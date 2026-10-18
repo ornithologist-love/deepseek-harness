@@ -42,6 +42,10 @@ interface ComWorld {
   keyEvents: { vk: number; flags: number }[]
   /** Cross-cutting call trace shared by keybd_event and the dialog Show slot. */
   nativeOrder: string[]
+  /** The handle `GetForegroundWindow` reports as the initiating window. */
+  foreground: FakePtr
+  /** Owner handles passed to the dialog's Show slot, in order. */
+  shownOwners: unknown[]
 }
 
 function comWorld(overrides: Partial<ComWorld> = {}): ComWorld {
@@ -53,6 +57,7 @@ function comWorld(overrides: Partial<ComWorld> = {}): ComWorld {
     str16PointerSizes: [],
     registered: 0, unregistered: 0, uninitialized: 0,
     keyEvents: [], nativeOrder: [],
+    foreground: { kind: 'foreground' }, shownOwners: [],
     ...overrides,
   }
 }
@@ -82,7 +87,11 @@ function installFakeKoffi(world: ComWorld, options: {
       switch (slot) {
         case 9: world.options.push(args[0] as number); return 0
         case 17: world.titles.push(args[0] as string); return 0
-        case 3: world.nativeOrder.push('show'); return world.showHr
+        case 3: {
+          world.nativeOrder.push('show')
+          world.shownOwners.push(args[0])
+          return world.showHr
+        }
         case 20: {
           if (world.getResultHr < 0) return world.getResultHr
           ;(args[0] as unknown[])[0] = itemPtr
@@ -121,6 +130,7 @@ function installFakeKoffi(world: ComWorld, options: {
             }
             case 'CoTaskMemFree': return (ptr: unknown) => { world.freed.push(ptr) }
             case 'GetCurrentThreadId': return () => 31337
+            case 'GetForegroundWindow': return () => world.foreground
             case 'keybd_event': return (vk: number, _scan: number, flags: number, _extra: unknown) => {
               world.keyEvents.push({ vk, flags })
               world.nativeOrder.push(flags === 0 ? 'alt-down' : 'alt-up')
@@ -204,7 +214,10 @@ describe('loadWin32DialogBindings over the fake COM world', () => {
       { vk: 0x12, flags: 0 },
       { vk: 0x12, flags: 2 },
     ])
-    expect(world.nativeOrder.slice(-3)).toEqual(['alt-down', 'alt-up', 'show'])
+    expect(world.nativeOrder).toEqual(['alt-down', 'alt-up', 'show'])
+    // The dialog Show names the foreground window captured before creation, so
+    // the modal dialog stays owned by the window that requested it.
+    expect(world.shownOwners).toEqual([world.foreground])
     expect(world.freed).toHaveLength(1)
     expect(world.str16PointerSizes).toEqual([FAKE_POINTER_SIZE])
     expect(world.released).toEqual(['item', 'dialog'])
