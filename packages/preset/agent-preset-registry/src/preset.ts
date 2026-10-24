@@ -13,6 +13,10 @@ export interface AgentPreset {
 export interface Config {
   /** Deployment default when the caller omits a preset. */
   default: string
+  /** Preset ID prefixes left out of the remote roster; the presets stay resolvable and mountable. */
+  hiddenPresetPrefixes?: string[]
+  /** Preset ID prefixes the remote `select` refuses; Host-side composition may still assign them. */
+  lockedPresetPrefixes?: string[]
   /** User-selected default; edited through Settings. */
   selectedDefault: Volatile<string | undefined>
 }
