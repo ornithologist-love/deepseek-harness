@@ -31,7 +31,7 @@ import { WELCOME_NOTICE_SETTINGS_NAMESPACE } from '../onboarding-copy.ts'
 import { Config, ONBOARDING_CONFIG_GLOBAL } from '../onboarding-config.ts'
 
 export type { ModelsSectionInjected, ModelsSectionProps } from './ModelsSection.tsx'
-export type { ModelsFooterOwnerProps, ProviderCardExtrasOwnerProps } from './slot-contract.ts'
+export type { CredentialPromptOwnerProps, ModelsHeaderOwnerProps, ModelsFooterOwnerProps, ProviderCardExtrasOwnerProps } from './slot-contract.ts'
 export type { ModelsKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -96,6 +96,10 @@ export function apply(ctx: ClientContext): void {
     operations,
     schema,
     t,
+    credentialOnlyProviders: configured.credentialOnlyProviders,
+    hiddenProviders: configured.hiddenProviders,
+    providerIcons: configured.providerIcons,
+    providerEditorLayouts: configured.providerEditorLayouts,
   })
   const deepSeekOnboardingInjected = (): DeepSeekOnboardingInjected => ({
     automatic: credentialOnboarding,
@@ -105,6 +109,7 @@ export function apply(ctx: ClientContext): void {
     operations,
     schema,
     t,
+    providerEditorLayouts: configured.providerEditorLayouts,
   })
   const welcomeController = new WelcomeNoticeStore(ctx.configForms.get<Record<string, unknown>>(WELCOME_NOTICE_SETTINGS_NAMESPACE))
   const welcomeInjected = (): WelcomeNoticeInjected => ({
@@ -140,11 +145,12 @@ export function apply(ctx: ClientContext): void {
     label: () => t('nav'),
     inject: injected,
     children: {
+      'settings.models.header': { kind: 'list', scope: 'root' },
       'settings.models.provider-card': { kind: 'keyed', scope: 'root' },
       'settings.models.footer': { kind: 'list', scope: 'root' },
     },
   }, ModelsSection))
-  if (!('dshDesktop' in globalThis)) ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
+  if (configured.welcomeNotice && !('dshDesktop' in globalThis)) ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
     name: 'settings.onboarding',
     id: 'welcome-notice',
     order: -100,
@@ -153,7 +159,10 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('settings.onboarding', () => ctx.slots.register({
     name: 'settings.onboarding',
     id: 'deepseek-official',
-    children: { 'settings.models.sign-in': { kind: 'single', scope: 'root' } },
+    children: {
+      'settings.models.sign-in': { kind: 'single', scope: 'root' },
+      'settings.models.credential-prompt': { kind: 'single', scope: 'root' },
+    },
     order: 0,
     inject: deepSeekOnboardingInjected,
   }, DeepSeekOnboardingDialog))

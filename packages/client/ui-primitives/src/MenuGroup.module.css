@@ -28,6 +28,12 @@
   font-weight: 500;
 }
 
+.headingContent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .heading[data-stuck] {
   background: var(--dsw-alias-menu-group-header-fill);
 }

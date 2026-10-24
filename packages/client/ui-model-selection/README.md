@@ -53,6 +53,14 @@ Contributions must render non-interactive inline content, such as a colored name
 
 Import this package's `/client` declarations type-only, then register through `ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({ name: 'conversation.input.model.label' }, ModelLabel))`. Derive `ModelLabel` props from `PropsRuntime<'conversation.input.model.label'>`; use provider IDs to choose CSS Module classes and retain `model.name` as the text. Registration follows the declaration and contributing plugin lifetimes. Without a component replacement, styles can target the enclosing label's `data-provider-id` and `data-model-id` attributes in all three placements.
 
+### Icons, badges, and provider setup
+
+`conversation.input.model.icon` is a session-scoped, inline `single` slot for a decorative mark on the trigger (`placement: 'trigger'`), each provider heading (`'group'`), and each model row (`'option'`). Owner props provide `provider` (absent on the trigger while no listed model is selected), `model` (absent on headings), and `placement`. Without a contribution, the trigger keeps the Models icon and headings and rows show none. `conversation.input.model.badge` adds non-interactive trailing content to each model row, with the label slot's `provider`, `model`, and `selected` props.
+
+When any catalog model has `recommended: true`, the composer model menu offers a “Recommended models only” checkbox, checked by default. While it is checked, a provider that recommends some models lists only those; other providers list all models.
+
+Providers with an empty catalog stay hidden unless a `conversation.input.model.provider-setup` contribution is registered. Then each such provider keeps its heading, matched by name while searching, and the contribution renders under it with `provider` and a `close()` that dismisses the menu.
+
 ### Unroutable sessions
 
 Catalog availability does not block sending with a saved selection; request execution reports missing credentials or unavailable models. Refreshes and refresh failures retain the last displayed selection and groups. A Host reset clears that display. Sign-out hides the account provider from the picker while preserving the saved provider/model ID and reasoning effort. Signing in restores the catalog name when that model is available again. Existing session logs remain unchanged.

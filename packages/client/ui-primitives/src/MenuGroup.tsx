@@ -4,15 +4,17 @@ import css from './MenuGroup.module.css'
 
 /**
  * Render a named group with an instance-owned heading id and an inaccessible position sentinel.
- * @param props - Caller-localized label and optional menu rows.
+ * @param props - Caller-localized label, an optional decorative icon placed before it, and optional menu rows.
  * @returns A section named by its direct heading, followed by the supplied children.
  */
-export function MenuGroup({ label, children }: { label: string; children?: ReactNode }) {
+export function MenuGroup({ label, icon, children }: { label: string; icon?: ReactNode; children?: ReactNode }) {
   const headingId = useId()
   return (
     <section role="group" aria-labelledby={headingId} data-menu-group="" className={css.group}>
       <span aria-hidden="true" data-menu-group-start="" className={css.start} />
-      <div id={headingId} data-menu-group-heading="" className={css.heading}>{label}</div>
+      <div id={headingId} data-menu-group-heading="" className={css.heading}>
+        {icon === undefined ? label : <span className={css.headingContent}>{icon}{label}</span>}
+      </div>
       {children}
     </section>
   )

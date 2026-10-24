@@ -33,6 +33,7 @@ export const zh = {
   'search.empty': '没有匹配的模型。',
   'empty.models': '暂无可用模型',
   'empty.efforts': '当前模型未提供推理等级。',
+  'filter.recommended': '仅显示推荐模型',
 } satisfies Record<string, string>
 
 /** The model namespace key union. */
@@ -63,6 +64,7 @@ export const en = {
   'search.empty': 'No matching models.',
   'empty.models': 'No models available.',
   'empty.efforts': 'This model provides no reasoning effort levels.',
+  'filter.recommended': 'Recommended models only',
 } satisfies Record<ModelKey, string>
 
 /** Japanese copy, checked against the English keys. */
@@ -90,6 +92,7 @@ export const ja = {
   'search.empty': '一致するモデルがありません。',
   'empty.models': '利用可能なモデルがありません。',
   'empty.efforts': 'このモデルには推論強度の設定がありません。',
+  'filter.recommended': '推奨モデルのみ',
 } satisfies Record<keyof typeof en, string>
 
 /** Spanish dictionary, checked against the English keys. */
@@ -117,6 +120,7 @@ export const es = {
   'search.empty': 'No hay modelos coincidentes.',
   'empty.models': 'No hay modelos disponibles.',
   'empty.efforts': 'Este modelo no proporciona niveles de esfuerzo de razonamiento.',
+  'filter.recommended': 'Solo modelos recomendados',
 } satisfies Record<keyof typeof en, string>
 
 /** French dictionary, checked against the English keys. */
@@ -144,6 +148,7 @@ export const fr = {
   'search.empty': 'Aucun modèle correspondant.',
   'empty.models': 'Aucun modèle disponible.',
   'empty.efforts': 'Ce modèle ne fournit aucun niveau d’effort de raisonnement.',
+  'filter.recommended': 'Modèles recommandés uniquement',
 } satisfies Record<keyof typeof en, string>
 
 /** German dictionary, checked against the English keys. */
@@ -171,6 +176,7 @@ export const de = {
   'search.empty': 'Keine passenden Modelle.',
   'empty.models': 'Keine Modelle verfügbar.',
   'empty.efforts': 'Dieses Modell liefert keine Argumentationsaufwandsstufen.',
+  'filter.recommended': 'Nur empfohlene Modelle',
 } satisfies Record<keyof typeof en, string>
 
 /** Russian dictionary, checked against the English keys. */
@@ -198,6 +204,7 @@ export const ru = {
   'search.empty': 'Нет подходящих моделей.',
   'empty.models': 'Нет доступных моделей.',
   'empty.efforts': 'Эта модель не обеспечивает обоснования уровней усилий.',
+  'filter.recommended': 'Только рекомендуемые модели',
 } satisfies Record<keyof typeof en, string>
 
 /** Portuguese dictionary, checked against the English keys. */
@@ -225,4 +232,5 @@ export const pt = {
   'search.empty': 'Não há modelos correspondentes.',
   'empty.models': 'Nenhum modelo disponível.',
   'empty.efforts': 'Este modelo não fornece níveis de esforço de raciocínio.',
+  'filter.recommended': 'Somente modelos recomendados',
 } satisfies Record<keyof typeof en, string>

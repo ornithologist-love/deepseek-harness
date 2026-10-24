@@ -1,6 +1,6 @@
 /** Page-store join: directory × namespaces × credentials, with last-good rows on failure. */
 import { describe, expect, it } from 'vitest'
-import type { RpcResponse } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ModelCatalog, RpcResponse } from '@deepseek-ai/dsh-api-remotes/client'
 import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
 import { settingsSchema } from './settings-schema.client.ts'
@@ -108,6 +108,7 @@ function api(overrides: {
   providers?: () => Promise<RpcResponse<{ providers: typeof DIRECTORY }>>
   describeSettings?: () => Promise<RemoteAnswer<{ writable: boolean; hasDocument: boolean; namespaces: typeof NAMESPACES }>>
   describeCredentials?: (refs: readonly string[]) => Promise<RemoteAnswer<Record<string, unknown>>>
+  modelCatalog?: () => Promise<RemoteAnswer<ModelCatalog>>
 } = {}) {
   const seenRefs: string[][] = []
   const providers = overrides.providers ?? (() => Promise.resolve(ok({ providers: DIRECTORY })))
@@ -129,8 +130,14 @@ function api(overrides: {
       : remoteFail(response.result.error.message)
   }
   const face = {
-    session: { modelCatalog: async () => remoteOk({ groups: overrides.accountAvailable
-      ? [{ id: 'deepseek-account', models: [{ id: 'deepseek-flash' }] }] : [] }) },
+    session: { modelCatalog: overrides.modelCatalog ?? (async () => remoteOk({
+      default: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+      routableProviders: [],
+      groups: overrides.accountAvailable
+        ? [{ id: 'deepseek-account', name: 'DeepSeek Account', models: [{ id: 'deepseek-flash', name: 'DeepSeek Flash' }] }]
+        : [],
+      failures: [],
+    })) },
     llm: {
       listProviders: () => mapProviderBatch(rows => rows
         .filter(row => row.active)
@@ -162,6 +169,27 @@ function api(overrides: {
 }
 
 describe('ModelsSettingsStore', () => {
+  it('reports the deployment default provider the catalog names', async () => {
+    const { ctx, mirror } = api({ modelCatalog: async () => remoteOk({
+      default: { provider: 'example-gateway', model: 'example-large' },
+      routableProviders: [],
+      groups: [],
+      failures: [],
+    }) })
+    const store = new ModelsSettingsStore(ctx, settingsSchema, mirror)
+    await store.load()
+    expect(store.store.getSnapshot().defaultProvider).toBe('example-gateway')
+  })
+
+  it('leaves the default provider unknown when the catalog read fails', async () => {
+    const { ctx, mirror } = api({ modelCatalog: async () => remoteFail('the catalog is unavailable') })
+    const store = new ModelsSettingsStore(ctx, settingsSchema, mirror)
+    await store.load()
+    // A failed read says nothing about which route is deployed, so the page
+    // must not claim one.
+    expect(store.store.getSnapshot().defaultProvider).toBeUndefined()
+  })
+
   it('describes native variables without exposing secret values and respects the 64-reference limit', async () => {
     const providers = Array.from({ length: 65 }, (_, index) => ({
       provider: `fixture-${index}`, displayName: 'fixture', settingsNs: 'llm-pi-ai', settingsPath: ['providers', `fixture-${index}`], active: false,

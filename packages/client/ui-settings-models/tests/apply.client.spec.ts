@@ -26,6 +26,21 @@ const PAGE_PEER = { principal: { kind: 'owner' } } as Parameters<WebServer['rend
 
 afterEach(() => { vi.unstubAllGlobals() })
 
+/**
+ * An empty model catalog whose default route is the official DeepSeek one: the
+ * page reads the effective default provider on every load, while only an
+ * account row needs the catalog's groups.
+ * @returns the catalog answer the scripted session namespace returns.
+ */
+function defaultCatalog() {
+  return {
+    default: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+    routableProviders: [],
+    groups: [],
+    failures: [],
+  }
+}
+
 // These specs assert the shipped Chinese copy. The lane has no jsdom `window`,
 // so browser-language detection never runs and a fresh LocaleRuntime opens on
 // FALLBACK_LOCALE (en); bench stages zh explicitly on the locale instead.
@@ -50,7 +65,13 @@ async function bench(mock = RemoteMock.create().load(remoteDefaultResponses), se
       ...services,
     },
     settings: mock.remote.settings,
-    session: { initializeDefaultModel: vi.fn(async () => ({ ok: true, value: undefined })) },
+    session: {
+      initializeDefaultModel: vi.fn(async () => ({ ok: true, value: undefined })),
+      modelCatalog: vi.fn(() => Promise.resolve({
+        ok: true as const,
+        value: defaultCatalog(),
+      })),
+    },
   })
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
   return { ctx, slots: ctx.get('slots') as SlotRegistry, locale, remote }
@@ -78,7 +99,17 @@ describe('ui-settings-models apply', () => {
       await host.await()
       const rows: IndexInjection[] = []
       ctx.emit('webserver/index-inject', rows, PAGE_PEER)
-      expect(rows).toEqual([{ kind: 'global', name: ONBOARDING_CONFIG_GLOBAL, value: { credentialOnboarding: false } }])
+      expect(rows).toEqual([{
+        kind: 'global',
+        name: ONBOARDING_CONFIG_GLOBAL,
+        value: {
+          credentialOnboarding: false,
+          welcomeNotice: true,
+          credentialOnlyProviders: [],
+          providerIcons: {},
+          providerEditorLayouts: {},
+        },
+      }])
       for (const row of rows) if (row.kind === 'global') vi.stubGlobal(row.name, row.value)
       const plugin = ctx.plugin({ inject: [...inject], apply })
       await plugin.await()
@@ -98,12 +129,58 @@ describe('ui-settings-models apply', () => {
   })
 
   it('defaults to browser onboarding and rejects malformed bootstrap options', async () => {
-    expect(hostPlugin.Config({})).toEqual({ credentialOnboarding: true })
+    expect(hostPlugin.Config({})).toEqual({
+      credentialOnboarding: true,
+      welcomeNotice: true,
+      credentialOnlyProviders: [],
+      providerIcons: {},
+      providerEditorLayouts: {},
+    })
     expect(hostPlugin.Config['~standard'].validate({ credentialOnboarding: 'false' })).toHaveProperty('issues')
     const { ctx } = await bench()
     try {
       vi.stubGlobal(ONBOARDING_CONFIG_GLOBAL, { credentialOnboarding: 'false' })
       expect(() => { apply(ctx) }).toThrow()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('leaves the welcome-notice step unregistered when the deployment turns it off', async () => {
+    const b = await bench()
+    declare(b.slots)
+    // The browser half only reads the page-global payload the Host publishes.
+    vi.stubGlobal(ONBOARDING_CONFIG_GLOBAL, { ...hostPlugin.Config({}), welcomeNotice: false })
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    // The credential step is untouched: only the preview notice goes away.
+    expect(b.slots.entries('settings.onboarding').map(entry => entry.options.id)).toEqual(['deepseek-official'])
+    expect(b.slots.entries('settings.section').map(entry => entry.options.id)).toEqual(['models'])
+  })
+
+  it('publishes the deployment provider options into the browser page', async () => {
+    const { ctx } = await bench()
+    const icon = { src: 'data:image/svg+xml,%3Csvg/%3E', monochrome: true, scale: 0.8 }
+    const host = ctx.plugin(hostPlugin, {
+      welcomeNotice: false,
+      credentialOnlyProviders: ['acme'],
+      providerIcons: { acme: icon },
+      providerEditorLayouts: { 'llm-acme': 'pi-ai' },
+    })
+    await host.await()
+    try {
+      const rows: IndexInjection[] = []
+      ctx.emit('webserver/index-inject', rows)
+      expect(rows).toEqual([{
+        kind: 'global',
+        name: ONBOARDING_CONFIG_GLOBAL,
+        value: {
+          credentialOnboarding: true,
+          welcomeNotice: false,
+          credentialOnlyProviders: ['acme'],
+          providerIcons: { acme: icon },
+          providerEditorLayouts: { 'llm-acme': 'pi-ai' },
+        },
+      }])
     } finally {
       await ctx.fiber.dispose()
     }

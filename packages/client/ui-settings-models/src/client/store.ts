@@ -113,6 +113,8 @@ export interface ModelsSettingsState {
   rows: readonly ProviderRow[]
   /** Namespace views by ns, for the editor's schema/layers/secrets. */
   namespaces: ReadonlyMap<string, SettingsNamespaceView>
+  /** Effective deployment default provider before a conversation chooses its own model. */
+  defaultProvider?: string | undefined
 }
 
 /**
@@ -229,9 +231,10 @@ export class ModelsSettingsStore {
   /** Publish one joined answer; stale answers leave the current refresh in charge. */
   private async read(generation: number): Promise<void> {
     this.store.update((s) => { s.status = 'loading'; s.error = null })
-    const [registered, declared] = await Promise.all([
+    const [registered, declared, catalog] = await Promise.all([
       this.ctx.remote.llm.listProviders(),
       this.ctx.remote.llm.listConfigurableProviders(),
+      this.ctx.remote.session.modelCatalog(),
       this.describeFace.ensure(),
     ])
     if (generation !== this.generation) return
@@ -265,7 +268,6 @@ export class ModelsSettingsStore {
       }
     })
     if (rows.some(row => row.entry.provider === 'deepseek-account')) {
-      const catalog = await this.ctx.remote.session.modelCatalog()
       for (const row of rows) {
         if (row.entry.provider === 'deepseek-account') row.accountAvailable = catalog.ok
           && catalog.value.groups.some(group => group.id === 'deepseek-account' && group.models.length > 0)
@@ -308,6 +310,7 @@ export class ModelsSettingsStore {
         }
       })
       s.namespaces = namespaces
+      s.defaultProvider = catalog.ok ? catalog.value.default.provider : undefined
     })
   }
 
