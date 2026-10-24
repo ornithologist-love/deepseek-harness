@@ -10,6 +10,7 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { ModelsSection, providerCopy } from '../src/client/ModelsSection.tsx'
 import type { ModelsSectionInjected, ModelsSectionProps } from '../src/client/ModelsSection.tsx'
 import { CustomProviderCard } from '../src/client/CustomProviderCard.tsx'
+import { ProviderEditor } from '../src/client/ProviderEditor.tsx'
 import { formatCapacity, parseCapacity } from '../src/client/DeepSeekModelsEditor.tsx'
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
 import { ModelsSettingsStore, deriveKeyRef, protocolChoices, reasoningLevelChoices } from '../src/client/store.ts'
@@ -44,6 +45,17 @@ const PiAiConfig = Schema.object({
       ]),
     })),
     reasoning: Schema.union(['off', 'high']),
+  })),
+})
+
+/** The DeepSeek profile shape, for a namespace a deployment maps to that family. */
+const DeepSeekConfig = Schema.object({
+  apiKeyEnv: Schema.string().role('credential-ref'),
+  baseURL: Schema.string(),
+  defaultContextWindow: Schema.number().step(1).min(1),
+  models: Schema.array(Schema.object({
+    id: Schema.string().required(),
+    name: Schema.string(),
   })),
 })
 
@@ -160,7 +172,15 @@ function ctxWith(face: object): PageContext {
   const existing = contexts.get(face)
   if (existing !== undefined) return existing
   const ctx = Object.assign(new Context(), { remote: { ...face,
-    session: { initializeDefaultModel: async () => ({ ok: true, value: undefined }) },
+    session: {
+      initializeDefaultModel: async () => ({ ok: true, value: undefined }),
+      modelCatalog: async () => remoteOk({
+        default: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+        routableProviders: [],
+        groups: [],
+        failures: [],
+      }),
+    },
   } })
   contexts.set(face, ctx)
   return ctx
@@ -206,8 +226,24 @@ function firstMutate(mutate: ReturnType<typeof vi.fn>): MutateCall {
   return { ns, ops, ...expectedRevision === undefined ? {} : { expectedRevision } }
 }
 
-async function mountSection(options: Parameters<typeof scriptedFace>[0] = {}) {
-  const scripted = scriptedFace(options)
+async function mountSection(
+  options: Parameters<typeof scriptedFace>[0] = {},
+  injectedOptions: Partial<ModelsSectionInjected> = {},
+) {
+  return mountScripted(scriptedFace(options), injectedOptions)
+}
+
+/**
+ * Mount a page over an already-built scripted face, for a case that edited it
+ * before mounting.
+ * @param scripted - the scripted wire answers.
+ * @param injectedOptions - the deployment options the section is injected with.
+ * @returns the mounted page.
+ */
+async function mountScripted(
+  scripted: ReturnType<typeof scriptedFace>,
+  injectedOptions: Partial<ModelsSectionInjected> = {},
+) {
   const controller = new ModelsSettingsStore(
     ctxWith(scripted.face), settingsSchema, new SettingsDescribeMirror(ctxWith(scripted.face)))
   await controller.load()
@@ -218,6 +254,8 @@ async function mountSection(options: Parameters<typeof scriptedFace>[0] = {}) {
     schema: settingsSchema,
     t,
     renderSlot: () => null,
+    // What the deployment's page-bootstrap options add to the section's inject face.
+    ...injectedOptions,
   }
   render(<ModelsSection {...injected} />)
   return { ...scripted, controller }
@@ -860,6 +898,127 @@ describe('provider rows', () => {
     expect(screen.queryByText(en.customTag)).toBeNull()
   })
 })
+
+describe('deployment editor layouts', () => {
+  it('edits a namespace the deployment maps to the deepseek family with its catalog fields', () => {
+    const namespace: SettingsNamespaceView = {
+      ns: 'llm-acme',
+      schema: JSON.parse(JSON.stringify(DeepSeekConfig.toJSON())) as JsonValue,
+      value: { apiKeyEnv: 'ACME_API_KEY', models: [{ id: 'acme-large', name: 'Acme Large' }] },
+      user: {},
+      autoGenerate: true, applies: 'live',
+      secrets: [],
+      revision: 0,
+    }
+    render(<ProviderEditor
+      provider="acme" displayName="Acme" namespace={namespace} settingsPath={[]} schema={settingsSchema}
+      operations={operationsWith(scriptedFace().face)} t={t} readOnly={false} onClose={vi.fn()}
+      providerEditorLayouts={{ 'llm-acme': 'deepseek' }}
+    />)
+    // The mapped family brings its curated fields: this namespace declares a
+    // model catalog, so the card edits it instead of deferring to the hint.
+    expect(screen.getByText(en.customized)).toBeTruthy()
+    expect(screen.getByLabelText<HTMLInputElement>(en.baseUrl).placeholder)
+      .toBe('https://api.deepseek.com/anthropic (Default to use DEEPSEEK_BASE_URL)')
+    expect(screen.getByText(en.deepSeekEndpointHint)).toBeTruthy()
+    expect(screen.queryByText(advanceHintFor('llm-acme'))).toBeNull()
+  })
+
+  it('edits a namespace the deployment maps to the pi-ai family with its model rows', async () => {
+    await mountSection(undefined, { providerEditorLayouts: { 'llm-pi-ai': 'pi-ai' } })
+    openEditor('openai')
+    // The pi-ai route list, whose rows are interrogated through the endpoint.
+    expect(screen.getByRole('button', { name: en.fetchModels })).toBeTruthy()
+    expect(screen.getByRole('button', { name: en.addModel })).toBeTruthy()
+  })
+
+  it('names no editor family for a namespace mapped to nothing', () => {
+    const namespace: SettingsNamespaceView = {
+      ns: 'llm-acme',
+      schema: JSON.parse(JSON.stringify(DeepSeekConfig.toJSON())) as JsonValue,
+      value: { apiKeyEnv: 'ACME_API_KEY' },
+      user: {},
+      autoGenerate: true, applies: 'live',
+      secrets: [],
+      revision: 0,
+    }
+    // A deployment payload whose entry resolved to no family: the mapped name
+    // names nothing rather than falling back to a built-in family.
+    const layouts: Record<string, 'deepseek' | 'pi-ai'> = JSON.parse('{"llm-acme":null}')
+    render(<ProviderEditor
+      provider="acme" displayName="Acme" namespace={namespace} settingsPath={[]} schema={settingsSchema}
+      operations={operationsWith(scriptedFace().face)} t={t} readOnly={false} onClose={vi.fn()}
+      providerEditorLayouts={layouts}
+    />)
+    expect(screen.getByText(advanceHintFor('llm-acme'))).toBeTruthy()
+    expect(screen.queryByLabelText(en.keyInput)).toBeNull()
+  })
+
+  it('defers a namespace the deployment does not map to editing the raw settings section', () => {
+    const namespace: SettingsNamespaceView = {
+      ns: 'llm-acme',
+      schema: JSON.parse(JSON.stringify(DeepSeekConfig.toJSON())) as JsonValue,
+      value: { apiKeyEnv: 'ACME_API_KEY' },
+      user: {},
+      autoGenerate: true, applies: 'live',
+      secrets: [],
+      revision: 0,
+    }
+    render(<ProviderEditor
+      provider="acme" displayName="Acme" namespace={namespace} settingsPath={[]} schema={settingsSchema}
+      operations={operationsWith(scriptedFace().face)} t={t} readOnly={false} onClose={vi.fn()}
+      providerEditorLayouts={{ 'llm-other': 'pi-ai' }}
+    />)
+    expect(screen.getByText(advanceHintFor('llm-acme'))).toBeTruthy()
+    expect(screen.queryByText(en.customized)).toBeNull()
+    expect(screen.queryByLabelText(en.keyInput)).toBeNull()
+    expect(buttonNamed(en.apply).disabled).toBe(true)
+  })
+
+  it('keeps the curated family of an unmapped namespace beside the deployment\'s own mapping', async () => {
+    await mountSection(undefined, { providerEditorLayouts: { 'llm-acme': 'deepseek' } })
+    openEditor('openai')
+    // Naming one namespace does not erase the built-in mapping of the others.
+    expect(screen.getByText(en.customized)).toBeTruthy()
+    expect(screen.getByRole('button', { name: en.fetchModels })).toBeTruthy()
+  })
+
+  it('renders a mapped namespace as its family in the add-provider draft', async () => {
+    const scripted = scriptedFace()
+    // One route the adapter ships but nothing has configured yet: the catalog
+    // form can adopt it, and its card renders through the namespace layout.
+    scripted.face.llm.listConfigurableProviders = vi.fn(() => Promise.resolve(ok([{
+      provider: 'anthropic',
+      displayName: 'anthropic',
+      settingsNs: 'llm-pi-ai',
+      settingsPath: ['providers', 'anthropic'],
+      declared: false,
+      defaultBaseURL: 'https://api.anthropic.com',
+    }])))
+    await mountScripted(scripted, { providerEditorLayouts: { 'llm-pi-ai': 'pi-ai' } })
+    fireEvent.click(screen.getByRole('button', { name: en.add }))
+    // The draft card carries the same curated fields as a saved row's card.
+    expect(await screen.findByLabelText(en.provider)).toBeTruthy()
+    expect(screen.getByText(en.customized)).toBeTruthy()
+    fireEvent.click(screen.getByText(en.customized))
+    expect(screen.getByLabelText<HTMLInputElement>(en.baseUrl).placeholder).toBe('https://api.anthropic.com')
+  })
+
+  it('carries the deployment mapping into the hand-declared provider form', async () => {
+    await mountSection(undefined, { providerEditorLayouts: { 'llm-pi-ai': 'pi-ai' } })
+    openCustomMode()
+    // The create card edits a profile of the same namespace family, so a
+    // deployment that curated that family sees its fields here too.
+    expect(screen.getByRole('textbox', { name: en.customRoute })).toBeTruthy()
+    expect(screen.getByRole('button', { name: en.addModel })).toBeTruthy()
+    expect(screen.getByRole('button', { name: en.fetchModels })).toBeTruthy()
+  })
+})
+
+/** The section hint shown for a namespace no curated layout claims. */
+function advanceHintFor(ns: string): string {
+  return `${en.advancedHint} (${ns})`
+}
 
 describe('hand-declared providers', () => {
   function mountCard(

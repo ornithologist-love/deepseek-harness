@@ -1,7 +1,7 @@
 /**
- * Models-page extension slots — the two seats through which a plugin
- * distributed outside this repository adds UI to the Models settings section
- * without editing it.
+ * Models-page extension slots — the seats through which a plugin distributed
+ * outside this repository adds UI to the Models settings section or replaces
+ * its onboarding credential editor, without editing either.
  *
  * `settings.models.provider-card` is keyed by the row's owning settings
  * namespace (`ProviderDirectoryEntry.settingsNs`): an adapter family's
@@ -33,6 +33,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'settings.models.provider-card': { kind: 'keyed'; scope: 'root'; owner: ProviderCardExtrasOwnerProps }
     /** Optional account login choice before the credential editor. */
     'settings.models.sign-in': { kind: 'single'; scope: 'root'; owner: { complete: () => void; useApiKey: () => void } }
+    /** Replace the onboarding credential editor while this plugin keeps credential storage. */
+    'settings.models.credential-prompt': { kind: 'single'; scope: 'root'; owner: CredentialPromptOwnerProps }
     /**
      * Ordered extension area after the provider rows and the add controls.
      * Without a registrant the area renders nothing.
@@ -55,4 +57,16 @@ export interface ProviderCardExtrasOwnerProps {
 export interface ModelsFooterOwnerProps {
   /** Marker field: footer owner props are intentionally empty. */
   children?: never
+}
+
+/** Owner share of the onboarding credential prompt. */
+export interface CredentialPromptOwnerProps {
+  /** Route id of the provider the typed credential belongs to. */
+  provider: string
+  /** Human-facing name of that provider. */
+  displayName: string
+  /** Store the credential for this provider; rejects with a localized message on invalid or failed writes. */
+  save: (value: string) => Promise<void>
+  /** Close the prompt without storing a credential. */
+  close: () => void
 }

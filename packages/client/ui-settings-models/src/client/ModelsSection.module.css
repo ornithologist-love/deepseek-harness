@@ -81,6 +81,17 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* A deployment-supplied provider mark, sized to the row's text: the markup
+   chooses between an image and a monochrome mask, so the box lives here. */
+.providerIcon {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+  flex: none;
+  align-self: center;
+}
+
 /* Reads as an annotation on the name, not as a second name: caption size and
    the secondary label tone, so it never competes with the row's own title. It
    sits inside `rowIdentity` with the credential dot, which is what keeps it
@@ -242,7 +253,7 @@
 
 .editorHeader {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 

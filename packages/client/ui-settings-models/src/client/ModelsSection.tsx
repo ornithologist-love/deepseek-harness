@@ -34,6 +34,7 @@ import type { ModelsSettingsStore, ProviderRow } from './store.ts'
 import type { ModelsOperations } from './operations.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
 import { ProviderEditor, type ProviderEditorProps } from './ProviderEditor.tsx'
+import type { ProviderIconConfig } from '../onboarding-config.ts'
 import type { en } from './locales.ts'
 import styles from './ModelsSection.module.css'
 
@@ -51,6 +52,12 @@ export interface ModelsSectionInjected {
   schema: SettingsSchemaOperations
   /** Section copy. */
   t: (key: keyof typeof en) => string
+  /** Provider routes whose catalog the deployment manages (see `Config.credentialOnlyProviders`). */
+  credentialOnlyProviders?: readonly string[]
+  /** Provider icons by route id (see `Config.providerIcons`). */
+  providerIcons?: Readonly<Record<string, ProviderIconConfig>>
+  /** Editor family per settings namespace (see `Config.providerEditorLayouts`). */
+  providerEditorLayouts?: Readonly<Record<string, 'deepseek' | 'pi-ai'>>
 }
 
 /**
@@ -115,14 +122,17 @@ interface CatalogDraft {
 /** Values that vary around the shared provider-editor rendering. */
 interface ProviderEditorRenderProps extends Pick<
   ProviderEditorProps,
-  'namespace' | 'schema' | 'operations' | 't' | 'readOnly' | 'onClose'
+  'namespace' | 'schema' | 'operations' | 't' | 'readOnly' | 'onClose' | 'providerEditorLayouts'
+    | 'titleIcon' | 'titleStatus'
 > {
   target: EditorTarget
   row: ProviderRow
+  /** Credentials only: hide the custom-provider tag and the catalog fields (see `Config.credentialOnlyProviders`). */
+  credentialOnly?: boolean
 }
 
 /** Render an editor for either the setup posture or an expanded provider row. */
-function renderProviderEditor({ target, row, ...props }: ProviderEditorRenderProps): ReactNode {
+function renderProviderEditor({ target, row, credentialOnly = false, ...props }: ProviderEditorRenderProps): ReactNode {
   return (
     <ProviderEditor
       provider={target.provider}
@@ -134,7 +144,49 @@ function renderProviderEditor({ target, row, ...props }: ProviderEditorRenderPro
       {...target.nativeAuth === undefined ? {} : { nativeAuth: target.nativeAuth }}
       {...row.credential === undefined ? {} : { credential: row.credential }}
       {...row.credentialChecks === undefined ? {} : { credentialChecks: row.credentialChecks }}
+      {...credentialOnly ? { credentialOnly } : {}}
       {...props}
+    />
+  )
+}
+
+/**
+ * One deployment-supplied provider mark. A monochrome icon is painted through
+ * a mask filled with the current text color, so it follows the theme; any
+ * other icon renders as its own image.
+ * @param props.icon - the configured image source, mask mode, and scale.
+ * @returns the icon element.
+ */
+function ProviderIcon({ icon }: { icon: ProviderIconConfig }): ReactNode {
+  const url = `url("${icon.src}")`
+  const transform = icon.scale === undefined ? undefined : `scale(${icon.scale})`
+  if (icon.monochrome === true) {
+    return (
+      <span
+        aria-hidden
+        className={styles['providerIcon']}
+        style={{
+          background: 'currentColor',
+          maskImage: url,
+          WebkitMaskImage: url,
+          maskSize: 'contain',
+          WebkitMaskSize: 'contain',
+          maskRepeat: 'no-repeat',
+          WebkitMaskRepeat: 'no-repeat',
+          maskPosition: 'center',
+          WebkitMaskPosition: 'center',
+          ...transform === undefined ? {} : { transform },
+        }}
+      />
+    )
+  }
+  return (
+    <img
+      className={styles['providerIcon']}
+      src={icon.src}
+      alt=""
+      aria-hidden
+      {...transform === undefined ? {} : { style: { transform } }}
     />
   )
 }
@@ -236,16 +288,33 @@ export function providerCopy(template: string, target: ProviderIdentity): string
  * @returns the section, or null while the shell has not injected yet.
  */
 export function ModelsSection(props: ModelsSectionProps): ReactNode {
-  const { controller, useSnapshot, operations, schema, t, renderSlot } = props
+  const {
+    controller, useSnapshot, operations, schema, t, credentialOnlyProviders, providerIcons, providerEditorLayouts,
+    renderSlot,
+  } = props
   if (
     controller === undefined || useSnapshot === undefined || operations === undefined
     || schema === undefined || t === undefined
   ) return null
-  return <Loaded injected={{ controller, useSnapshot, operations, schema, t }} renderSlot={renderSlot} />
+  return (
+    <Loaded
+      injected={{
+        controller,
+        useSnapshot,
+        operations,
+        schema,
+        t,
+        ...credentialOnlyProviders === undefined ? {} : { credentialOnlyProviders },
+        ...providerIcons === undefined ? {} : { providerIcons },
+        ...providerEditorLayouts === undefined ? {} : { providerEditorLayouts },
+      }}
+      renderSlot={renderSlot}
+    />
+  )
 }
 
 function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderSlot: ModelsRenderSlot }): ReactNode {
-  const { controller, operations, schema, t } = injected
+  const { controller, operations, schema, t, credentialOnlyProviders, providerIcons, providerEditorLayouts } = injected
   const snapshot = injected.useSnapshot(value => value)
   const state = { ...snapshot, rows: snapshot.rows.map(row => row.entry.provider === 'deepseek-account'
     ? { ...row, entry: { ...row.entry, displayName: t('deepSeekAccount') } } : row) }
@@ -424,6 +493,36 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
         )}
       <ul className={styles['rows']}>
         {configured.map((row) => {
+          // The row's provider mark, its custom-provider tag, and the state the
+          // editor title repeats: all three follow the row, and the editor's
+          // share is built before the row's own posture below decides how it
+          // renders.
+          const icon = providerIcons?.[row.entry.provider]
+          const titleIcon = icon === undefined ? undefined : <ProviderIcon icon={icon} />
+          const credentialOnly = credentialOnlyProviders?.includes(row.entry.provider) === true
+          const credentialConfigured = row.credential?.configured === true
+          const credentialMissing = !credentialConfigured
+            && row.apiKeyEnv !== undefined
+            && row.credential?.configured === false
+          const titleStatus = credentialConfigured
+            ? (
+              <span
+                className={`${styles['credentialDot']} ${styles['credentialDotConfigured']}`}
+                role="img"
+                aria-label={t('credentialConfigured')}
+                title={t('credentialConfigured')}
+              />
+            )
+            : credentialMissing
+              ? (
+                <span
+                  className={`${styles['credentialDot']} ${styles['credentialDotMissing']}`}
+                  role="img"
+                  aria-label={t('credentialMissing')}
+                  title={t('credentialMissing')}
+                />
+              )
+              : undefined
           const target = targetOf(row)
           const namespace = state.namespaces.get(target.settingsNs)
           /* v8 ignore next -- the join marks a row configured only when its namespace resolved */
@@ -445,6 +544,10 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                   operations,
                   t,
                   readOnly: !state.writable,
+                  credentialOnly,
+                  ...providerEditorLayouts === undefined ? {} : { providerEditorLayouts },
+                  ...titleIcon === undefined ? {} : { titleIcon },
+                  ...titleStatus === undefined ? {} : { titleStatus },
                   onClose: (changed) => { closeSetup(changed, target) },
                 })}
                 {renderSlot(
@@ -456,19 +559,18 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
             )
           }
           const open = !addOpen && editing?.provider === row.entry.provider
-          const credentialConfigured = row.credential?.configured === true
-          const credentialMissing = !credentialConfigured
-            && row.apiKeyEnv !== undefined
-            && row.credential?.configured === false
           return (
             <li key={row.entry.provider} className={styles['rowCard']}>
               <div className={styles['rowHead']}>
                 <span className={styles['rowIdentity']}>
+                  {titleIcon}
                   <span className={styles['rowName']}>{row.entry.displayName}</span>
                   {/* Only the adapter can tell a hand-declared route from a
                       shipped one it also has a stored profile for, so the tag
-                      follows its answer and stays off when it gives none. */}
-                  {row.entry.declared === true
+                      follows its answer and stays off when it gives none. A
+                      credential-only route is named by the deployment instead,
+                      so nothing on the card claims to have declared it. */}
+                  {row.entry.declared === true && !credentialOnly
                     ? <span className={styles['rowTag']}>{t('customTag')}</span>
                     : null}
                   {/* The store keeps the account row only while the account lists models. */}
@@ -480,25 +582,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                       </span>
                     )
                     : null}
-                  {credentialConfigured
-                    ? (
-                      <span
-                        className={`${styles['credentialDot']} ${styles['credentialDotConfigured']}`}
-                        role="img"
-                        aria-label={t('credentialConfigured')}
-                        title={t('credentialConfigured')}
-                      />
-                    )
-                    : credentialMissing
-                      ? (
-                        <span
-                          className={`${styles['credentialDot']} ${styles['credentialDotMissing']}`}
-                          role="img"
-                          aria-label={t('credentialMissing')}
-                          title={t('credentialMissing')}
-                        />
-                      )
-                      : null}
+                  {titleStatus}
                 </span>
                 <span className={styles['rowActions']}>
                   {/* The account catalog comes from the account listing; its model overrides live in cordis.patch.yml. */}
@@ -558,6 +642,10 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                   operations,
                   t,
                   readOnly: !state.writable,
+                  credentialOnly,
+                  ...providerEditorLayouts === undefined ? {} : { providerEditorLayouts },
+                  ...titleIcon === undefined ? {} : { titleIcon },
+                  ...titleStatus === undefined ? {} : { titleStatus },
                   onClose: (changed) => { closeEditor(changed, target) },
                 })
                 : null}
@@ -648,6 +736,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                       {...draft.target.baseURLEnv === undefined ? {} : { baseURLEnv: draft.target.baseURLEnv }}
                       {...draft.target.nativeAuth === undefined ? {} : { nativeAuth: draft.target.nativeAuth }}
                       {...addRow?.credentialChecks === undefined ? {} : { credentialChecks: addRow.credentialChecks }}
+                      {...providerEditorLayouts === undefined ? {} : { providerEditorLayouts }}
                       t={t}
                       readOnly={!state.writable}
                       onClose={(changed) => { closeEditor(changed, draft.target) }}
@@ -679,6 +768,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
                       operations={operations}
                       t={t}
                       readOnly={!state.writable}
+                      {...providerEditorLayouts === undefined ? {} : { providerEditorLayouts }}
                       onClose={(changed) => {
                         closeAdd()
                         if (changed) void controller.load()

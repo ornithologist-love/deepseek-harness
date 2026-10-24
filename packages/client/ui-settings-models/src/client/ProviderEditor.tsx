@@ -54,6 +54,10 @@ export interface ProviderEditorProps {
   provider: string
   /** Display name for the card title. */
   displayName: string
+  /** Content rendered before the title, inside the title row. */
+  titleIcon?: ReactNode
+  /** Content rendered after the title, inside the title row. */
+  titleStatus?: ReactNode
   /** Hide the title row (the add card renders its own provider select). */
   hideTitle?: boolean
   /**
@@ -88,6 +92,8 @@ export interface ProviderEditorProps {
   readOnly: boolean
   /** Render only the credential field and actions, without provider settings. */
   credentialOnly?: boolean
+  /** Editor family per settings namespace, for a deployment's own adapter namespace. */
+  providerEditorLayouts?: Readonly<Record<string, 'deepseek' | 'pi-ai'>>
   /** Require a newly entered credential before this editor can submit. */
   credentialRequired?: boolean
   /** Give the credential field initial focus when this editor mounts. */
@@ -150,8 +156,18 @@ export function pathOps(
   return ops
 }
 
-/** The editor layout the owning namespace selects. */
-function layoutOf(ns: string): EditorLayout {
+/**
+ * The editor layout the owning namespace selects: an explicit deployment
+ * mapping first, then the two adapter families this card curates.
+ * @param ns - the settings namespace the profile lives in.
+ * @param layouts - the deployment's namespace-to-family mapping.
+ * @returns the curated field set to render.
+ */
+function layoutOf(
+  ns: string,
+  layouts: Readonly<Record<string, 'deepseek' | 'pi-ai'>> | undefined,
+): EditorLayout {
+  if (layouts !== undefined && Object.hasOwn(layouts, ns)) return layouts[ns] ?? 'unknown'
   if (ns === 'llm-deepseek') return 'deepseek'
   if (ns === 'llm-pi-ai') return 'pi-ai'
   return 'unknown'
@@ -196,7 +212,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const node = useMemo(() => schema.nodeAtPath(root, settingsPath), [root, schema, settingsPath])
   const fallback = schema.getPath(namespace.value, settingsPath)
   const disabled = props.readOnly || busy
-  const layout = layoutOf(namespace.ns)
+  const layout = layoutOf(namespace.ns, props.providerEditorLayouts)
   const keyRef = refFor(schema, namespace, settingsPath, props.provider)
   // The same schema read the create card makes, so the choices offered here
   // and there cannot drift apart: both come from the adapter's own `Config`.
@@ -548,7 +564,9 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
         ? null
         : (
           <div className={styles['editorHeader']}>
+            {props.titleIcon}
             <span className={styles['editorTitle']}>{props.displayName}</span>
+            {props.titleStatus}
             {props.provider !== props.displayName
               ? <span className={styles['editorRoute']}>{props.provider}</span>
               : null}
