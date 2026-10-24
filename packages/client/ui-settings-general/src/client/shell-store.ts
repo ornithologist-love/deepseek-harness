@@ -11,16 +11,17 @@ type Actions = {
 
 /**
  * Declare the settings dialog state and its complete mutation API.
+ * @param requestOpen - return true when another surface handles settings navigation.
  * @returns one root-scoped store handle for the settings shell.
  */
-export function createSettingsShellStore(): EngineStoreHandle<State, Actions> {
+export function createSettingsShellStore(requestOpen?: (sectionId?: string) => boolean): EngineStoreHandle<State, Actions> {
   return defineStore({
     init: (): State => ({ open: false, activeId: undefined as string | undefined }),
     actions: {
-      open: (d) => { d.open = true },
+      open: (d) => { if (!requestOpen?.()) d.open = true },
       close: (d) => { d.open = false; d.activeId = undefined },
       select: (d, id: string) => { d.activeId = id },
-      openSection: (d, id: string) => { d.activeId = id; d.open = true },
+      openSection: (d, id: string) => { if (!requestOpen?.(id)) { d.activeId = id; d.open = true } },
     },
   })
 }

@@ -263,6 +263,18 @@ describe('AppFrame', () => {
     expect(frame.querySelector('[data-shell-leading-band]')).toBeNull()
   })
 
+  it('draws neither the sidebar nor its reopen seat while an embedder hides it', () => {
+    document.documentElement.dataset.platform = 'darwin'
+    const { frame, instance, queryByTestId } = mountFrame()
+    act(() => { instance.actions.setSidebarHidden(true) })
+    expect(tracks(frame)).toEqual([0, 0])
+    expect(queryByTestId('sidebar-content')).toBeNull()
+    expect(queryByTestId('shell.leading-content')).toBeNull()
+    expect(frame.querySelector('[data-side="sidebar"]')).toBeNull()
+    act(() => { instance.actions.setSidebarHidden(false) })
+    expect(queryByTestId('sidebar-content')).toBeTruthy()
+  })
+
   it('mounts the shell.leading seat only while the darwin collapse hides the column', () => {
     document.documentElement.dataset.platform = 'darwin'
     const { frame, instance, sidebarOwner, queryByTestId } = mountFrame()

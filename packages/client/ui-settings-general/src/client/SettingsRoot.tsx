@@ -74,10 +74,10 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelP
         {/* The four seats stay direct children of the panel and take their
             places from its grid: title and header share the first row, the
             navigation and the active section the second. */}
-        <div className={css.navTitle} id={titleId} tabIndex={-1}
+        <div className={css.navTitle} id={titleId} tabIndex={-1} data-settings-title
           data-modal-autofocus={active === undefined ? '' : undefined}>{renderSlot('settings.header', {})}</div>
-        <nav className={css.nav}>
-          <div className={css.navList}>
+        <nav className={css.nav} data-settings-nav>
+          <div className={css.navList} data-settings-nav-list>
             {rows.map(row => (
               <button
                 key={row.id}
@@ -98,14 +98,14 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelP
             ))}
           </div>
         </nav>
-        <div className={css.header}>
+        <div className={css.header} data-settings-header>
           <div className={css.actions}>{renderSlot('settings.action', {})}</div>
           <button type="button" className={css.close} onClick={onClose}>
             <IconCloseOutlineRegular size={14} />
             <span className={css.hiddenLabel}>{renderSlot('settings.close', {})}</span>
           </button>
         </div>
-        <div className={css.options}>
+        <div className={css.options} data-settings-options>
           {active !== undefined && renderSlot('settings.section', { close: onClose }, { only: active })}
         </div>
       </div>

@@ -23,6 +23,14 @@ type LayoutState = {
 
 type LayoutInfo = {
   sidebar: number
+  /**
+   * Whether an embedder removed the sidebar column for this document, e.g. a
+   * window that hosts a single Conversation. Unlike a collapsed sidebar, no
+   * reopen control is offered and toggles leave the preference untouched.
+   */
+  sidebarHidden: boolean
+  /** Display the existing sidebar and main column as full-width pages. */
+  singleColumn: boolean
   /** Last positive frame measurement; window width bootstraps the first render. */
   viewportWidth: number
   narrowExpanded: boolean
@@ -60,6 +68,9 @@ type LayoutActions = {
   retainMainPanels: (draft: LayoutState, panelIds: readonly string[]) => void
   setSidebar: (draft: LayoutState, px: number) => void
   toggleSidebar: (draft: LayoutState) => void
+  setSidebarHidden: (draft: LayoutState, hidden: boolean) => void
+  setSingleColumn: (draft: LayoutState, enabled: boolean) => void
+  showSidebar: (draft: LayoutState) => void
   setViewportWidth: (draft: LayoutState, width: number) => void
   setRightbar: (draft: LayoutState, px: number) => void
   openRightbar: (draft: LayoutState, track: boolean, fullscreen: boolean) => void
@@ -81,6 +92,8 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
       panelInfo: { activePanelId: null },
       layoutInfo: {
         sidebar: SIDEBAR_DEFAULT,
+        sidebarHidden: false,
+        singleColumn: false,
         viewportWidth: window.innerWidth,
         narrowExpanded: false,
         rightbar: null,
@@ -93,7 +106,7 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
     actions: {
       selectPanel: (d, panelId: MainPanelId | null) => {
         d.panelInfo.activePanelId = panelId
-        if (d.layoutInfo.viewportWidth < SIDEBAR_DRAWER_BREAKPOINT) d.layoutInfo.narrowExpanded = false
+        if (d.layoutInfo.singleColumn || d.layoutInfo.viewportWidth < SIDEBAR_DRAWER_BREAKPOINT) d.layoutInfo.narrowExpanded = false
       },
       retainMainPanels: (d, panelIds: readonly string[]) => {
         if (d.panelInfo.activePanelId !== null && !panelIds.includes(d.panelInfo.activePanelId)) {
@@ -107,9 +120,22 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
       // Narrow toggles flip only the override: the width preference survives
       // untouched, so re-widening restores the pre-squeeze layout.
       toggleSidebar: (d) => {
+        if (d.layoutInfo.sidebarHidden) return
         d.layoutInfo.rightbarInstant = false
-        if (d.layoutInfo.viewportWidth < SIDEBAR_AUTO_COLLAPSE) d.layoutInfo.narrowExpanded = !d.layoutInfo.narrowExpanded
-        else d.layoutInfo.sidebar = d.layoutInfo.sidebar === 0 ? SIDEBAR_DEFAULT : 0
+        if (d.layoutInfo.singleColumn || d.layoutInfo.viewportWidth < SIDEBAR_AUTO_COLLAPSE) {
+          d.layoutInfo.narrowExpanded = !d.layoutInfo.narrowExpanded
+        } else d.layoutInfo.sidebar = d.layoutInfo.sidebar === 0 ? SIDEBAR_DEFAULT : 0
+      },
+      setSidebarHidden: (d, hidden: boolean) => {
+        d.layoutInfo.sidebarHidden = hidden
+      },
+      setSingleColumn: (d, enabled: boolean) => {
+        d.layoutInfo.singleColumn = enabled
+      },
+      showSidebar: (d) => {
+        if (d.layoutInfo.sidebarHidden) return
+        d.layoutInfo.narrowExpanded = true
+        if (d.layoutInfo.sidebar === 0) d.layoutInfo.sidebar = SIDEBAR_DEFAULT
       },
       // Crossing the breakpoint in either direction drops the override: the
       // narrow default is auto-collapsed, the wide state is the preference.
@@ -127,10 +153,15 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
         d.layoutInfo.rightbar = clampWidth(px, RIGHTBAR_MIN, Math.max(RIGHTBAR_MIN, d.layoutInfo.viewportWidth * RIGHTBAR_MAX_RATIO))
       },
       openRightbar: (d, track: boolean, fullscreen: boolean) => {
+        // A phone shows the sidebar as its own page; the expanded panel replaces
+        // it rather than opening beside it, so the toggle that leaves the panel
+        // never clears the page's own state.
+        if (!d.layoutInfo.singleColumn && d.layoutInfo.viewportWidth < SIDEBAR_AUTO_COLLAPSE) {
+          d.layoutInfo.narrowExpanded = false
+        }
         if (!d.layoutInfo.rightbarShown || d.layoutInfo.rightbarTrack !== track || d.layoutInfo.rightbarFullscreen !== fullscreen) {
           d.layoutInfo.rightbarInstant = d.layoutInfo.rightbarFullscreen && !fullscreen
         }
-        if (!d.layoutInfo.rightbarShown && d.layoutInfo.viewportWidth < SIDEBAR_AUTO_COLLAPSE) d.layoutInfo.narrowExpanded = false
         d.layoutInfo.rightbar ??= Math.max(RIGHTBAR_MIN, Math.round(d.layoutInfo.viewportWidth * RIGHTBAR_DEFAULT_RATIO))
         d.layoutInfo.rightbarShown = true
         d.layoutInfo.rightbarTrack = track

@@ -27,6 +27,10 @@ import css from './AppFrame.module.css'
 /** Browser posture supplied by the root registration. */
 export interface AppFrameInjected {
   hooks: { foldedLandscape: HostObservable<boolean> }
+  /** Main-slot keys kept mounted while hidden. */
+  persistentPanels?: readonly string[]
+  /** Fixed browser title replacing the Session-title projection. */
+  documentTitle?: string
 }
 
 /** Full composed props: runtime, child slots, store, locale, and injected posture. */
@@ -43,10 +47,16 @@ function CenterColumn(props: { children?: ReactNode; inert: boolean }) {
 }
 
 /** Subscribe to the main key without subscribing the column frame to each panel id. */
-function MainPanel({ usePanelInfo, renderSlot }: Pick<PropsRuntime<'root'>, 'usePanelInfo'> & PropsRenderSlots<'main'>) {
+function MainPanel({ usePanelInfo, renderSlot, persistentPanels = [] }: Pick<PropsRuntime<'root'>, 'usePanelInfo'> & PropsRenderSlots<'main'> & { persistentPanels?: readonly string[] }) {
   const panelId = usePanelInfo(info => info.activePanelId)
+  const active = panelId ?? 'conversation'
   return <div className={css.mainPanel} data-global-panel={panelId !== null || undefined}>
-    {renderSlot('main', {}, { entryKey: panelId ?? 'conversation' })}
+    {persistentPanels.length === 0
+      ? renderSlot('main', {}, { entryKey: active })
+      : [...new Set([...persistentPanels, active])].map(key => <div key={key} hidden={key !== active}
+        style={{ display: key === active ? 'flex' : 'none', height: '100%', minHeight: 0, flexDirection: 'column' }}>
+        {renderSlot('main', {}, { entryKey: key })}
+      </div>)}
   </div>
 }
 
@@ -134,6 +144,8 @@ export function AppFrame({
   actions,
   renderSlot,
   t,
+  persistentPanels = [],
+  documentTitle,
 }: AppFrameProps) {
   const layoutInfo = useStore(state => state.layoutInfo)
   const frameRef = useRef<HTMLDivElement | null>(null)
@@ -168,10 +180,14 @@ export function AppFrame({
   }, [actions])
 
   const narrow = viewport < SIDEBAR_AUTO_COLLAPSE
+  const sidebarHidden = layoutInfo.sidebarHidden
   const windowsTitlebar = document.documentElement.hasAttribute('data-windows-titlebar')
-  const drawer = viewport < SIDEBAR_DRAWER_BREAKPOINT && !windowsTitlebar
-  const centeredSidebar = foldedLandscape && viewport >= SIDEBAR_DRAWER_BREAKPOINT
-  const sidebarCollapsed = narrow ? !layoutInfo.narrowExpanded : layoutInfo.sidebar === 0
+  // An embedder-selected single column replaces the drawer and centred presentations.
+  const singleColumn = layoutInfo.singleColumn && !sidebarHidden
+  const sidebarPage = singleColumn && layoutInfo.narrowExpanded
+  const drawer = !singleColumn && viewport < SIDEBAR_DRAWER_BREAKPOINT && !windowsTitlebar && !sidebarHidden
+  const centeredSidebar = !singleColumn && foldedLandscape && viewport >= SIDEBAR_DRAWER_BREAKPOINT
+  const sidebarCollapsed = sidebarHidden || (!singleColumn && (narrow ? !layoutInfo.narrowExpanded : layoutInfo.sidebar === 0))
   const drawerOpen = drawer && !sidebarCollapsed
   // Entering drawer mode from a collapsed rail hides the backing immediately.
   const [sidebarTransition, setSidebarTransition] = useState({ drawer, collapsed: sidebarCollapsed, instant: true })
@@ -185,7 +201,7 @@ export function AppFrame({
   // Desktop reopen controls occupy the frame's shell.leading seat (macOS) or
   // the Windows caption row; neither platform keeps an icon rail.
   const darwin = document.documentElement.dataset.platform === 'darwin'
-  const collapsedWidth = drawer || darwin || windowsTitlebar ? 0 : SIDEBAR_COLLAPSED
+  const collapsedWidth = sidebarHidden || drawer || darwin || windowsTitlebar ? 0 : SIDEBAR_COLLAPSED
   // Opening on a narrow frame collapses the left sidebar. Eligibility must
   // include that space before the occupant's first shown report arrives.
   const normal = computeColumns(
@@ -259,6 +275,12 @@ export function AppFrame({
     actions.setRightbar(rightbarBase.current - dx)
   }, [actions])
   const productTitle = process.env.DSH_CLIENT_TITLE ?? t('brand.localBuild')
+  useEffect(() => {
+    if (documentTitle === undefined) return
+    const previous = document.title
+    document.title = documentTitle
+    return () => { document.title = previous }
+  }, [documentTitle])
   // The rendered template lets the grid solve the squeeze natively: the centre
   // declares its protected minimum and the right column bids up to the clamped
   // preference, so a window resize lands in the same layout pass as the frame
@@ -272,18 +294,18 @@ export function AppFrame({
     : cols.sidebar
   const sidebar = useMemo(() => renderSlot('sidebar', {
     collapsed: sidebarCollapsed,
-    width: sidebarWidth,
+    width: singleColumn ? viewport : sidebarWidth,
     drawer,
-  }), [renderSlot, sidebarCollapsed, sidebarWidth, drawer])
+  }), [renderSlot, sidebarCollapsed, sidebarWidth, drawer, singleColumn, viewport])
   const main = useMemo(() => (
-    <MainPanel usePanelInfo={usePanelInfo} renderSlot={renderSlot} />
-  ), [usePanelInfo, renderSlot])
+    <MainPanel usePanelInfo={usePanelInfo} renderSlot={renderSlot} persistentPanels={persistentPanels} />
+  ), [usePanelInfo, renderSlot, persistentPanels])
   const overlays = useMemo(() => renderSlot('shell.overlay', {}), [renderSlot])
   // The leading seat serves drawers and fully hidden macOS sidebars.
   // Windows native captions keep their controls in the caption row instead.
   // AppFrame.module.css reserves clearance for the seat's rendered controls.
   const leading = useMemo(() => renderSlot('shell.leading', {}), [renderSlot])
-  const leadingMounted = drawer || darwin && sidebarCollapsed
+  const leadingMounted = drawer || singleColumn && !sidebarPage || darwin && sidebarCollapsed
 
   return (
     <div
@@ -298,23 +320,24 @@ export function AppFrame({
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-sidebar-drawer={drawer || undefined}
       data-sidebar-instant={drawer && sidebarCollapsed && sidebarTransition.instant || undefined}
+      data-single-column={singleColumn ? sidebarPage ? 'sidebar' : 'main' : undefined}
       data-rightbar-collapsed={cols.rightbar === 0 || undefined}
       data-rightbar-fullscreen={layoutInfo.rightbarFullscreen || undefined}
       data-rightbar-instant={layoutInfo.rightbarInstant || undefined}
       data-dragging={dragging || undefined}
       data-animating={animateTracks || undefined}
     >
-      <DocumentTitle
+      {documentTitle === undefined && <DocumentTitle
         productTitle={productTitle}
         useSessions={useSessions}
         usePanelInfo={usePanelInfo}
-      />
+      />}
       {drawer && <div className={css.drawerMask} data-sidebar-mask aria-hidden="true"
         onClick={drawerOpen ? () => { actions.toggleSidebar() } : undefined} />}
       <div className={css.sidebarCol}
         style={drawer ? { width: sidebarWidth } : undefined}
         {...{ inert: drawer && sidebarCollapsed ? '' : undefined }}>
-        {sidebar}
+        {!sidebarHidden && sidebar}
       </div>
       <>
         <CenterColumn inert={drawerOpen}>{main}</CenterColumn>
@@ -328,14 +351,14 @@ export function AppFrame({
       <div className={css.overlayLayer} data-shell-overlay>
         {overlays}
       </div>
-      {leadingMounted && (
-        <div className={css.leadingSeat} data-shell-leading {...{ inert: drawerOpen ? '' : undefined }}>
+      {!sidebarHidden && leadingMounted && (
+        <div className={singleColumn ? css.pageLeading : css.leadingSeat} data-shell-leading {...{ inert: drawerOpen ? '' : undefined }}>
           {leading}
         </div>
       )}
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
-      {!drawer && !centeredSidebar && !sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
+      {!singleColumn && !drawer && !centeredSidebar && !sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
+      {!singleColumn && layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
         <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
       )}
     </div>

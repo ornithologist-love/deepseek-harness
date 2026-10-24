@@ -14,6 +14,7 @@ import type {} from '@deepseek-ai/dsh-api-remote-access/client'
 // Type-only: pulls the ctx.remote merge and its fixed Host facts.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type { ConnectionHandle } from '@deepseek-ai/dsh-client-connection/client'
+import type { SidebarSettingsOwnerProps } from '@deepseek-ai/dsh-client-ui-sidebar/client'
 // Type-only: pulls the ctx.modules merge.
 import type {} from '@deepseek-ai/dsh-client-modules/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
@@ -32,6 +33,7 @@ import type {
 } from './shell-contract.ts'
 import type { ShortcutCommandId } from '@deepseek-ai/dsh-client-shortcuts/client'
 import { createSettingsShellStore } from './shell-store.ts'
+import { SettingsShell } from './shell-service.ts'
 import { SettingsRoot } from './SettingsRoot.tsx'
 import { DesktopUpdateBadge } from './DesktopUpdateIndicator.tsx'
 import type { DesktopUpdateBridge } from '../types.ts'
@@ -57,7 +59,30 @@ export type { SettingsDocumentState } from './settings-document-store.ts'
 export { SettingsDocumentStore } from './settings-document-store.ts'
 export type { SettingsKey } from './locales.ts'
 
+export type { ISettingsShell } from './shell-service.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * An open-settings request was issued; an embedding surface that hosts the
+     * Settings shell may handle it and stop the default sidebar navigation.
+     * @mode bail
+     * @param sectionId - requested settings section, absent for the default section.
+     * @returns true when an embedding surface handles this navigation.
+     */
+    'settings/open-request'(sectionId?: string): boolean | void
+  }
+  interface Context {
+    /** The outward face only; the concrete service stays inside this plugin. */
+    settingsShell: import('./shell-service.ts').ISettingsShell
+  }
+}
+
 declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    /** The same Settings shell hosted by a sidebar-less conversation. */
+    'conversation.header.settings': { kind: 'single'; scope: 'root'; owner: SidebarSettingsOwnerProps }
+  }
   interface LocaleNamespaceMap {
     /** Shell chrome + shell-owned General section copy. */
     settings: SettingsKey
@@ -187,12 +212,15 @@ export function apply(ctx: ClientContext): void {
       },
     },
   })
+  const settingsMount = Reflect.get(globalThis, '__DSH_LAYOUT_OPTIONS__')?.settingsMount === 'conversation.header.settings'
+    ? 'conversation.header.settings' : 'sidebar.settings'
   // The settings shell reads this host's configuration, so it follows access to its description.
   ctx.remoteAccess.whenAccess('settings/describe', () =>
-    ctx.slots.inject('sidebar.settings', () => {
-      const shellHandle = createSettingsShellStore()
+    ctx.slots.inject(settingsMount, () => {
+      const shellHandle = createSettingsShellStore(sectionId => ctx.bail('settings/open-request', sectionId) === true)
       const shellInstance = shellHandle.create()
       const shellStore: typeof shellHandle = { ...shellHandle, create: () => shellInstance }
+      const disposeService = ctx.reflect.provide('settingsShell', new SettingsShell(shellInstance.actions))
       const disposeCommand = ctx.shortcuts.register({
         id: 'settings.open' as ShortcutCommandId, label: () => t('shortcut.open'), aliases: ['settings', 'preferences'],
         defaults: {
@@ -213,7 +241,7 @@ export function apply(ctx: ClientContext): void {
       })
 
       const disposeSlot = ctx.slots.register({
-        name: 'sidebar.settings',
+        name: settingsMount,
         locale: NS,
         store: shellStore,
         children: {
@@ -228,7 +256,12 @@ export function apply(ctx: ClientContext): void {
         },
         inject: shellInjected,
       }, SettingsRoot)
-      return () => { disposeCommand(); disposeSlot() }
+      return () => {
+        disposeCommand()
+        disposeSlot()
+        // provide()'s disposer settles asynchronously; teardown is synchronous fire-and-forget.
+        void disposeService()
+      }
     }))
 
   ctx.slots.inject('settings.trigger', () =>

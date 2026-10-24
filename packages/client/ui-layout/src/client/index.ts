@@ -160,6 +160,12 @@ export const inject = ['slots', 'theme', 'locale', 'shortcuts']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
+  const options = (globalThis as typeof globalThis & { __DSH_LAYOUT_OPTIONS__?: {
+    persistentPanels?: readonly string[]
+    documentTitle?: string
+  } }).__DSH_LAYOUT_OPTIONS__
+  const persistentPanels = options?.persistentPanels ?? []
+  const documentTitle = options?.documentTitle
   ctx.effect(() => ctx.locale.register('shortcuts.layout', { zh, en, ja, es, fr, de, ru, pt }), 'layout: command labels')
   const t = ctx.locale.bind('shortcuts.layout')
 
@@ -201,7 +207,9 @@ export function apply(ctx: ClientContext): void {
         'shell.leading': { kind: 'single', scope: 'root' },
       },
       store,
-      inject: (): AppFrameInjected => ({ hooks: { foldedLandscape } }),
+      inject: (): AppFrameInjected => ({
+        hooks: { foldedLandscape }, persistentPanels, ...(documentTitle === undefined ? {} : { documentTitle }),
+      }),
     }, AppFrame)
     const disposeShortcut = ctx.shortcuts.register({
       id: 'sidebar.left.toggle' as ShortcutCommandId, label: () => t('toggle'), aliases: ['sidebar', 'toggle left sidebar'],
