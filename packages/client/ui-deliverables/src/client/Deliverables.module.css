@@ -7,6 +7,11 @@
 .hostStatus { display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); }
 .presented { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; min-width: 0; }
 .presented[data-single='true'] { grid-template-columns: minmax(0, 1fr); }
+/* Each delivery position of the grid. A preview contribution joins the flow
+   before the card and, by carrying `data-deliverable-preview` on its root,
+   widens its position to the whole row. */
+.presentedItem { display: contents; }
+.presentedItem:has(> [data-deliverable-preview]) { display: block; grid-column: 1 / -1; min-width: 0; }
 .file { position: relative; box-sizing: border-box; display: flex; align-items: center; gap: 10px; min-width: 0; height: 60px; padding: 8px 10px; overflow: hidden; border: 0.5px solid var(--dsw-alias-border-l1); border-radius: var(--dsw-radius-lg); background: var(--deliverable-fill); color: var(--dsw-alias-label-primary); transition: background-color 120ms ease; }
 .file:hover { background: var(--deliverable-hover); }
 .cardPreview { position: absolute; z-index: 1; inset: 0; width: 100%; padding: 0; border: 0; border-radius: inherit; background: transparent; cursor: pointer; }
