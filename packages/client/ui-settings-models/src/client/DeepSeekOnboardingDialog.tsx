@@ -11,9 +11,10 @@ import type { ReactNode } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { InjectFace, PropsRuntime, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ModelsSettingsState, ModelsSettingsStore } from './store.ts'
-import { onboardingReadiness } from './store.ts'
+import { deriveKeyRef, onboardingReadiness } from './store.ts'
 import type { ModelsOperations } from './operations.ts'
 import type { SettingsSchemaOperations } from './schema-operations.ts'
+import { apiKeyFailure } from './apiKey.ts'
 import { ProviderEditor } from './ProviderEditor.tsx'
 import type {} from './slot-contract.ts'
 import type { en } from './locales.ts'
@@ -26,6 +27,8 @@ export interface DeepSeekOnboardingInjected {
   track?: TrackProductEvent
   /** Whether first-run setup should show automatically. Explicit requests remain available. */
   automatic: boolean
+  /** Editor family per settings namespace (see `Config.providerEditorLayouts`). */
+  providerEditorLayouts?: Readonly<Record<string, 'deepseek' | 'pi-ai'>>
   hooks: {
     /** Shared Models-page join state, bound by the slot renderer. */
     models: SnapshotStore<ModelsSettingsState>
@@ -42,7 +45,8 @@ export interface DeepSeekOnboardingInjected {
 
 /** Slot owner props plus the feature's injected dependencies. */
 export type DeepSeekOnboardingDialogProps =
-  PropsRuntime<'settings.onboarding'> & PropsRenderSlots<'settings.models.sign-in'> & InjectFace<DeepSeekOnboardingInjected>
+  PropsRuntime<'settings.onboarding'> & PropsRenderSlots<'settings.models.sign-in' | 'settings.models.credential-prompt'>
+    & InjectFace<DeepSeekOnboardingInjected>
 
 /* v8 ignore next 3 -- closed-union defaults only defend future source widening */
 function assertNever(_value: never): never {
@@ -56,10 +60,16 @@ function assertNever(_value: never): never {
  * @returns the onboarding modal or null when onboarding needs no intervention.
  */
 export function DeepSeekOnboardingDialog(props: DeepSeekOnboardingDialogProps): ReactNode {
-  const { complete, controller, useModels, operations, schema, t, renderSlot, automatic, explicit = false } = props
+  const {
+    complete, controller, useModels, operations, schema, t, renderSlot, automatic, explicit = false,
+    providerEditorLayouts,
+  } = props
   const [apiKey, setApiKey] = useState(explicit)
   const state = useModels(snapshot => snapshot)
   const readiness = onboardingReadiness(state)
+  // A deployment whose default provider is another route has nothing to ask
+  // this step for; the prompt belongs to the route it can store a key for.
+  const otherProvider = state.defaultProvider !== undefined && state.defaultProvider !== 'deepseek-official'
 
   useEffect(() => {
     if ((automatic || explicit) && state.status === 'idle') void controller.load()
@@ -67,14 +77,14 @@ export function DeepSeekOnboardingDialog(props: DeepSeekOnboardingDialogProps): 
 
   useEffect(() => {
     if (
-      (!automatic && !explicit)
+      ((!automatic || otherProvider) && !explicit)
       || readiness.kind === 'adapter-absent'
       || (!explicit && readiness.kind === 'provider-ready')
       || readiness.kind === 'unavailable'
     ) complete()
-  }, [complete, readiness.kind, explicit, automatic])
+  }, [complete, readiness.kind, explicit, automatic, otherProvider])
 
-  if (!automatic && !explicit) return null
+  if ((!automatic || otherProvider) && !explicit) return null
 
   switch (readiness.kind) {
     case 'loading':
@@ -107,31 +117,67 @@ export function DeepSeekOnboardingDialog(props: DeepSeekOnboardingDialogProps): 
     void controller.load()
   }
 
-  const editor = (
-    <OnboardingModal title={t('onboardingTitle')}>
-      <p className={styles.description}>{t('onboardingDescription')}</p>
-      <div className={styles.editor}>
-        <ProviderEditor
-          provider={row.entry.provider}
-          displayName={row.entry.displayName}
-          namespace={namespace}
-          schema={schema}
-          settingsPath={row.entry.settingsPath}
-          operations={operations}
-          t={t}
-          readOnly={false}
-          hideTitle
-          credentialOnly
-          onSubmitCredential={() => { props.track?.('api_key_save_click', {}) }}
-          credentialRequired
-          autoFocusCredential
-          cancelLabelKey="onboardingLater"
-          submitLabelKey="onboardingSave"
-          submitBusyLabelKey="onboardingSaving"
-          onClose={finishCredential}
-        />
-      </div>
-    </OnboardingModal>
-  )
+  /** The reference the reused editor stores a typed key under: the profile's own, else the derived one. */
+  const keyRef = ((): string => {
+    const profile = schema.getPath(namespace.value, row.entry.settingsPath)
+    const named = typeof profile === 'object' && profile !== null
+      ? (profile as { apiKeyEnv?: unknown }).apiKeyEnv
+      : undefined
+    return typeof named === 'string' && named.length > 0 ? named : deriveKeyRef(row.entry.provider)
+  })()
+
+  /**
+   * The credential save the replacement prompt reaches: the same judgement,
+   * write, and follow-up the reused editor makes after its own submit.
+   * @param value - the key the prompt collected, untrimmed.
+   * @returns resolution once the key is stored and the join refreshed.
+   * @throws a localized message the prompt shows when the key or the write is refused.
+   */
+  const save = async (value: string): Promise<void> => {
+    const key = value.trim()
+    if (key.length === 0) throw new Error(t('keyRequired'))
+    const failure = apiKeyFailure(key)
+    if (failure !== undefined) throw new Error(t(failure))
+    const stored = await operations.storeCredential(keyRef, key)
+    if (stored !== undefined) throw new Error(stored)
+    props.track?.('api_key_save_click', {})
+    await controller.load()
+    complete()
+  }
+
+  const editor = renderSlot('settings.models.credential-prompt', {
+    provider: row.entry.provider,
+    displayName: row.entry.displayName,
+    save,
+    close: complete,
+  }, {
+    fallback: (
+      <OnboardingModal title={t('onboardingTitle')}>
+        <p className={styles.description}>{t('onboardingDescription')}</p>
+        <div className={styles.editor}>
+          <ProviderEditor
+            provider={row.entry.provider}
+            displayName={row.entry.displayName}
+            namespace={namespace}
+            schema={schema}
+            settingsPath={row.entry.settingsPath}
+            operations={operations}
+            t={t}
+            readOnly={false}
+            hideTitle
+            credentialOnly
+            {...providerEditorLayouts === undefined ? {} : { providerEditorLayouts }}
+            onSubmitCredential={() => { props.track?.('api_key_save_click', {}) }}
+            credentialRequired
+            autoFocusCredential
+            cancelLabelKey="onboardingLater"
+            submitLabelKey="onboardingSave"
+            submitBusyLabelKey="onboardingSaving"
+            onClose={finishCredential}
+          />
+        </div>
+      </OnboardingModal>
+    ),
+  })
   return apiKey ? editor : renderSlot('settings.models.sign-in', { complete, useApiKey: () => { setApiKey(true) } }, { fallback: editor })
 }

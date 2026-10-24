@@ -17,8 +17,49 @@ export interface ModelLabelOwner {
   selected: boolean
 }
 
+/** A provider, and for model rows a catalog model, whose mark the model menu shows. */
+export interface ModelIconOwner {
+  /** Provider identity; absent on the trigger while no listed model is selected. */
+  provider: Pick<ModelProviderGroup, 'id' | 'name'> | undefined
+  /** The catalog entry for trigger and option placements; absent for group headings and while no listed model is selected. */
+  model: ModelCatalogModel | undefined
+  /** Trigger button, provider group heading, or selectable model row. */
+  placement: 'trigger' | 'group' | 'option'
+}
+
+/** A provider whose catalog lists no models, offered a setup action inside the menu. */
+export interface ModelProviderSetupOwner {
+  /** Provider identity and localized display name. */
+  provider: Pick<ModelProviderGroup, 'id' | 'name'>
+  /** Close the model menu, for an action that moves focus elsewhere. */
+  close: () => void
+}
+
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
+    /**
+     * Decorative mark before a model caption, provider heading, or model row.
+     * Without a contribution, the trigger shows the generic model icon and other placements show none.
+     */
+    'conversation.input.model.icon': {
+      kind: 'single'
+      scope: 'session'
+      inline: true
+      owner: ModelIconOwner
+    }
+    /** Non-interactive trailing badge on a model row, such as a price tier; empty without a contribution. */
+    'conversation.input.model.badge': {
+      kind: 'single'
+      scope: 'session'
+      inline: true
+      owner: Omit<ModelLabelOwner, 'placement'>
+    }
+    /** Setup action for a provider with an empty catalog; while any contribution is registered, such providers stay listed. */
+    'conversation.input.model.provider-setup': {
+      kind: 'single'
+      scope: 'session'
+      owner: ModelProviderSetupOwner
+    }
     /**
      * Non-interactive inline model label; selection controls remain owner-managed.
      * Without a contribution, the badge precedes the catalog name in the trigger
@@ -63,4 +104,9 @@ export interface ModelSelectInjected {
    * @returns the Host outcome, or undefined when this Session cannot select a model.
    */
   select: (selection: ModelSelection) => Promise<RemoteResult<void> | undefined>
+  /**
+   * Whether a `conversation.input.model.provider-setup` contribution is registered, read while rendering.
+   * @returns true when providers with an empty catalog should stay listed with their setup action.
+   */
+  offersProviderSetup: () => boolean
 }

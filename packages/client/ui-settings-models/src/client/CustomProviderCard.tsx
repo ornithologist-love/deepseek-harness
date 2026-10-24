@@ -83,6 +83,8 @@ export interface CustomProviderCardProps {
   t: (key: keyof typeof en) => string
   /** Disable writes (read-only settings provider). */
   readOnly: boolean
+  /** Editor family the deployment maps this namespace to (see `Config.providerEditorLayouts`). */
+  providerEditorLayouts?: Readonly<Record<string, 'deepseek' | 'pi-ai'>>
   /** Close the card; `changed` reports whether a provider was created. */
   onClose: (changed: boolean) => void
   /**

@@ -113,6 +113,8 @@ export interface ModelCatalogModel {
   readonly reasoning?: ModelReasoning
   /** Provider-authored label shown beside the name; display data only. */
   readonly badge?: LlmModelBadge
+  /** Whether the catalog recommends this model; the model menu can then list only recommended models. */
+  readonly recommended?: boolean
 }
 
 /** One provider and its successfully loaded model catalog. */

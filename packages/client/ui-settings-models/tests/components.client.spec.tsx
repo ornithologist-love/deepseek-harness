@@ -176,11 +176,28 @@ function remoteFail(message: string, code: RefusalCode = 'credential/rejected') 
   return { ok: false as const, error: REFUSALS[code](message) }
 }
 
+/** The directory entry shape the scripted Host answers with, before the live flag is stripped. */
+type ScriptedProviderEntry = {
+  provider: string
+  displayName: string
+  settingsNs: string
+  settingsPath: string[]
+  active?: boolean
+  declared?: boolean
+  defaultBaseURL?: string
+  baseURLEnv?: string[]
+  nativeAuth?: { env: string[]; oauth: boolean }
+}
+
 function scriptedFace(overrides: {
   update?: ReturnType<typeof vi.fn>
   mutate?: ReturnType<typeof vi.fn>
   set?: ReturnType<typeof vi.fn>
   unset?: ReturnType<typeof vi.fn>
+  /** The configurable directory the Host reports, when a case needs a route the default lacks. */
+  providers?: readonly ScriptedProviderEntry[]
+  /** The settings document the Host reports, when a case needs a namespace the default lacks. */
+  namespaces?: () => SettingsNamespaceView[]
 } = {}) {
   const providerNamespace = wireNamespaces().find(view => view.ns === 'llm-pi-ai')!
   const update = overrides.update ?? vi.fn(() => Promise.resolve(remoteOk(providerNamespace)))
@@ -193,7 +210,7 @@ function scriptedFace(overrides: {
         { id: 'deepseek-official', name: 'DeepSeek' },
         { id: 'openai', name: 'openai' },
       ]))),
-      listConfigurableProviders: vi.fn(() => Promise.resolve(remoteOk([
+      listConfigurableProviders: vi.fn(() => Promise.resolve(remoteOk((overrides.providers ?? [
         { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [], active: true },
         {
           provider: 'openai', displayName: 'openai', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'], active: true,
@@ -207,11 +224,15 @@ function scriptedFace(overrides: {
         { provider: 'zombie', displayName: 'zombie', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'zombie'], active: false },
         { provider: 'broken', displayName: 'broken', settingsNs: 'llm-pi-ai', settingsPath: ['nope', 'x'], active: false },
         { provider: 'plain', displayName: 'plain', settingsNs: 'llm-plain', settingsPath: ['profiles', 'plain'], active: false },
-      ].map(({ active: _active, ...entry }) => entry)))),
+      ]).map(({ active: _active, ...entry }) => entry)))),
       discoverModels: vi.fn(() => Promise.resolve(remoteOk([]))),
     },
     settings: {
-      describe: vi.fn(() => Promise.resolve(remoteOk({ writable: true, hasDocument: false, namespaces: wireNamespaces() }))),
+      describe: vi.fn(() => Promise.resolve(remoteOk({
+        writable: true,
+        hasDocument: false,
+        namespaces: overrides.namespaces?.() ?? wireNamespaces(),
+      }))),
       update,
       mutate,
     },
@@ -245,7 +266,15 @@ function ctxWith(face: object): PageContext {
   const existing = contexts.get(face)
   if (existing !== undefined) return existing
   const ctx = Object.assign(new Context(), { remote: { ...face,
-    session: { initializeDefaultModel: async () => ({ ok: true, value: undefined }) },
+    session: {
+      initializeDefaultModel: async () => ({ ok: true, value: undefined }),
+      modelCatalog: async () => remoteOk({
+        default: { provider: 'deepseek-official', model: 'deepseek-v4-flash' },
+        routableProviders: [],
+        groups: [],
+        failures: [],
+      }),
+    },
   } })
   contexts.set(face, ctx)
   return ctx
@@ -313,7 +342,7 @@ function cardSeatCalls(
     ])
 }
 
-async function mountFace(scripted: ReturnType<typeof scriptedFace>) {
+async function mountFace(scripted: ReturnType<typeof scriptedFace>, injectedOptions: Partial<ModelsSectionInjected> = {}) {
   const { face, update, mutate, set, unset } = scripted
   const ctx = ctxWith(face)
   const mirror = new SettingsDescribeMirror(ctx)
@@ -327,13 +356,25 @@ async function mountFace(scripted: ReturnType<typeof scriptedFace>) {
     schema: settingsSchema,
     t,
     renderSlot: renderSlot as unknown as ModelsSectionProps['renderSlot'],
+    // What the deployment's page-bootstrap options add to the section's inject face.
+    ...injectedOptions,
   }
   const view = render(<ModelsSection {...injected} />)
   return { view, ctx, face, update, mutate, set, unset, controller, mirror, renderSlot }
 }
 
-async function mountSection(overrides: Parameters<typeof scriptedFace>[0] = {}) {
-  return mountFace(scriptedFace(overrides))
+/**
+ * Mount the page with the deployment-provided provider options the Host
+ * publishes (`credentialOnlyProviders`, `providerEditorLayouts`).
+ * @param overrides - the scripted wire answers.
+ * @param injectedOptions - the deployment options the section is injected with.
+ * @returns the mounted page.
+ */
+async function mountSection(
+  overrides: Parameters<typeof scriptedFace>[0] = {},
+  injectedOptions: Partial<ModelsSectionInjected> = {},
+) {
+  return mountFace(scriptedFace(overrides), injectedOptions)
 }
 
 /**
@@ -759,10 +800,13 @@ describe('ModelsSection', () => {
       renderSlot={() => null}
     />)
 
-    const missing = screen.getByRole('img', { name: en.credentialMissing })
+    // Both rows report the reference missing, and the open DeepSeek setup card
+    // repeats its row's state in the editor title.
+    const marks = screen.getAllByRole('img', { name: en.credentialMissing })
+    const missing = marks.find(mark => mark.closest('li')?.textContent?.includes('openai') === true)!
     expect(missing.getAttribute('title')).toBe(en.credentialMissing)
     expect(missing.className).toContain('credentialDotMissing')
-    expect(missing.closest('li')?.textContent).toContain('openai')
+    expect(marks.some(mark => mark.closest('li')?.textContent?.includes('DeepSeek') === true)).toBe(true)
     expect(screen.queryByRole('img', { name: en.credentialConfigured })).toBeNull()
     expect(screen.getByText('zombie').closest('li')?.querySelector('[role="img"]')).toBeNull()
   })
@@ -2146,7 +2190,6 @@ describe('ModelsSection', () => {
     expect(failure).toBe('credential is read-only')
     expect(mutate).not.toHaveBeenCalled()
   })
-
 })
 
 describe('apiKeyFailure', () => {
@@ -2411,6 +2454,218 @@ it('keeps an inherited profile endpoint ahead of dynamic provider configuration'
   const input = screen.getByLabelText<HTMLInputElement>(en.baseUrl)
   expect(input.placeholder).toBe('https://team.example/openai/v1')
   expect(input.getAttribute('aria-describedby')).toBeNull()
+})
+
+/** The provider mark a deployment configures for one route. */
+const GATEWAY_ICON = 'data:image/svg+xml,%3Csvg/%3E'
+
+/** The settings namespace a gateway route stores its profile in. */
+const GATEWAY_NAMESPACE = 'llm-gateway'
+
+/** The settings schema of one deployment-managed gateway route. */
+const GatewayConfig = Schema.object({
+  providers: Schema.dict(Schema.object({
+    apiKeyEnv: Schema.string().role('credential-ref'),
+    baseURL: Schema.string(),
+    models: Schema.array(Schema.object({ id: Schema.string().required() })),
+  })),
+})
+
+/**
+ * A deployment that manages one gateway route itself: the Host reports it as a
+ * route the adapter does not ship, so the page would otherwise tag it.
+ * @param options.declared - whether the adapter reports the route as hand-declared.
+ * @returns the scripted wire face and the directory/namespace answers it uses.
+ */
+function gatewayFace(options: { declared?: boolean } = {}) {
+  const gatewayNamespace: SettingsNamespaceView = {
+    ns: GATEWAY_NAMESPACE,
+    schema: JSON.parse(JSON.stringify(GatewayConfig.toJSON())) as JsonValue,
+    value: { providers: { acme: { apiKeyEnv: 'ACME_API_KEY', baseURL: 'https://acme.example/v1', models: [{ id: 'acme-large' }] } } },
+    user: { providers: { acme: { apiKeyEnv: 'ACME_API_KEY', baseURL: 'https://acme.example/v1', models: [{ id: 'acme-large' }] } } },
+    autoGenerate: true, applies: 'live',
+    secrets: [],
+    revision: 0,
+  }
+  const providers: ScriptedProviderEntry[] = [
+    { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [], active: true },
+    { provider: 'openai', displayName: 'openai', settingsNs: 'llm-pi-ai', settingsPath: ['providers', 'openai'], active: true },
+    {
+      provider: 'acme', displayName: 'Acme Gateway', settingsNs: GATEWAY_NAMESPACE,
+      settingsPath: ['providers', 'acme'], active: true,
+      ...options.declared === undefined ? {} : { declared: options.declared },
+    },
+  ]
+  const scripted = scriptedFace({ providers, namespaces: () => [...wireNamespaces(), gatewayNamespace] })
+  scripted.face.credentials.describe.mockImplementation((refs: string[]) => Promise.resolve(remoteOk(
+    Object.fromEntries(refs.map(ref => [ref, { configured: true, writable: true }])),
+  )))
+  /** The route's visible name. */
+  const displayName = (provider: string): string =>
+    provider === 'acme' ? 'Acme Gateway' : provider === 'deepseek-official' ? 'DeepSeek' : provider
+  /** The route's row, matched by its Edit action; an open editor's title cannot pass for it. */
+  const rowOf = (provider: string): HTMLElement => {
+    const label = provider === displayName(provider) ? `Edit ${provider}` : `Edit ${displayName(provider)} (${provider})`
+    const row = screen.getAllByRole('listitem').find(candidate =>
+      [...candidate.querySelectorAll('button')].some(button => button.getAttribute('aria-label') === label))
+    if (row === undefined) throw new Error(`no row for ${provider}`)
+    return row
+  }
+  return {
+    scripted,
+    displayName,
+    rowOf,
+    /** The editor card open inside that row, or null while it is closed. */
+    editorOf: (provider: string): HTMLElement | null =>
+      [...rowOf(provider).querySelectorAll<HTMLElement>('div')]
+        .find(candidate => candidate.querySelector('div[class*="editorActions"]') !== null) ?? null,
+  }
+}
+
+async function mountGateway(
+  options: { declared?: boolean } = {},
+  injectedOptions: Partial<ModelsSectionInjected> = {},
+) {
+  const gateway = gatewayFace(options)
+  const mounted = await mountFace(gateway.scripted, injectedOptions)
+  return { ...mounted, ...gateway }
+}
+
+describe('deployment-managed providers', () => {
+  it('tags a hand-declared route the deployment does not manage', async () => {
+    const { rowOf } = await mountGateway({ declared: true })
+    expect(rowOf('acme').textContent).toContain(en.customTag)
+  })
+
+  it('leaves the custom tag off the routes the deployment manages', async () => {
+    const { rowOf } = await mountGateway({ declared: true }, { credentialOnlyProviders: ['acme'] })
+    // The route is still there and still editable; only the tag is gone.
+    expect(rowOf('acme').textContent).toContain('Acme Gateway')
+    expect(rowOf('acme').textContent).not.toContain(en.customTag)
+    expect(screen.getByRole('button', { name: 'Edit Acme Gateway (acme)' })).toBeTruthy()
+  })
+
+  it('shows a managed route as credentials only, with no provider settings to edit', async () => {
+    const { editorOf, rowOf } = await mountGateway({ declared: true }, {
+      credentialOnlyProviders: ['acme'],
+      providerEditorLayouts: { [GATEWAY_NAMESPACE]: 'pi-ai' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Acme Gateway (acme)' }))
+    // The credential field stays: that is what this route's editor is for.
+    const editor = editorOf('acme')
+    if (editor === null) throw new Error('the managed route opened no editor')
+    expect(within(editor).getByLabelText(en.keyInput)).toBeTruthy()
+    // The catalog fields are the deployment's, so the card offers none of them.
+    expect(within(editor).queryByText(en.customized)).toBeNull()
+    expect(within(editor).queryByLabelText(en.baseUrl)).toBeNull()
+    expect(rowOf('acme').textContent).not.toContain(en.customTag)
+    // A managed route carries no protocol picker either: that is a profile
+    // field the deployment owns, not something the user sets here.
+    expect(within(editor).queryByLabelText(en.customApi)).toBeNull()
+  })
+
+  it('keeps the catalog fields for an unmanaged route in the same layout', async () => {
+    const { editorOf } = await mountGateway({ declared: true }, {
+      providerEditorLayouts: { [GATEWAY_NAMESPACE]: 'pi-ai' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Acme Gateway (acme)' }))
+    const editor = editorOf('acme')
+    if (editor === null) throw new Error('the route opened no editor')
+    expect(within(editor).getByText(en.customized)).toBeTruthy()
+    fireEvent.click(within(editor).getByText(en.customized))
+    expect(within(editor).getByLabelText(en.baseUrl)).toBeTruthy()
+  })
+})
+
+describe('configured provider icons', () => {
+  it('renders a configured icon as the image its source names', async () => {
+    const { rowOf } = await mountGateway({ declared: true }, { providerIcons: { acme: { src: GATEWAY_ICON } } })
+    const picture = rowOf('acme').querySelector('img')
+    if (picture === null) throw new Error('the row shows no icon image')
+    expect(picture.getAttribute('src')).toBe(GATEWAY_ICON)
+    expect(picture.getAttribute('aria-hidden')).toBe('true')
+    // Only the route the deployment configured gets a mark.
+    expect(rowOf('openai').querySelector('img')).toBeNull()
+  })
+
+  it('masks a monochrome icon in the current text color instead of showing its own art', async () => {
+    const { rowOf } = await mountGateway({ declared: true }, {
+      providerIcons: { acme: { src: GATEWAY_ICON, monochrome: true, scale: 0.8 } },
+    })
+    const row = rowOf('acme')
+    expect(row.querySelector('img')).toBeNull()
+    const masked = row.querySelector<HTMLElement>('[aria-hidden="true"]')
+    if (masked === null) throw new Error('the row shows no masked icon')
+    expect(masked.style.maskImage).toBe(`url("${GATEWAY_ICON}")`)
+    expect(masked.style.backgroundColor).toBe('currentcolor')
+    expect(masked.style.transform).toBe('scale(0.8)')
+  })
+
+  it('renders nothing but the provider identity when a route has no icon configured', async () => {
+    const { rowOf } = await mountGateway({ declared: true }, {
+      providerIcons: { 'example-other': { src: GATEWAY_ICON } },
+    })
+    // A deployment naming other routes leaves this one without a mark.
+    const row = rowOf('acme')
+    expect(row.querySelector('img')).toBeNull()
+    expect(row.querySelector('[style]')).toBeNull()
+    expect(row.textContent).toContain('Acme Gateway')
+  })
+
+  it('scales a plain icon to the configured factor', async () => {
+    const { rowOf } = await mountGateway({ declared: true }, {
+      providerIcons: { acme: { src: GATEWAY_ICON, scale: 1.25 } },
+    })
+    const picture = rowOf('acme').querySelector<HTMLImageElement>('img')
+    if (picture === null) throw new Error('the row shows no icon image')
+    expect(picture.getAttribute('src')).toBe(GATEWAY_ICON)
+    expect(picture.style.transform).toBe('scale(1.25)')
+  })
+
+  it('renders a monochrome icon masked, without a scale it was not given', async () => {
+    const { rowOf } = await mountGateway({ declared: true }, {
+      providerIcons: { acme: { src: GATEWAY_ICON, monochrome: true } },
+    })
+    const masked = rowOf('acme').querySelector<HTMLElement>('[aria-hidden="true"]')
+    if (masked === null) throw new Error('the row shows no masked icon')
+    expect(masked.style.maskImage).toBe(`url("${GATEWAY_ICON}")`)
+    expect(masked.style.transform).toBe('')
+  })
+
+  it('repeats the configured icon in the title of the open editor', async () => {
+    const { editorOf, rowOf } = await mountGateway({ declared: true }, { providerIcons: { acme: { src: GATEWAY_ICON } } })
+    expect(rowOf('acme').querySelectorAll('img')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Acme Gateway (acme)' }))
+    const editor = editorOf('acme')
+    if (editor === null) throw new Error('the route opened no editor')
+    // The card's own title repeats the mark, so an open editor still says
+    // which deployment route it belongs to.
+    expect(editor.querySelector('img')?.getAttribute('src')).toBe(GATEWAY_ICON)
+  })
+
+  it('carries both the icon and the layout into the first-run setup card', async () => {
+    const deepSeek: SettingsNamespaceView = { ...wireNamespaces()[0]!, user: {} }
+    const scripted = scriptedFace({
+      providers: [
+        { provider: 'deepseek-official', displayName: 'DeepSeek', settingsNs: 'llm-deepseek', settingsPath: [], active: true },
+      ],
+      namespaces: () => [deepSeek],
+    })
+    // No route is live and no credential is stored, so nothing on the page can
+    // serve a request: the unkeyed route owns its open setup card.
+    scripted.face.llm.listProviders.mockResolvedValue(remoteOk([]))
+    scripted.face.credentials.describe.mockImplementation((refs: string[]) => Promise.resolve(remoteOk(
+      Object.fromEntries(refs.map(ref => [ref, { configured: false, writable: true }])),
+    )))
+    await mountFace(scripted, {
+      providerIcons: { 'deepseek-official': { src: GATEWAY_ICON } },
+      providerEditorLayouts: { 'llm-deepseek': 'deepseek' },
+    })
+    const card = screen.getByRole('listitem')
+    expect(card.querySelector('img')?.getAttribute('src')).toBe(GATEWAY_ICON)
+    expect(within(card).getByLabelText(en.keyInput)).toBeTruthy()
+    expect(within(card).getByText(en.customized)).toBeTruthy()
+  })
 })
 
 it('renders the localized account row as signed in without an edit action', async () => {

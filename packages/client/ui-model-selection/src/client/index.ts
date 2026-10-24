@@ -33,7 +33,7 @@ import { orderModelProviders } from './provider-order.ts'
 export { ModelDirectory } from './directory.ts'
 export type { ModelDirectoryState } from './directory.ts'
 export { ModelDirectoryResolver } from './service.ts'
-export type { ModelLabelOwner, ModelSelectInjected } from './slots.ts'
+export type { ModelIconOwner, ModelLabelOwner, ModelProviderSetupOwner, ModelSelectInjected } from './slots.ts'
 export type { ModelKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -174,6 +174,9 @@ export function apply(ctx: ClientContext): void {
       locale: NS,
       children: {
         'conversation.input.model.label': { kind: 'single', scope: 'session', inline: true },
+        'conversation.input.model.icon': { kind: 'single', scope: 'session', inline: true },
+        'conversation.input.model.badge': { kind: 'single', scope: 'session', inline: true },
+        'conversation.input.model.provider-setup': { kind: 'single', scope: 'session' },
       },
       inject: (sessionId): ModelSelectInjected => {
         const directory = models.directoryFor(sessionId)
@@ -188,6 +191,7 @@ export function apply(ctx: ClientContext): void {
           select: (selection: ModelSelection) => available
             ? directory.select(selection)
             : Promise.resolve(undefined),
+          offersProviderSetup: () => scope.slots.entriesOfSlot('conversation.input.model.provider-setup').length > 0,
         }
       },
     }, ModelSelect))
