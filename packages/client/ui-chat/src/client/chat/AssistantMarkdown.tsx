@@ -14,7 +14,7 @@ import css from './AssistantMarkdown.module.css'
  * Standalone fallback for image destinations (query/fragment suffixes are ignored).
  * Chat fileImages resolves decoded file references against cwd; pathImages also
  * serves this component outside that provider and accepts legacy image URL suffixes.
- * Resolve an authored absolute image path against the document's file API.
+ * Resolve an authored absolute image path or local file URL against the document's file API.
  * @param base - canonical `document.baseURI` at render time.
  * @param value - authored Markdown destination; URL escapes are decoded once.
  * @returns an absolute Web or Desktop file-API URL, or undefined for unsupported
@@ -22,13 +22,30 @@ import css from './AssistantMarkdown.module.css'
  */
 export function localPathMediaUrl(base: string, value: string): string | undefined {
   let path: string
-  try { path = decodeURIComponent(value.split(/[?#]/u)[0] ?? '') }
-  catch { return undefined } // Malformed URL escapes cannot identify a file.
+  if (/^file:/iu.test(value)) {
+    let file: URL
+    try { file = new URL(value) }
+    catch { return undefined } // Invalid file URLs do not identify a local file.
+    if (file.hostname !== '' && file.hostname !== 'localhost') return undefined
+    try { path = decodeURIComponent(file.pathname) }
+    catch { return undefined } // File URLs require valid percent encoding.
+    if (/^\/[a-z]:\//iu.test(path)) path = path.slice(1)
+  } else {
+    const destination = value.split(/[?#]/u)[0] ?? ''
+    try { path = decodeURIComponent(destination) }
+    catch {
+      // Raw Windows paths may contain a literal percent sign, unlike URI paths.
+      if (!/^[a-z]:[\\/]/iu.test(destination)) return undefined
+      path = destination
+    }
+  }
   return fileMediaUrl(base, path)
 }
 
 export interface AssistantMarkdownProps extends
-  Pick<PropsRenderSlots<'conversation.chat.reasoning.body' | 'conversation.chat.message.images'>, 'renderSlot'>,
+  Pick<PropsRenderSlots<
+    'conversation.chat.reasoning.body' | 'conversation.chat.message.images' | 'conversation.chat.markdown.image'
+  >, 'renderSlot'>,
   Pick<ChatNodeOwnerProps, 'loadImage'> {
   /** Render only the requested business portion, preserving original block indexes. */
   groupPart?: string | undefined
@@ -50,6 +67,10 @@ export interface AssistantMarkdownProps extends
   revealProcess?: (() => void) | undefined
   /** Resolved prose file mentions for this Assistant's closing turn. */
   mentions?: MarkdownFileMentions | undefined
+  /** Session working directory that relative image destinations resolve against, when known. */
+  cwd?: string | undefined
+  /** Stable viewing scope offered to a Markdown image replacement; absent outside a Turn. */
+  imageScope?: string | undefined
   /** The owning view's locale seat, passed down as a plain prop. */
   t: ChatViewSlotProps['t']
 }
@@ -58,14 +79,17 @@ export interface AssistantMarkdownProps extends
 export const AssistantMarkdown = memo(function AssistantMarkdown({
   blocks, streaming, textInteractionSource = false, interrupted, loadImage, groupPart, useDisclosure,
   reasoningHidden = false, usePresentation, revealProcess, mentions, renderSlot, useGroupAction, t,
+  cwd, imageScope,
 }: AssistantMarkdownProps) {
   // Stable per locale revision (t identity changes on switch): a fresh object
   // per render would rebuild MarkdownText's component table every chunk.
   const labels = useMemo(() => markdownLabels(t), [t])
   // MarkdownText memoizes its vocabulary; keep its identity stable across renders.
-  const pathImages = useMemo<MarkdownPathImages>(() => {
-    return { resolve: value => localPathMediaUrl(document.baseURI, value) }
-  }, [])
+  const pathImages = useMemo<MarkdownPathImages>(() => ({
+    resolve: value => localPathMediaUrl(document.baseURI, value),
+    render: (destination, alt, fallback) => renderSlot('conversation.chat.markdown.image',
+      { destination, alt, cwd, scope: imageScope }, { fallback }),
+  }), [cwd, imageScope, renderSlot])
   const last = blocks.length - 1
   // Tool-call heads render as tool rows in the chat view's grouping pass, so
   // a node that is only those heads (or empty) would paint an empty root

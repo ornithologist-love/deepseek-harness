@@ -7,6 +7,7 @@ import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { PresentedOpenController } from './present-open.ts'
 import type { ChangesDiffStore } from './changes-diff.ts'
 import type { ChangesSummaryStore } from './changes-summary.ts'
+import type {} from './file-preview.ts'
 import { ChangedFiles } from './ChangedFiles.tsx'
 import { changesForClosing, presentedForClosing, type ChangesTurnData, type PresentedPath } from './turn-deliverables.ts'
 import type { NS } from './locales.ts'
@@ -16,6 +17,9 @@ import { PresentedFileCard } from './PresentedFileCard.tsx'
 import css from './Deliverables.module.css'
 
 interface DeliverablesMatch { changes: ChangesTurnData | null; presented: readonly PresentedPath[] }
+
+/** Child slots rendered under one delivery: delivered file actions and per-file previews. */
+type DeliverablesChildren = 'deliverables.file.actions' | 'deliverables.file.preview'
 
 const COLLAPSED_PRESENTED_COUNT = 4
 
@@ -48,12 +52,18 @@ export function selectDeliverables(owner: TurnTailOwnerProps): DeliverablesMatch
   return changes === null && presented.length === 0 ? null : { changes, presented }
 }
 
+type DeliverablesTailProps = PropsRuntime<'conversation.chat.turnTail'> & PropsLocale<typeof NS> & InjectFace<DeliverablesInjected> & PropsRenderSlots<DeliverablesChildren>
+
+type DeliverablesBodyProps = Pick<TurnTailOwnerProps, 'openFile' | 'turn'> & {
+  matched: DeliverablesMatch
+} & PropsLocale<typeof NS> & Pick<SessionStandardProps, 'sessionId'> & Pick<GlobalStandardProps, 'useSessions' | 'useContextMenu'> & InjectFace<DeliverablesInjected> & PropsRenderSlots<DeliverablesChildren>
+
 /**
  * Contribute file deliveries alongside other completed-Turn artifacts.
  * @param props - closing Turn, file actions, and localized copy.
  * @returns file rows, or null when the Turn declares none.
  */
-export function DeliverablesTail(props: PropsRuntime<'conversation.chat.turnTail'> & PropsLocale<typeof NS> & InjectFace<DeliverablesInjected> & PropsRenderSlots<'deliverables.file.actions'>) {
+export function DeliverablesTail(props: DeliverablesTailProps) {
   const matched = selectDeliverables(props)
   return matched === null ? null : <Deliverables {...props} matched={matched} />
 }
@@ -62,19 +72,19 @@ export function DeliverablesTail(props: PropsRuntime<'conversation.chat.turnTail
  * Render the changed-files card, once the Host has served the announced
  * summary and it lists a file, and shared native opening controls for declared
  * files. A summary the Host no longer serves leaves no card.
- * @param props - matched announcement and files, workspace opener, and localized copy.
+ * @param props - matched announcement and files, closing Turn, workspace opener, and localized copy.
  * @returns the closing turn's file rows.
  */
 export function Deliverables({
-  matched, openFile, useContextMenu, t, sessionId, useSessions, openPresented, openChangesReview, usePresentedOpen, usePresentedHost,
+  matched, openFile, turn, useContextMenu, t, sessionId, useSessions, openPresented, openChangesReview, usePresentedOpen, usePresentedHost,
   useChangesDiff, loadChangesDiff, useChangesSummary, reloadPresentedHost, loadChangesSummary, useShowCodeDiff, renderSlot,
-}: Pick<TurnTailOwnerProps, 'openFile'> & {
-  matched: DeliverablesMatch
-} & PropsLocale<typeof NS> & Pick<SessionStandardProps, 'sessionId'> & Pick<GlobalStandardProps, 'useSessions' | 'useContextMenu'> & InjectFace<DeliverablesInjected> & PropsRenderSlots<'deliverables.file.actions'>) {
+}: DeliverablesBodyProps) {
   const { getTriggerProps } = useContextMenu()
   const [expanded, setExpanded] = useState(false)
   const showCodeDiff = useShowCodeDiff(value => value)
   const cwd = useSessions(state => state.byId[sessionId]?.cwd)
+  // One preview scope per viewed Session and closing Turn.
+  const previewScope = JSON.stringify([sessionId, turn.turn])
   const states = usePresentedOpen(value => value)
   const host = usePresentedHost(value => value)
   const announced = showCodeDiff ? matched.changes : null
@@ -106,18 +116,21 @@ export function Deliverables({
       </div>}
       {host !== null && host !== 'error' && !host.available && <span className={css.hostStatus}>{t('presented.unavailable')}</span>}
       <div className={css.presented} data-presented-files-row data-single={matched.presented.length === 1 ? true : undefined}>
-        {presented.map(file => <PresentedFileCard key={`${file.seq}:${file.index}`} file={file} cwd={cwd}
-          phase={states[presentedFileUrl(sessionId, file.seq, file.index)]}
-          host={host === 'error' ? null : host} t={t}
-          onPreview={() => { openFile(file.path) }}
-          contextMenuProps={getTriggerProps({ kind: 'file', value: { sessionId, path: file.path } })}
-          actions={renderSlot('deliverables.file.actions', {
-            actionUrl: presentedFileUrl(sessionId, file.seq, file.index),
-            available: host !== null && host !== 'error' && host.available,
-            pending: states[presentedFileUrl(sessionId, file.seq, file.index)] === 'opening'
+        {presented.map(file => <div key={`${file.seq}:${file.index}`} className={css.presentedItem} data-presented-item>
+          {renderSlot('deliverables.file.preview', { file, cwd, scope: previewScope })}
+          <PresentedFileCard file={file} cwd={cwd}
+            phase={states[presentedFileUrl(sessionId, file.seq, file.index)]}
+            host={host === 'error' ? null : host} t={t}
+            onPreview={() => { openFile(file.path) }}
+            contextMenuProps={getTriggerProps({ kind: 'file', value: { sessionId, path: file.path } })}
+            actions={renderSlot('deliverables.file.actions', {
+              actionUrl: presentedFileUrl(sessionId, file.seq, file.index),
+              available: host !== null && host !== 'error' && host.available,
+              pending: states[presentedFileUrl(sessionId, file.seq, file.index)] === 'opening'
               || states[presentedFileUrl(sessionId, file.seq, file.index)] === 'revealing',
-            onAction: (action, application) => openPresented(sessionId, file.seq, file.index, action, application),
-          })} />)}
+              onAction: (action, application) => openPresented(sessionId, file.seq, file.index, action, application),
+            })} />
+        </div>)}
       </div>
       {collapsible && <button type="button" className={css.toggle}
         aria-expanded={expanded}

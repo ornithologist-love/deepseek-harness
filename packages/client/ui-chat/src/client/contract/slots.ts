@@ -299,6 +299,18 @@ export interface CommandRowOwnerProps {
   compaction?: CompactionSummaryNode
 }
 
+/** One settled Markdown image offered to a replacement presentation. */
+export interface MarkdownImageOwnerProps {
+  /** The destination exactly as authored. */
+  readonly destination: string
+  /** Authored description. */
+  readonly alt: string
+  /** Session working directory that relative destinations resolve against, when known. */
+  readonly cwd: string | undefined
+  /** Stable JSON pair of the viewed Session ID and the root Turn number; absent outside a Turn. */
+  readonly scope: string | undefined
+}
+
 /** Full props of a registered command row. */
 export type CommandRowProps = PropsRuntime<'conversation.chat.commandview'>
 
@@ -467,6 +479,21 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.chat.message.images': { kind: 'single'; scope: 'session'; owner: MessageImagesOwnerProps }
     /** User-message images, including pending and local-echo previews, independently replaceable from output images. */
     'conversation.chat.user.images': { kind: 'single'; scope: 'session'; owner: MessageImagesOwnerProps }
+    /**
+     * Settled standalone Markdown image in an Assistant reply, after native URL
+     * validation. Without a contribution the native image and preview render.
+     * @example
+     * return {
+     *   inject: ['slots'],
+     *   apply(ctx) {
+     *     ctx.slots.inject('conversation.chat.markdown.image', () => ctx.slots.register(
+     *       { name: 'conversation.chat.markdown.image' },
+     *       ({ destination, alt }) => React.createElement('figure', null, alt, destination),
+     *     ))
+     *   },
+     * }
+     */
+    'conversation.chat.markdown.image': { kind: 'single'; scope: 'session'; owner: MarkdownImageOwnerProps }
     /**
      * Command row keyed by the command name. The component receives the folded
      * command lifecycle and linked compaction when present. Reusing a key

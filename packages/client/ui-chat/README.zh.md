@@ -47,7 +47,9 @@ Session 作用域的 `conversation.chat.user.content` Factory 只渲染用户内
 
 官方 user 与 steering 共用的渲染器在 `user` 注册项上声明 session-scoped `conversation.chat.user.before` chain slot，并在气泡上方直接通过 `renderSlotChain` 渲染；`steering` 注册项复用该渲染器但不拥有该槽位。owner props 携带 Session 记录的持久化消息 `source` 与行 `kind`；各条目的 `select` 匹配自己负责的来源，首个非 null 结果作为 `matched` 交给获选组件。无匹配时不显示内容。条目自行拥有标记和文案；Chat 不解析消息来源。
 
-独立的 Markdown 图片以内嵌预览显示，点击打开共享图片浮层；本地路径在消息落定后基于当前查看的工作区解析。图片文件链接保持点击打开侧栏，鼠标停留或键盘聚焦时显示缩略图，Esc 关闭缩略图。图片加载失败时保留本地化状态与图片说明；不执行重复图片过滤。
+独立的 Markdown 图片以内嵌预览显示，点击打开共享图片浮层；本地路径在消息落定后基于当前查看的工作区解析。正文书写的 `file:` URL 只要指向本地路径也同样渲染，而原生 Windows 路径中作为文件名一部分的 `%` 保留为字面字符，不按 URL 转义处理。图片文件链接保持点击打开侧栏，鼠标停留或键盘聚焦时显示缩略图，Esc 关闭缩略图。图片加载失败时保留本地化状态与图片说明；不执行重复图片过滤。
+
+Assistant 节点声明 Session 作用域的 `conversation.chat.markdown.image` single Slot，对应一张已通过原生 URL 校验、已经落定的独立 Markdown 图片。其 [`MarkdownImageOwnerProps`](src/client/contract/slots.ts) 提供正文书写的 `destination`、书写的 `alt`、当前查看 Session 的 `cwd`，以及由 Session id 与所属轮次编号组成的 `scope`。没有贡献时原生图片及其预览保持原样渲染；流式回复中的图片和链接内的图片不会提供出去。替换实现拿不到原生图片，需要自行负责展示。
 
 设置 → 通用设置 → 网页链接默认打开方式控制普通点击 Chat HTTP(S) 链接时的目标：「应用内侧边栏」（默认）打开新的右侧 Sidebar Browser tab，「默认浏览器」打开外部标签页。该设置项位于快捷键之后，仅在 Sidebar Browser 可用时显示。若 Sidebar Browser 未注册，两种选择均使用外部浏览器；带修饰键的点击保留原生行为。已认证浏览器的 `ui-chat.linkOpening` 偏好在 Host 上持久化，设置无法持久化写入时仅在当前进程内生效。已发送的文件引用及消息日志确认调用的 skill 也可在右侧栏打开预览。文件路径使用当前查看的 Session；skill 名称由该 Session 当前的输入触发源解析。两者悬停或聚焦时均使用正文文件链接的虚线下划线。会话、目录和命令标签仍只作为引用展示。
 

@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-context-menu/client'
  * surface; the owning view renders an empty list and inert prose at zero cost.
  */
 import './file-actions.ts'
+import './file-preview.ts'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-connection/client'
@@ -67,7 +68,10 @@ export function apply(ctx: ClientContext): void {
       name: 'conversation.chat.turnTail',
       id: '@deepseek-ai/dsh-client-ui-deliverables',
       locale: NS,
-      children: { 'deliverables.file.actions': { kind: 'list', scope: 'session' } },
+      children: {
+        'deliverables.file.actions': { kind: 'list', scope: 'session' },
+        'deliverables.file.preview': { kind: 'list', scope: 'session' },
+      },
       inject: (): DeliverablesInjected => ({
         hooks: { changesDiff: diffs.state, presentedOpen: opener.state, presentedHost: opener.host, changesSummary: summaries.state,
           showCodeDiff: ctx.configForms.developerTools.enabled },

@@ -37,7 +37,7 @@ export type {
   AssistantActionOwnerProps, ChatFileMentions, ChatNodeHookContext, ChatNodeInjected, ChatNodeOwnerProps,
   ChatNodeViewProps, ChatScrollPosition, ChatStore, ChatViewInjected, ChatViewSlotProps,
   ChatFlowDataInjected, ChatFlowHookContext, ChatFlowInjected, ChatFlowOwnerProps, ChatFlowSlotProps, UseGroupHeaderAction,
-  CommandRowOwnerProps, CommandRowProps, MessageImagesProps, OpenFileOptions, PresentationInjected,
+  CommandRowOwnerProps, CommandRowProps, MarkdownImageOwnerProps, MessageImagesProps, OpenFileOptions, PresentationInjected,
   QuotaNoticeCode, QuotaNoticeHostProps, QuotaNoticeInjected, QuotaNoticeOwnerProps, QuotaNoticeState,
   ReasoningBodyOwnerProps, ReasoningContentInput, UserContentAttachment, UserContentData, UserContentInput,
   UserBeforeOwnerProps,
