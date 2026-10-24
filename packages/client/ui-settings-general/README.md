@@ -51,6 +51,10 @@ The General section holds the built-in Coding Tools and Current version rows alo
 
 On a loopback browser, the shell renders **Open configuration file** only when the Host confirms that a provider-owned local document can be prepared. The action opens that document in the native text editor (bypassing the browser file association on macOS). Remote browsers never register this native-open action, including on configured public deployments; their preferences persist through the Host settings service.
 
+### Opening settings from another plugin
+
+`ctx.settingsShell.open(sectionId?)` opens the dialog at a registered `settings.section`, so a feature can send the user straight to its own settings (for example, a missing-credential prompt opening the models section). Without an id, or with an unregistered one, the dialog shows the first section. The service drives the same shell state as the Settings button and the `settings.open` command, and exists while the shell is registered.
+
 ### Onboarding steps
 
 The onboarding ledger projects in ascending order and mounts exactly one step at a time. Registrants own durable completion, capability readiness, copy, mutations, and their visible wrapper, so independently registered flows cannot stack and the shell does not become a second configuration fact source. Visible steps own their dialog chrome and app-root `inert` lifecycle.
