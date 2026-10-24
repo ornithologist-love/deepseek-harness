@@ -158,7 +158,8 @@ export function AppFrame({
   }, [actions])
 
   const narrow = viewport < SIDEBAR_AUTO_COLLAPSE
-  const sidebarCollapsed = narrow ? !layoutInfo.narrowExpanded : layoutInfo.sidebar === 0
+  const sidebarHidden = layoutInfo.sidebarHidden
+  const sidebarCollapsed = sidebarHidden || (narrow ? !layoutInfo.narrowExpanded : layoutInfo.sidebar === 0)
   const sidebarPreference = sidebarCollapsed
     ? 0
     : layoutInfo.sidebar === 0 ? SIDEBAR_DEFAULT : layoutInfo.sidebar
@@ -166,7 +167,7 @@ export function AppFrame({
   // Desktop reopen controls occupy the frame's shell.leading seat (macOS) or
   // the Windows caption row; neither platform keeps an icon rail.
   const darwin = document.documentElement.dataset.platform === 'darwin'
-  const collapsedWidth = darwin
+  const collapsedWidth = sidebarHidden || darwin
     || document.documentElement.hasAttribute('data-windows-titlebar') ? 0 : SIDEBAR_COLLAPSED
   // Opening on a narrow frame collapses the left sidebar. Eligibility must
   // include that space before the occupant's first shown report arrives.
@@ -278,7 +279,7 @@ export function AppFrame({
         usePanelInfo={usePanelInfo}
       />
       <div className={css.sidebarCol}>
-        {sidebar}
+        {!sidebarHidden && sidebar}
       </div>
       <>
         <CenterColumn>{main}</CenterColumn>
@@ -292,7 +293,7 @@ export function AppFrame({
       <div className={css.overlayLayer} data-shell-overlay>
         {overlays}
       </div>
-      {leadingMounted && (
+      {!sidebarHidden && leadingMounted && (
         <div className={css.leadingSeat} data-shell-leading>
           {leading}
         </div>

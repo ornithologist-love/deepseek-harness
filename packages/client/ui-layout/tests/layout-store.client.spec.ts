@@ -14,6 +14,7 @@ describe('createLayoutStore', () => {
       panelInfo: { activePanelId: null },
       layoutInfo: {
         sidebar: 280,
+        sidebarHidden: false,
         viewportWidth: 1920,
         narrowExpanded: false,
         rightbar: null,
@@ -51,6 +52,16 @@ describe('createLayoutStore', () => {
     expect(store.getSnapshot().layoutInfo.sidebar).toBe(0)
     actions.toggleSidebar()
     expect(store.getSnapshot().layoutInfo.sidebar).toBe(280)
+  })
+
+  it('ignores toggles while the sidebar is hidden and keeps its preference', () => {
+    const { store, actions } = createLayoutStore().create()
+    actions.setSidebar(400)
+    actions.setSidebarHidden(true)
+    actions.toggleSidebar()
+    expect(store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 400, sidebarHidden: true })
+    actions.setSidebarHidden(false)
+    expect(store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 400, sidebarHidden: false })
   })
 
   it('keeps the sidebar preference while toggling its narrow override', () => {

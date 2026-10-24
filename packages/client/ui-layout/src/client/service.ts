@@ -42,6 +42,13 @@ export interface ILayout {
   /** Toggle the sidebar panel (closed ⟷ contract default width). */
   toggleSidebar(): void
   /**
+   * Remove or restore the sidebar column for this document. While hidden the
+   * frame draws no sidebar and no reopen control, and toggles are ignored;
+   * the width preference is kept for when it is restored.
+   * @param hidden - true for embedders that present a single Conversation.
+   */
+  setSidebarHidden(hidden: boolean): void
+  /**
    * Report the right panel's presentation without changing its expanded state.
    * @param track - whether the normal panel width reserves a grid track,
    *   including beneath a fullscreen overlay.
@@ -92,6 +99,11 @@ export class LayoutController implements ILayout {
   /** Toggle the sidebar panel (closed ⟷ contract default width). */
   toggleSidebar(): void {
     this.panels.toggleSidebar()
+  }
+
+  /** Remove or restore the sidebar column for this document. */
+  setSidebarHidden(hidden: boolean): void {
+    this.panels.setSidebarHidden(hidden)
   }
 
   /** Report the right panel's track and fullscreen presentation. */
