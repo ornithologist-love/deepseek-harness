@@ -1,10 +1,16 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import type { ReactNode } from 'react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownText } from './markdown-test-components.tsx'
 import type { MarkdownPathImages } from '../src/markdown/MarkdownText.tsx'
 
-afterEach(cleanup)
+afterEach(() => { cleanup(); vi.restoreAllMocks() })
+
+/** Mount a rendered subtree the renderer handed back as an opaque node. */
+function renderView(node: ReactNode) {
+  return render(<>{node}</>).container
+}
 
 const LOCAL_IMAGE = '![diagram](/tmp/graph.png)'
 
@@ -115,5 +121,48 @@ describe('MarkdownText local-path images', () => {
     rerender(<MarkdownText text={LOCAL_IMAGE} pathImages={pathImages} />)
     expect(container.querySelector('img')?.getAttribute('src'))
       .toBe('https://cdn.example.com/graph.png')
+  })
+})
+
+describe('MarkdownText image renderer', () => {
+  it('hands a settled standalone image to the renderer with its native fallback', () => {
+    const renderImage = vi.fn<(destination: string, alt: string, fallback: ReactNode) => ReactNode>(
+      () => <span data-testid="replacement">replaced</span>,
+    )
+    const { container } = render(<MarkdownText text={LOCAL_IMAGE}
+      pathImages={{ resolve: mapping, render: renderImage }} />)
+    expect(container.querySelector('[data-testid="replacement"]')).toBeTruthy()
+    // The replacement decides what renders, so the native image stays out of the document.
+    expect(container.querySelector('img')).toBeNull()
+    expect(renderImage).toHaveBeenCalledOnce()
+    const [destination, alt, fallback] = renderImage.mock.calls[0]!
+    expect(destination).toBe('/tmp/graph.png')
+    expect(alt).toBe('diagram')
+    const native = renderView(fallback)
+    expect(native.querySelector('img')?.getAttribute('src')).toBe('https://cdn.example.com/graph.png')
+    expect(native.querySelector('img')?.getAttribute('alt')).toBe('diagram')
+  })
+
+  it('keeps the native image while streaming', () => {
+    const renderImage = vi.fn<(destination: string, alt: string, fallback: ReactNode) => ReactNode>(
+      () => <span data-testid="replacement">replaced</span>,
+    )
+    const { container } = render(<MarkdownText text={LOCAL_IMAGE} streaming
+      pathImages={{ resolve: mapping, render: renderImage }} />)
+    expect(renderImage).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-testid="replacement"]')).toBeNull()
+    expect(container.querySelector('img')).toBeNull()
+    expect(screen.getByText('diagram')).toBeTruthy()
+  })
+
+  it('keeps the native image inside a link', () => {
+    const renderImage = vi.fn<(destination: string, alt: string, fallback: ReactNode) => ReactNode>(
+      () => <span data-testid="replacement">replaced</span>,
+    )
+    const { container } = render(<MarkdownText text="[![a](/tmp/graph.png)](https://e.com)"
+      pathImages={{ resolve: mapping, render: renderImage }} />)
+    expect(renderImage).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-testid="replacement"]')).toBeNull()
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('https://cdn.example.com/graph.png')
   })
 })

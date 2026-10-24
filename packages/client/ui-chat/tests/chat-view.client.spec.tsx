@@ -430,7 +430,9 @@ function makeHarness(
     return imageSlotOverride?.(owner) ?? options?.fallback ?? null
   }
   const renderAssistantSlot: React.ComponentProps<typeof AssistantNodeView>['renderSlot'] = (name, owner, options) =>
-    name === 'conversation.chat.message.images' ? renderImages(name, owner, options) : renderReasoningSlot(name, owner, options)
+    name === 'conversation.chat.message.images'
+      ? renderImages(name, owner, options)
+      : renderReasoningSlot(name, owner, options)
   const renderNodeSlot: NodeRenderer = (key, owner, opts) => {
     if (nodeSlotOverride !== undefined) return nodeSlotOverride(key, owner, opts)
     return <HarnessChatNode standard={props} owner={owner}

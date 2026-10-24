@@ -161,6 +161,14 @@ export interface MarkdownPathImages {
    * names no displayable image — it then stays inert alt text.
    */
   resolve(value: string): string | undefined
+  /**
+   * Render a settled standalone image after native URL validation.
+   * @param destination - Original authored image destination.
+   * @param alt - Authored description.
+   * @param fallback - Native image and preview, retained when no product renderer applies.
+   * @returns Replacement presentation or the unchanged native fallback.
+   */
+  render?: ((destination: string, alt: string, fallback: ReactNode) => ReactNode) | undefined
 }
 
 /**
@@ -638,7 +646,10 @@ function MarkdownImage({ destination, alt, pathImages, streaming, inLink }: {
   const file = streaming ? undefined : parseFileLink(destination)
   const src = (file === undefined ? undefined : fileImages?.resolve(file.path)) ?? imageSource(destination, pathImages)
   if (src === undefined) return <span className={css.imageAlt}>{alt}</span>
-  return <LoadedMarkdownImage key={src} src={src} alt={alt} destination={destination} preview={inLink ? undefined : fileImages} />
+  const fallback = <LoadedMarkdownImage key={src} src={src} alt={alt} destination={destination} preview={inLink ? undefined : fileImages} />
+  return !streaming && !inLink && pathImages?.render !== undefined
+    ? pathImages.render(destination, alt, fallback)
+    : fallback
 }
 
 function LoadedMarkdownImage({ src, alt, destination, preview }: {

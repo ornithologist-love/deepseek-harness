@@ -4,12 +4,14 @@ import type { ChatNodeViewProps, PresentationInjected, TurnTailOwnerProps } from
 import { AssistantMarkdown } from './AssistantMarkdown.tsx'
 
 type AssistantNodeViewProps = ChatNodeViewProps<'assistant-step'> & InjectFace<PresentationInjected>
-  & PropsRenderSlots<'conversation.chat.reasoning.body' | 'conversation.chat.message.images'>
+  & PropsRenderSlots<
+    'conversation.chat.reasoning.body' | 'conversation.chat.message.images' | 'conversation.chat.markdown.image'
+  >
 
 /** Streaming, settled, and interrupted Assistant states share one keyed renderer instance. */
 export const AssistantNodeView = memo(function AssistantNodeView({
   node, groupPart, useDisclosure, useGroupAction, useTurnData, turnProcess, openFile, loadImage, fileMentions,
-  usePresentation, renderSlot, t,
+  usePresentation, renderSlot, t, cwd, sessionId,
 }: AssistantNodeViewProps) {
   const data = node.data
   const turn = node.location.kind === 'turn' || node.location.kind === 'step'
@@ -31,6 +33,8 @@ export const AssistantNodeView = memo(function AssistantNodeView({
     && turnProcess.spec.inlineReasoning
     && !turnProcess.open
   const revealProcess = useCallback(() => { turnProcess?.setOpen(true) }, [turnProcess])
+  // One image-preview scope per viewed Session and root Turn.
+  const imageScope = turn === undefined ? undefined : JSON.stringify([sessionId, turn.turn])
   return (
     <AssistantMarkdown
       blocks={data.blocks}
@@ -45,6 +49,8 @@ export const AssistantNodeView = memo(function AssistantNodeView({
       renderSlot={renderSlot}
       revealProcess={revealProcess}
       mentions={mentions}
+      cwd={cwd}
+      imageScope={imageScope}
       t={t}
     />
   )

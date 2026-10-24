@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { fileMediaUrl } from '@deepseek-ai/dsh-util-workspace-path'
 import { AssistantMarkdown, localPathMediaUrl } from '../src/client/chat/AssistantMarkdown.tsx'
+import type { AssistantMarkdownProps } from '../src/client/chat/AssistantMarkdown.tsx'
 import { useDetailedPresentation } from './presentation-fixture.client.ts'
 import { unusedImageLoader } from './reasoning-component-fixture.tsx'
 import { useDisclosure } from '../src/client/chat/use-disclosure.ts'
@@ -12,6 +14,9 @@ import type { AssistantBlock } from '../src/client/contract/snapshot.ts'
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
 
 const t = ((_key: string) => 'label') as ChatViewSlotProps['t']
+
+/** Child dispatch stub without contributions: every child keeps its native fallback. */
+const renderNativeFallback: AssistantMarkdownProps['renderSlot'] = (_key, _owner, options) => options?.fallback ?? null
 
 function textBlock(text: string): AssistantBlock {
   return { kind: 'text', text }
@@ -53,13 +58,41 @@ describe('localPathMediaUrl', () => {
     expect(localPathMediaUrl(BASE, '/tmp/my graph.png'))
       .toBe(`${BASE}api/file?path=${encodeURIComponent('/tmp/my graph.png')}`)
   })
+
+  it('resolves local file URLs that name a local path', () => {
+    const cases = [
+      ['file:///tmp/a.png', '/tmp/a.png'],
+      ['file:///C:/work/a%20b.png', 'C:/work/a b.png'],
+      ['file://localhost/tmp/a.png', '/tmp/a.png'],
+    ] as const
+    for (const [authored, path] of cases) {
+      expect(localPathMediaUrl(BASE, authored)).toBe(fileMediaUrl(BASE, path))
+      expect(new URL(localPathMediaUrl(BASE, authored)!).searchParams.get('path')).toBe(path)
+    }
+  })
+
+  it('keeps file URLs inert when they name no local file', () => {
+    expect(localPathMediaUrl(BASE, 'file://server/share/a.png')).toBeUndefined()
+    expect(localPathMediaUrl(BASE, 'file:///tmp/%E0%A4%A.png')).toBeUndefined()
+    expect(localPathMediaUrl(BASE, 'file://[')).toBeUndefined()
+  })
+
+  it('keeps a literal percent sign in a raw Windows path', () => {
+    expect(new URL(localPathMediaUrl(BASE, 'C:\\data\\50%off.png')!).searchParams.get('path'))
+      .toBe('C:\\data\\50%off.png')
+    expect(localPathMediaUrl(BASE, 'C:\\data\\50%off.png')).toBe(fileMediaUrl(BASE, 'C:\\data\\50%off.png'))
+  })
+
+  it('keeps invalid percent encoding inert outside Windows paths', () => {
+    expect(localPathMediaUrl(BASE, '/tmp/50%off.png')).toBeUndefined()
+  })
 })
 
 describe('AssistantMarkdown local-path images', () => {
   it.each([BASE, 'dsh-app://app/'])('renders a local image in closing prose through %s', (base) => {
     vi.spyOn(document, 'baseURI', 'get').mockReturnValue(base)
     const { container } = render(
-      <AssistantMarkdown renderSlot={() => null} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
+      <AssistantMarkdown renderSlot={renderNativeFallback} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
         usePresentation={useDetailedPresentation}
         blocks={[textBlock('See ![diagram](/tmp/graph.png) for the layout.')]}
         streaming={false}
@@ -77,7 +110,7 @@ describe('AssistantMarkdown local-path images', () => {
 
   it('keeps non-absolute destinations inert', () => {
     const { container } = render(
-      <AssistantMarkdown renderSlot={() => null} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
+      <AssistantMarkdown renderSlot={renderNativeFallback} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
         usePresentation={useDetailedPresentation}
         blocks={[textBlock('See ![diagram](relative.png).')]}
         streaming={false}
@@ -87,6 +120,56 @@ describe('AssistantMarkdown local-path images', () => {
     )
     expect(container.querySelector('img')).toBeNull()
     expect(container.textContent).toContain('diagram')
+  })
+})
+
+describe('AssistantMarkdown Markdown image Slot', () => {
+  const IMAGE_MARKDOWN = 'See ![diagram](/tmp/graph.png) for the layout.'
+  const CWD = 'C:\\work\\proj'
+
+  it('renders a settled image through a contributed replacement', () => {
+    vi.spyOn(document, 'baseURI', 'get').mockReturnValue(BASE)
+    const renderSlot = vi.fn<AssistantMarkdownProps['renderSlot']>(() => (
+      // The replacement replaces the native presentation entirely.
+      <span data-testid="replacement">replaced</span>
+    ))
+    const { container } = render(
+      <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
+        usePresentation={useDetailedPresentation}
+        blocks={[textBlock(IMAGE_MARKDOWN)]}
+        streaming={false}
+        loadImage={unusedImageLoader}
+        cwd={CWD}
+        imageScope={JSON.stringify(['s1', 3])}
+        t={t}
+      />,
+    )
+    expect(container.querySelector('[data-testid="replacement"]')).toBeTruthy()
+    expect(container.querySelector('img')).toBeNull()
+    expect(renderSlot).toHaveBeenCalledWith('conversation.chat.markdown.image', {
+      destination: '/tmp/graph.png',
+      alt: 'diagram',
+      cwd: CWD,
+      scope: JSON.stringify(['s1', 3]),
+    }, { fallback: expect.anything() })
+  })
+
+  it('keeps the native image when no replacement is contributed', () => {
+    vi.spyOn(document, 'baseURI', 'get').mockReturnValue(BASE)
+    const renderSlot = vi.fn<AssistantMarkdownProps['renderSlot']>((_name, _owner, options) => options?.fallback ?? null)
+    const { container } = render(
+      <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
+        usePresentation={useDetailedPresentation}
+        blocks={[textBlock(IMAGE_MARKDOWN)]}
+        streaming={false}
+        loadImage={unusedImageLoader}
+        t={t}
+      />,
+    )
+    expect(container.querySelector('[data-testid="replacement"]')).toBeNull()
+    const image = container.querySelector('img')
+    expect(image?.getAttribute('alt')).toBe('diagram')
+    expect(new URL(image?.getAttribute('src') ?? '').searchParams.get('path')).toBe('/tmp/graph.png')
   })
 })
 
