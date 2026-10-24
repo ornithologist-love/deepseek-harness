@@ -53,6 +53,8 @@ export class AgentPresetRegistry extends TypertRemoteService {
   static inject = ['loader', 'sessionProjections']
   static Config = z.object({
     default: z.string().required(),
+    hiddenPresetPrefixes: z.array(z.string()).default([]),
+    lockedPresetPrefixes: z.array(z.string()).default([]),
     selectedDefault: z.string().volatile(),
   })
   private readonly owner: Context
@@ -194,7 +196,9 @@ export class AgentPresetRegistry extends TypertRemoteService {
   @Remote('list')
   async remoteExportList(): Promise<AgentPresetRoster> {
     const defaultId = this.defaultId
-    return { presets: (await this.list()).map(row => ({ ...row, isDefault: row.id === defaultId })) }
+    const hidden = this.config.hiddenPresetPrefixes ?? []
+    return { presets: (await this.list()).filter(row => !hidden.some(prefix => row.id.startsWith(prefix)))
+      .map(row => ({ ...row, isDefault: row.id === defaultId })) }
   }
 
   /** Resolve an identity without starting an Agent.
@@ -348,6 +352,9 @@ export class AgentPresetRegistry extends TypertRemoteService {
   @Remote('select')
   async select(agent: Agent, agentPreset: string): Promise<string> {
     const turn = (this.switches.get(agent.id) ?? Promise.resolve()).then(async () => {
+      if ((this.config.lockedPresetPrefixes ?? []).some(prefix => agentPreset.startsWith(prefix))) {
+        throw new RemoteError('agent-preset/locked', 'The deployment reserves this preset for its own flows', { sessionId: agent.id, agentPreset })
+      }
       const boundary = this.owner.sessionProjections.stateOf(agent.session, 'turnBoundary')
       if (boundary !== undefined && (boundary.openTurnStartSeq !== null || boundary.lastTurn > 0)) {
         throw new RemoteError('agent-preset/locked', 'This session has already started', { sessionId: agent.id, agentPreset })

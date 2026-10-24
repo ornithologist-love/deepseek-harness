@@ -411,3 +411,15 @@ it('reports every process-global service published by a preset', async () => {
   await declare(ctx, { id: 'leaks', plugins: [{ name: 'cordis:leaks' }] })
   expect((await ctx.agentPresets.resolve('leaks')).broken).toContain('presetAlpha, presetZulu')
 })
+
+it('leaves hidden presets out of the roster and rejects remote selection of locked presets', async () => {
+  const ctx = await harness({ config: { hiddenPresetPrefixes: ['reserved-'], lockedPresetPrefixes: ['reserved-'] } })
+  contexts.push(ctx)
+  await declare(ctx, contribution('standard'))
+  await declare(ctx, { ...contribution('reserved'), id: 'reserved-agent' })
+  expect((await ctx.agentPresets.remoteExportList()).presets.map(row => row.id)).toEqual(['standard'])
+  expect(await ctx.agentPresets.resolve('reserved-agent')).toMatchObject({ id: 'reserved-agent' })
+  const agent = await agentOn(ctx, 'locked')
+  await expect(ctx.agentPresets.select(agent, 'reserved-agent')).rejects.toThrow('reserves this preset')
+  expect(ctx.sessionProjections.stateOf(agent.session, 'agentPreset')).not.toBe('reserved-agent')
+})
