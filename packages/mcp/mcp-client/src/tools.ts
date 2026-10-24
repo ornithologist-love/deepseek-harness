@@ -61,8 +61,9 @@ const IMAGE_MEDIA_TYPES: readonly ImageMediaType[] = [
   'image/gif',
 ]
 
-/** Canonical RFC 4648 base64, excluding whitespace and URL-safe aliases. */
-const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
+/** Character admission only; the Buffer round-trip below validates lengths and pad bits.
+ * A flat expression avoids V8's recursive regexp stack limit on large images. */
+const CANONICAL_BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
 
 /**
  * Derive the model-facing public name for one MCP tool.
