@@ -29,3 +29,7 @@
     background: var(--dsw-alias-interactive-bg-hover);
   }
 }
+
+@media (pointer: coarse) {
+  .iconButton { width: 44px; height: 44px; }
+}

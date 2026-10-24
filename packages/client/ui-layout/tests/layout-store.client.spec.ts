@@ -14,8 +14,10 @@ describe('createLayoutStore', () => {
       panelInfo: { activePanelId: null },
       layoutInfo: {
         sidebar: 280,
+        sidebarHidden: false,
         viewportWidth: 1920,
         narrowExpanded: false,
+        singleColumn: false,
         rightbar: null,
         rightbarShown: false,
         rightbarTrack: false,
@@ -53,6 +55,16 @@ describe('createLayoutStore', () => {
     expect(store.getSnapshot().layoutInfo.sidebar).toBe(280)
   })
 
+  it('ignores toggles while the sidebar is hidden and keeps its preference', () => {
+    const { store, actions } = createLayoutStore().create()
+    actions.setSidebar(400)
+    actions.setSidebarHidden(true)
+    actions.toggleSidebar()
+    expect(store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 400, sidebarHidden: true })
+    actions.setSidebarHidden(false)
+    expect(store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 400, sidebarHidden: false })
+  })
+
   it('keeps the sidebar preference while toggling its narrow override', () => {
     const { store, actions } = createLayoutStore().create()
     actions.setSidebar(400)
@@ -74,6 +86,14 @@ describe('createLayoutStore', () => {
     expect(store.getSnapshot().layoutInfo.narrowExpanded).toBe(false)
     actions.setViewportWidth(980)
     expect(store.getSnapshot().layoutInfo.narrowExpanded).toBe(false)
+  })
+
+  it('replaces the narrow sidebar page when the right panel opens', () => {
+    const { store, actions } = createLayoutStore().create()
+    actions.setViewportWidth(980)
+    actions.toggleSidebar()
+    actions.openRightbar(true, false)
+    expect(store.getSnapshot().layoutInfo).toMatchObject({ narrowExpanded: false, rightbarShown: true })
   })
 })
 
@@ -204,8 +224,9 @@ describe('right panel', () => {
     actions.openRightbar(true, false)
     expect(store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 400, narrowExpanded: false })
     actions.toggleSidebar()
-    actions.openRightbar(true, true)
     expect(store.getSnapshot().layoutInfo.narrowExpanded).toBe(true)
+    actions.openRightbar(true, true)
+    expect(store.getSnapshot().layoutInfo.narrowExpanded).toBe(false)
     actions.closeRightbar()
     actions.openRightbar(true, false)
     expect(store.getSnapshot().layoutInfo.narrowExpanded).toBe(false)

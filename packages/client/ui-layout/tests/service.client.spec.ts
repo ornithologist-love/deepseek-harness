@@ -9,6 +9,7 @@ function fakePanels(): PanelActions {
     retainMainPanels: vi.fn(),
     setSidebar: vi.fn(),
     toggleSidebar: vi.fn(),
+    setSidebarHidden: vi.fn(),
     setViewportWidth: vi.fn(),
     setRightbar: vi.fn(),
     openRightbar: vi.fn(),
@@ -41,6 +42,16 @@ describe('LayoutController', () => {
     service.toggleSidebar()
 
     expect(panels.toggleSidebar).toHaveBeenCalledTimes(1)
+    expect(panels.setSidebar).not.toHaveBeenCalled()
+  })
+
+  it('forwards sidebar removal to the constructor-supplied actions', () => {
+    const panels = fakePanels()
+    const service = new LayoutController(panels, () => true, createSnapshotStore({ activePanelId: null }))
+
+    service.setSidebarHidden(true)
+
+    expect(panels.setSidebarHidden).toHaveBeenCalledWith(true)
     expect(panels.setSidebar).not.toHaveBeenCalled()
   })
 
