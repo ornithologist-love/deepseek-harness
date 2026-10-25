@@ -148,6 +148,10 @@ export type Config = PresetDefinition
 export interface Config {
   /** Deployment default when the caller omits a preset. */
   default: string
+  /** Preset ID prefixes left out of the remote roster; the presets stay resolvable and mountable. */
+  hiddenPresetPrefixes?: string[]
+  /** Preset ID prefixes the remote `select` refuses; Host-side composition may still assign them. */
+  lockedPresetPrefixes?: string[]
   /** User-selected default; edited through Settings. */
   selectedDefault: Volatile<string | undefined>
 }
@@ -222,15 +226,19 @@ export interface Config {
 ## `@deepseek-ai/dsh-api-session-controller`
 
 - `inject`: `agentDefaultModel` · `agents` · `attachments` · `fileUploads` · `fs` · `llm` · `remoteAccess` · `sessions` · `sessionProjections` · `sessionQuery` · `typert` · `workspaceRegistry`
-- `source`: [`packages/api/session-controller/src/index.ts:94`](../packages/api/session-controller/src/index.ts)
+- `source`: [`packages/api/session-controller/src/index.ts:129`](../packages/api/session-controller/src/index.ts)
 
 ```ts config-catalog
 /** Session Controller deployment policy. */
 export interface Config {
+  /** Save composer drafts separately and activate Agents only for execution. */
+  readonly configurationDirectory?: string
   /** Override platform desktop-opener detection. */
   readonly nativeOpen?: boolean
   /** Positive integral milliseconds of list work before yielding between complete rows. */
   readonly listWorkSliceMs?: number
+  /** Reject commands until the deployment policy is mounted. */
+  readonly policyRequired?: boolean
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-api-session-controller -->
@@ -608,13 +616,34 @@ export type OnboardingProcess = 'compact' | 'standard' | 'detailed'
 
 ## `@deepseek-ai/dsh-client-ui-settings-models`
 
-- `source`: [`packages/client/ui-settings-models/src/onboarding-config.ts:6`](../packages/client/ui-settings-models/src/onboarding-config.ts)
+- `source`: [`packages/client/ui-settings-models/src/onboarding-config.ts:16`](../packages/client/ui-settings-models/src/onboarding-config.ts)
 
 ```ts config-catalog
 /** Onboarding options after schema defaults are applied. */
 export interface Config {
   /** Offer the browser API-key step when no native shell owns credential onboarding. */
   credentialOnboarding: boolean
+  /** Whether to register the preview welcome notice among the `settings.onboarding` steps (the entry whose id is `welcome-notice`). */
+  welcomeNotice: boolean
+  /**
+   * Provider routes whose model catalog the deployment manages: their card
+   * edits credentials only and shows no custom-provider tag.
+   */
+  credentialOnlyProviders: string[]
+  /** Provider icon per provider route id. */
+  providerIcons: Record<string, ProviderIconConfig>
+  /** Explicit editor family per adapter settings namespace; unlisted namespaces keep the built-in mapping. */
+  providerEditorLayouts: Record<string, 'deepseek' | 'pi-ai'>
+}
+
+/** One configured provider icon. */
+export interface ProviderIconConfig {
+  /** Image URL the row and editor title render. */
+  src: string
+  /** Paint the image as a mask filled with the current text color. */
+  monochrome?: boolean
+  /** Uniform scale applied to the icon. */
+  scale?: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-settings-models -->
@@ -2677,7 +2706,7 @@ export interface Config {
 
 - `inject`: `sessionProjections`
 - `refs`: [`SandboxMode`](subsystems/sandbox.zh.md)
-- `source`: [`packages/sandbox/sandbox-policy/src/index.ts:71`](../packages/sandbox/sandbox-policy/src/index.ts)
+- `source`: [`packages/sandbox/sandbox-policy/src/index.ts:74`](../packages/sandbox/sandbox-policy/src/index.ts)
 
 ```ts config-catalog
 /**
