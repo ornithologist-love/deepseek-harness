@@ -59,7 +59,7 @@ vi.mock('@deepseek-ai/dsh-sandbox-windows-acl', () => {
         throw new Error(`Windows ACL temp root must be outside the workspace: workspace=${workspaceRoot}; temp=${tempRoot}`)
       }
     },
-    workspaceWriteSid: () => 'S-1-4-42-42',
+    memberSetWriteSid: () => 'S-1-4-42-42',
     tempWriteSid: (path: string) => `TEMP:${path}`,
   }
 })
@@ -230,6 +230,28 @@ describe('windows-acl write grants (LocalSandboxProvider)', () => {
       expect(flag(moved.argv, '--temp')).not.toBe(flag(parent.argv, '--temp'))
       expect(mockState.grants).toHaveLength(5) // workspace A + two temps + workspace B + one temp
 
+      await fiber.dispose()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('a multi-folder workspace passes every member and grants them under one standing capability', async () => {
+    try {
+      const { sandbox, fiber } = await setup()
+      const primary = workspaceRoot()
+      const member = workspaceRoot()
+      scratch.push(primary, member)
+      const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: primary, workspaceRoots: [primary, member], sessionId: SessionId('members') }
+      const confined = await sandbox.confine(['true'], policy)
+      expect(confined.argv.slice(2, 6)).toEqual(['--workspace', primary, '--workspace', member])
+      expect(flag(confined.argv, '--write-sid')).toBe(WORKSPACE_SID)
+      expect(mockState.grants[0]).toEqual(expect.objectContaining({
+        writeSid: WORKSPACE_SID,
+        added: [{ path: primary, standing: true }, { path: member, standing: true }],
+      }))
+      await sandbox.confine(['true'], { ...policy, workspaceRoots: [member, primary], sessionId: SessionId('other') })
+      expect(mockState.grants.filter(grant => grant.added.some(added => added.standing))).toHaveLength(1)
       await fiber.dispose()
     } finally {
       cleanup()

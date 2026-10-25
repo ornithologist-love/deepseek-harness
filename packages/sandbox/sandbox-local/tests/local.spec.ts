@@ -94,6 +94,12 @@ describe('profile dialects', () => {
     expect(landlockProfileArgs(WW)).toEqual(['--ro', '/', '--rw', '/dev/null', '--rw', '/tmp', '--rw', '/ws'])
   })
 
+  it('bwrap and landlock workspace-write grant every workspace member once', () => {
+    const members = { ...WW, workspaceRoots: ['/ws', '/engine'] }
+    expect(bwrapProfileArgs(members).slice(9)).toEqual(['--tmpfs', '/tmp', '--bind', '/ws', '/ws', '--bind', '/engine', '/engine'])
+    expect(landlockProfileArgs(members)).toEqual(['--ro', '/', '--rw', '/dev/null', '--rw', '/tmp', '--rw', '/ws', '--rw', '/engine'])
+  })
+
   it('seatbelt read-only: allow-default with every file write denied except the /dev/null literal', () => {
     expect(seatbeltProfileArgs(RO)).toEqual(['-p', SEATBELT_RO_PROFILE])
   })

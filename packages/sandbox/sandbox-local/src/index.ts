@@ -6,8 +6,8 @@
  * than returning the original argv.
  *
  * The windows-acl rung additionally owns the write grants: the write SID is
- * the per-WORKSPACE identity derived from the canonical workspace path
- * (`workspaceWriteSid`), while every live session receives a RANDOM private
+ * the per-WORKSPACE identity derived from the canonical member paths
+ * (`memberSetWriteSid`; one member keeps `workspaceWriteSid`), while every live session receives a RANDOM private
  * temp directory and its own derived capability (`tempWriteSid`). The
  * workspace-root ACE materializes once per workspace per server lifetime
  * and STANDS (the cross-session reuse cache — the exact-ACE skip makes
@@ -37,7 +37,7 @@ import z from '@deepseek-ai/schemastery'
 import { SandboxProvider, SandboxUnavailableError, canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, ConfinedSandboxMode, RunnerFailureRule, SandboxEnforcement, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { AclWriteGrant, assertTempRootOutsideWorkspace, registerAclDiagnosisSkill, tempWriteSid, workspaceWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
+import { AclWriteGrant, assertTempRootOutsideWorkspace, memberSetWriteSid, registerAclDiagnosisSkill, tempWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from './profiles.ts'
 
@@ -267,7 +267,7 @@ export class LocalSandboxProvider extends SandboxProvider {
   private selectedRunner: SelectedRunner | 'unavailable' | undefined
   /**
    * Server-lifetime write grants (windows-acl rung): the STANDING
-   * workspace-root grant per workspace (its ACE is the cross-session reuse
+   * member-root grant per workspace member set (its ACE is the cross-session reuse
    * cache and outlives the provider — never revoked) and the REVOCABLE
    * private-temp grant per live session/workspace pair (revoked on provider
    * dispose).
@@ -325,6 +325,9 @@ export class LocalSandboxProvider extends SandboxProvider {
   async confine(argv: readonly string[], policy: SandboxPolicy, signal?: AbortSignal): Promise<ConfinedArgv> {
     signal?.throwIfAborted()
     policy = { ...policy, workspaceRoot: canonicalPath(policy.workspaceRoot) }
+    if (policy.workspaceRoots !== undefined) {
+      policy = { ...policy, workspaceRoots: [...new Set([policy.workspaceRoot, ...policy.workspaceRoots.map(canonicalPath)])] }
+    }
     if (this.runnerCommand !== undefined) {
       return Promise.resolve<ConfinedArgv>({
         argv: [...this.runnerCommand, ...bwrapProfileArgs(policy), '--', ...argv],
@@ -367,22 +370,24 @@ export class LocalSandboxProvider extends SandboxProvider {
    * @returns the runner invocation.
    */
   private windowsAclRunnerArgv(policy: SandboxPolicy): string[] {
+    const roots = policy.workspaceRoots ?? [policy.workspaceRoot]
+    const workspaceArgs = roots.flatMap(root => ['--workspace', root])
     const sessionId = policy.sessionId
     if (sessionId === undefined || policy.mode === 'read-only') {
       return [
         ...this.windowsAclRunnerInvocation(),
-        '--workspace', policy.workspaceRoot,
+        ...workspaceArgs,
         '--temp', tmpdir(),
         '--mode', policy.mode,
       ]
     }
-    const temp = this.materializeAclGrant(sessionId, policy.workspaceRoot)
+    const temp = this.materializeAclGrant(sessionId, policy.workspaceRoot, roots)
     return [
       ...this.windowsAclRunnerInvocation(),
-      '--workspace', policy.workspaceRoot,
+      ...workspaceArgs,
       '--temp', temp.dir,
       '--mode', policy.mode,
-      '--write-sid', workspaceWriteSid(policy.workspaceRoot),
+      '--write-sid', memberSetWriteSid(roots),
       '--temp-write-sid', temp.writeSid,
     ]
   }
@@ -398,15 +403,17 @@ export class LocalSandboxProvider extends SandboxProvider {
    * removed before the error propagates.
    * @param sessionId - the policy's calling-session identity.
    * @param workspaceRoot - the resolved policy root.
+   * @param roots - every canonical member this invocation may write.
    * @returns the pair's private temp directory and write capability.
    */
-  private materializeAclGrant(sessionId: SessionId, workspaceRoot: string): AclTempCapability {
-    assertTempRootOutsideWorkspace(workspaceRoot, tmpdir())
-    const writeSid = workspaceWriteSid(workspaceRoot)
-    if (!this.workspaceGrants.has(workspaceRoot)) {
+  private materializeAclGrant(sessionId: SessionId, workspaceRoot: string, roots: readonly string[]): AclTempCapability {
+    for (const root of roots) assertTempRootOutsideWorkspace(root, tmpdir())
+    const writeSid = memberSetWriteSid(roots)
+    const members = JSON.stringify([...roots].sort())
+    if (!this.workspaceGrants.has(members)) {
       const grant = AclWriteGrant.create(writeSid)
       try {
-        grant.add(workspaceRoot, true)
+        for (const root of roots) grant.add(root, true)
       } catch (error) {
         // Free the SID; a standing ACE (if the apply succeeded before a
         // post-apply throw) is the intended end state, not an error
@@ -418,7 +425,7 @@ export class LocalSandboxProvider extends SandboxProvider {
         }
         throw error
       }
-      this.workspaceGrants.set(workspaceRoot, grant)
+      this.workspaceGrants.set(members, grant)
     }
     const key = JSON.stringify([String(sessionId), workspaceRoot])
     const existing = this.tempCapabilities.get(key)
