@@ -37,6 +37,8 @@ kind: "package-reference"
 
 进入创造模式会为接收该选择的空白 Session 选择 `cordis`，不改变新任务默认值或代码工作工具设置。尚未绑定工作区或空白 Session 时，选择等待绑定完成后应用。应用后，创造 Session 保留该预设；之后真正创建的新 Session 使用配置的默认值，例如标准模式。
 
+部署方可以隐藏新会话选择器本身：预设 id 以列出的前缀开头时，或在 `seatRequiresDeveloperTools` 下代码工作工具关闭时。省略这两个字段时，保持上文的现有行为。
+
 <a id="understand-the-implementation"></a>
 ## 理解实现
 

@@ -37,6 +37,8 @@ Known shipped presets offer mode details and usage examples in a read-only dialo
 
 Entering Creator selects `cordis` for the receiving blank Session without changing the new-task default or Coding Tools setting. If no workspace or blank Session is bound yet, the choice waits for that binding. After the choice is applied, the Creator Session keeps its preset; a later newly created Session uses the configured default, such as Standard.
 
+A deployment may hide the new-session picker itself: when the preset id starts with a listed prefix, or while Developer tools is off under `seatRequiresDeveloperTools`. Omitted, both fields keep the behavior described above.
+
 <a id="understand-the-implementation"></a>
 ## Understand the implementation
 

@@ -15,6 +15,10 @@
  * Coding Tools (General settings) hide PTC and Minimal from the hero menu
  * and Settings roster when off. Hidden saved defaults fall back to Standard;
  * the existing gate clears staged choices while existing sessions keep their composition.
+ *
+ * The Host publishes this deployment's presentation options as one
+ * page-global: preset prefixes whose Sessions another surface presents, and
+ * whether the hero chip itself needs Developer tools at all.
  */
 
 // Type-only: pulls the Session Controller service merge (ctx.sessions).
@@ -33,6 +37,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import { Config, AGENT_PRESET_OPTIONS_GLOBAL } from '../agent-preset-options.ts'
 import { AgentPresetLabel } from './AgentPresetLabel.tsx'
 import { CreatePluginMenuItem } from './CreatePluginMenuItem.tsx'
 import type { AgentPresetLabelInjected } from './AgentPresetLabel.tsx'
@@ -59,6 +64,7 @@ export type { AgentPresetSeatState } from './seat-store.ts'
 export type { AgentPresetSectionState, PresetView } from './section-store.ts'
 export type { AgentPresetOption, AgentPresetSettingsState } from './settings-store.ts'
 export { AGENT_PRESET_SETTINGS_NS, writeDefaultPreset } from './settings-store.ts'
+export type { Config } from '../agent-preset-options.ts'
 
 /** Required services (cordis fiber inject). */
 export const inject = [
@@ -70,6 +76,9 @@ export const inject = [
  * @param ctx - the browser plugin context.
  */
 export function apply(ctx: ClientContext): void {
+  const page = globalThis as Partial<Record<typeof AGENT_PRESET_OPTIONS_GLOBAL, unknown>>
+  const payload = page[AGENT_PRESET_OPTIONS_GLOBAL]
+  const configured = Config(payload === undefined ? {} : payload)
   const toolsSettings = ctx.configForms.get<{ enabled: boolean }>('ui-settings')
   const presetSettings = ctx.configForms.get(AGENT_PRESET_SETTINGS_NS)
   let active = true
@@ -185,6 +194,8 @@ export function apply(ctx: ClientContext): void {
       const seat = binding === undefined ? unboundSeat : seatFor(binding)
       return {
         hooks: { agentPresetSeat: seat.store, developerTools: ctx.configForms.developerTools.enabled },
+        hiddenPrefixes: configured.hiddenAgentPresetPrefixes,
+        seatRequiresDeveloperTools: configured.seatRequiresDeveloperTools,
         load: () => seat.load(),
         select: (id: string) => seat.select(id),
         dismissRefusal: (error) => { seat.dismissRefusal(error) },
@@ -194,6 +205,7 @@ export function apply(ctx: ClientContext): void {
 
     const labelInjected = (): AgentPresetLabelInjected => ({
       hooks: { agentPresets: controller.store },
+      hiddenPrefixes: configured.hiddenAgentPresetPrefixes,
       load: () => controller.load(),
     })
 

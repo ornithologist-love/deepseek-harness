@@ -24,7 +24,9 @@ import type { AgentPresetSeatInjected } from '../src/client/AgentPresetSeat.tsx'
 import { AgentPresetSeatController } from '../src/client/seat-store.ts'
 import { CreatePluginMenuItem, type CreatePluginMenuItemInjected } from '../src/client/CreatePluginMenuItem.tsx'
 import { AgentPresetSectionController } from '../src/client/section-store.ts'
-import { apply as hostApply } from '../src/index.ts'
+import { apply as hostApply, Config as hostConfig } from '../src/index.ts'
+import { AGENT_PRESET_OPTIONS_GLOBAL } from '../src/agent-preset-options.ts'
+import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
 import type { AgentPresetRow } from '@deepseek-ai/dsh-agent-preset-registry/types'
 
 // These specs assert the shipped Chinese copy. The lane has no jsdom `window`,
@@ -296,6 +298,15 @@ async function settingsWithoutChip(initialPreset: string, settingsRosterGate?: P
   return { ...b, bindingOwner, feature, section, sessions }
 }
 
+/** A slot entry's inject factory, typed by the face the registration declares. */
+type InjectFactory<T> = (arg: never) => T
+
+function slotInjected<T>(slots: SlotRegistry, name: string, id?: string): InjectFactory<T> {
+  const entry = slots.entries(name).find(candidate => id === undefined || candidate.options.id === id)
+  if (entry === undefined) throw new Error(`no ${name} entry registered`)
+  return entry.inject as InjectFactory<T>
+}
+
 describe('ui-agent-preset apply', () => {
   const settingsActions = [
     { action: 'makeDefault', initial: 'standard', selected: 'minimal', run: (section: AgentPresetSectionInjected) => section.makeDefault('minimal') },
@@ -335,8 +346,34 @@ describe('ui-agent-preset apply', () => {
     },
   )
 
-  it('keeps the host Loader entry inert', () => {
-    expect(hostApply).not.toThrow()
+  it('publishes the surface options into the browser page and keeps today’s behavior by default', () => {
+    expect(hostConfig({})).toEqual({ hiddenAgentPresetPrefixes: [], seatRequiresDeveloperTools: false })
+    expect(hostConfig['~standard'].validate({ seatRequiresDeveloperTools: 'yes' })).toHaveProperty('issues')
+    expect(hostConfig['~standard'].validate({ hiddenAgentPresetPrefixes: 'external-' })).toHaveProperty('issues')
+
+    const listeners: ((table: IndexInjection[]) => void)[] = []
+    hostApply({ on: (_event: string, listener: (table: IndexInjection[]) => void) => {
+      listeners.push(listener)
+    } } as never, hostConfig({}))
+    const table: IndexInjection[] = []
+    listeners[0]!(table)
+    expect(table).toEqual([{
+      kind: 'global',
+      name: AGENT_PRESET_OPTIONS_GLOBAL,
+      value: { hiddenAgentPresetPrefixes: [], seatRequiresDeveloperTools: false },
+    }])
+
+    const configured: IndexInjection[] = []
+    const configuredListeners: ((table: IndexInjection[]) => void)[] = []
+    hostApply({ on: (_event: string, listener: (table: IndexInjection[]) => void) => {
+      configuredListeners.push(listener)
+    } } as never, hostConfig({ hiddenAgentPresetPrefixes: ['external-'], seatRequiresDeveloperTools: true }))
+    configuredListeners[0]!(configured)
+    expect(configured).toEqual([{
+      kind: 'global',
+      name: AGENT_PRESET_OPTIONS_GLOBAL,
+      value: { hiddenAgentPresetPrefixes: ['external-'], seatRequiresDeveloperTools: true },
+    }])
   })
 
   it('declares the services it uses', () => {
@@ -1042,6 +1079,48 @@ describe('ui-agent-preset apply', () => {
     await label.load()
 
     expect(label.hooks.agentPresets.getSnapshot().options).toEqual([{ id: 'standard' }])
+  })
+
+  it('hands the chip and the label this deployment’s page options', async () => {
+    const { ctx, slots } = await bench()
+    declareRoot(slots)
+    declareConversation(slots)
+    ctx.provide('conversation', {} as never)
+    ctx.provide('sessions', sessionsDouble(ctx, { byId: {} }) as never)
+    ctx.provide('uiWorkspace', uiWorkspaceDouble() as never)
+
+    // The Host's page row, staged the way the shell assigns it before activation.
+    vi.stubGlobal(AGENT_PRESET_OPTIONS_GLOBAL, {
+      hiddenAgentPresetPrefixes: ['external-'],
+      seatRequiresDeveloperTools: true,
+    })
+    try {
+      await ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'uiWorkspace'], apply }).await()
+      const seat = slotInjected<AgentPresetSeatInjected>(slots, 'conversation.hero.agentPreset')()
+      const label = slotInjected<AgentPresetLabelInjected>(slots, 'conversation.session.header.actions')()
+      expect(seat.hiddenPrefixes).toEqual(['external-'])
+      expect(seat.seatRequiresDeveloperTools).toBe(true)
+      expect(label.hiddenPrefixes).toEqual(['external-'])
+
+      // Under the declared defaults nothing hides.
+      await ctx.fiber.dispose()
+      vi.unstubAllGlobals()
+      const defaults = await bench()
+      declareRoot(defaults.slots)
+      declareConversation(defaults.slots)
+      defaults.ctx.provide('conversation', {} as never)
+      defaults.ctx.provide('sessions', sessionsDouble(defaults.ctx, { byId: {} }) as never)
+      defaults.ctx.provide('uiWorkspace', uiWorkspaceDouble() as never)
+      await defaults.ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'uiWorkspace'], apply }).await()
+      const defaultSeat = slotInjected<AgentPresetSeatInjected>(defaults.slots, 'conversation.hero.agentPreset')()
+      const defaultLabel = slotInjected<AgentPresetLabelInjected>(defaults.slots, 'conversation.session.header.actions')()
+      expect(defaultSeat.hiddenPrefixes).toEqual([])
+      expect(defaultSeat.seatRequiresDeveloperTools).toBe(false)
+      expect(defaultLabel.hiddenPrefixes).toEqual([])
+      await defaults.ctx.fiber.dispose()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('stages the creator preset and starts a session from the section', async () => {
