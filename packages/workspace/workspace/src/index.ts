@@ -94,6 +94,15 @@ export class WorkspaceOrderInvalidError extends Error {
 }
 
 
+/** Reports a workspace's canonical member directories, primary first, or `undefined` when the source does not own it. */
+export type WorkspaceDirectorySource = (workspace: Workspace) => readonly string[] | undefined
+
+/** Reports directories a source selected earlier for a workspace it owns. */
+export type WorkspaceHistoricalDirectorySource = (workspace: Workspace) => readonly string[]
+
+/** Reads headers of addressable sessions that have no Session log yet. */
+export type WorkspaceSessionSource = () => Promise<readonly SessionHeader[]>
+
 /** The session an archive request is about to write into the archive set. */
 export interface SessionActivityRequest {
   readonly sessionId: SessionId
@@ -179,10 +188,14 @@ export class WorkspaceRegistry extends Service {
   private readonly missingSessionPaths = new Set<SessionId>()
   private readonly invalidSessionPaths = new Map<SessionId, string>()
   private operationTail: Promise<void> = Promise.resolve()
+  private readonly directorySources = new Map<WorkspaceDirectorySource, WorkspaceHistoricalDirectorySource | undefined>()
+  private readonly sessionSources = new Set<WorkspaceSessionSource>()
 
   private readonly host: WorkspaceEntityHost = {
     table: () => this.requireTable(),
-    candidateMatches: (id, path) => this.sessionPaths.get(id) === path || this.missingSessionPaths.has(id),
+    candidateMatches: (id, path) => this.sessionPaths.get(id) === path || this.missingSessionPaths.has(id)
+      || this.memberCandidateMatches(id, path),
+    memberDirectoryMatches: (id, cwd) => this.directoriesOf(id).includes(cwd),
     readSessionHeader: id => this.readSessionHeader(id),
     rememberSessionPath: (id, path) => {
       this.sessionPaths.set(id, path)
@@ -504,7 +517,72 @@ export class WorkspaceRegistry extends Service {
     for (const entity of this.entities.values()) {
       if (entity.path === canonical) return entity
     }
+    for (const entity of this.entities.values()) {
+      if (this.directoriesOf(entity.id).includes(canonical)) return entity
+    }
     return undefined
+  }
+
+  /**
+   * Register a source of multi-folder workspace members. The first source that
+   * owns a workspace decides its members; a workspace no source owns keeps its
+   * single directory.
+   * @param source - canonical member directories, primary first, or `undefined` when this source does not own the workspace.
+   * @param historical - directories the source selected earlier; sessions
+   *   already accounted under one of them stay members, but they authorize no
+   *   new attachment.
+   * @returns disposer removing the source.
+   */
+  registerDirectories(source: WorkspaceDirectorySource, historical?: WorkspaceHistoricalDirectorySource): () => void {
+    this.directorySources.set(source, historical)
+    return () => { this.directorySources.delete(source) }
+  }
+
+  /**
+   * Read a workspace's current member directories.
+   * @param id - Workspace identity.
+   * @returns canonical member directories, primary first: the owning source's
+   *   list, `[workspace.path]` when no source owns it, or empty for an unknown id.
+   */
+  directoriesOf(id: WorkspaceId): readonly string[] {
+    const workspace = this.entities.get(id)
+    if (workspace === undefined) return []
+    for (const source of this.directorySources.keys()) {
+      const directories = source(workspace)
+      if (directories !== undefined) return directories
+    }
+    return [workspace.path]
+  }
+
+  /**
+   * Register headers of addressable sessions that have no Session log yet,
+   * such as unsent drafts. Membership validation treats them like stored
+   * headers from the next {@link refreshSessionHeaders} on.
+   * @param source - reader of the additional headers.
+   * @returns disposer removing the source.
+   */
+  registerSessionSource(source: WorkspaceSessionSource): () => void {
+    this.sessionSources.add(source)
+    return () => { this.sessionSources.delete(source) }
+  }
+
+  /** Re-read stored, contributed, and live session headers after their cwd or member directories change. */
+  async refreshSessionHeaders(): Promise<void> {
+    await this.replaceHeaderIndex(await this.listStoredHeaders())
+    await this.indexLiveSessions()
+  }
+
+  private memberCandidateMatches(id: SessionId, path: string): boolean {
+    const cwd = this.sessionPaths.get(id)
+    if (cwd === undefined) return false
+    for (const workspace of this.entities.values()) {
+      if (workspace.path !== path) continue
+      if (this.directoriesOf(workspace.id).includes(cwd)) return true
+      for (const [source, historical] of this.directorySources) {
+        if (source(workspace) !== undefined && historical?.(workspace).includes(cwd)) return true
+      }
+    }
+    return false
   }
 
   private async createCanonical(canonical: string, title?: string, firstUse = false): Promise<WorkspaceEntity> {
@@ -829,10 +907,11 @@ export class WorkspaceRegistry extends Service {
     }
   }
 
-  /** Every stored session's header, projected from the persistence snapshot listing. */
+  /** Every stored session's header, projected from the persistence snapshot listing, then contributed headers. */
   private async listStoredHeaders(): Promise<SessionHeader[]> {
     const snapshots = await this.ctx.sessionPersistence.list()
-    return snapshots.map(snapshot => snapshot.header)
+    const contributed = await Promise.all([...this.sessionSources].map(read => read()))
+    return [...snapshots.map(snapshot => snapshot.header), ...contributed.flat()]
   }
 
   private async indexLiveSessions(): Promise<void> {

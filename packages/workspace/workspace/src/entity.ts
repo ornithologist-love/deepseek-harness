@@ -48,6 +48,14 @@ export interface WorkspaceEntityHost {
   candidateMatches(id: SessionId, path: string): boolean
 
   /**
+   * Accept a session whose cwd is a registered member directory of the workspace.
+   * @param id - Workspace the session attaches to.
+   * @param cwd - The session's canonical cwd.
+   * @returns whether a directory source lists `cwd` as a current member.
+   */
+  memberDirectoryMatches(id: WorkspaceId, cwd: string): boolean
+
+  /**
    * Read one stored session header for attach validation.
    * @param id - The session whose header to read.
    * @returns the header; rejects when session persistence is absent or holds
@@ -136,7 +144,7 @@ export class WorkspaceEntity implements Workspace {
           + `its cwd '${header.cwd}' is not a directory`,
         )
       }
-      if (cwd !== this.record.path) {
+      if (cwd !== this.record.path && !this.host.memberDirectoryMatches(this.id, cwd)) {
         throw new Error(
           `cannot attach session '${sessionId}' to workspace '${this.record.path}': `
           + `its cwd resolves to '${cwd}'`,
