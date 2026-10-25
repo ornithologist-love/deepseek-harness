@@ -14,10 +14,16 @@
  * the composer chip; the shared popup shell owns the modal mechanics.
  * The General-settings row separately writes the default preset for sessions
  * created later through the host Settings API.
+ *
+ * The Host publishes this deployment's options as one page-global; they shape
+ * the surfaces in three ways: preset colors, the opt-in remembered Full access
+ * acknowledgement (the `ui-permission` entry's volatile user setting), and
+ * the agent presets whose Sessions keep their own permission mechanism.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type { SessionFace } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { SessionFace, SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { PermissionCatalog, PermissionSelection } from '@deepseek-ai/dsh-permission-presets/client'
 // Direct dependency: catalog settlements are fenced by the actual connection
 // generation rather than by a parallel domain counter.
@@ -32,17 +38,18 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: pulls the ctx.remote merge and the forwarded-event key face
 // (the settings invalidation rides the allowlist) into this program.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
-import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
 import type { CommandUiContract, SelectOption } from '@deepseek-ai/dsh-client-ui-commands/client'
 import type { ClientSessionContext } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { Config, PERMISSION_OPTIONS_GLOBAL } from '../permission-options.ts'
+import { PERMISSION_CLIENT_SETTINGS_NAMESPACE, PermissionAcknowledgement } from './acknowledgement.ts'
 import { PermissionCatalogDirectory } from './catalog.ts'
 import { PermissionSelect } from './PermissionSelect.tsx'
 import type { PermissionSelectInjected } from './PermissionSelect.tsx'
 import { PermissionRow } from './PermissionRow.tsx'
 import type { PermissionRowInjected } from './PermissionRow.tsx'
 import {
-  accessEn, accessZh, en, PERMISSION_ACCESS_NS, zh,
+  accessEn, accessZh, en, PERMISSION_ACCESS_NS, type PermissionSettingsKey, zh,
 } from './locales.ts'
 import {
   AUTO_REVIEW_PRESET, displayPermissionPreset, FULL_ACCESS_PRESET,
@@ -55,6 +62,9 @@ export type { PermissionSelectInjected, PermissionSelectProps } from './Permissi
 export type {
   PermissionDefaultOption, PermissionSettingsState,
 } from './settings-store.ts'
+export type { Config } from '../permission-options.ts'
+export type { PermissionClientSettings } from './acknowledgement.ts'
+export type { PermissionAcknowledgement } from './acknowledgement.ts'
 
 /** Required services (cordis fiber inject). */
 export const inject = [
@@ -67,6 +77,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Current-session permission picker and confirmation copy. */
     'permission.access': keyof typeof accessEn
+    /** Permission row copy. */
+    'settings.permission': PermissionSettingsKey
   }
 }
 
@@ -75,11 +87,29 @@ function selectionOf(session: SessionFace | undefined): PermissionSelection | un
   return session?.projections.faceOf('permissions').getSnapshot() as PermissionSelection | undefined
 }
 
+/**
+ * Whether a Session keeps this package's local permission controls.
+ * @param list - the Session Controller's Session list of current summaries.
+ * @param sessionId - addressed Session.
+ * @param hidden - configured agent-preset projection values whose Sessions
+ * keep their own permission mechanism.
+ * @returns false when the Session's agent preset matches one exactly.
+ */
+function localControlsAvailable(
+  list: ObservableSnapshot<SessionListState>,
+  sessionId: SessionId,
+  hidden: readonly string[],
+): boolean {
+  const preset = list.getSnapshot().byId[sessionId]?.projectionValues?.agentPreset
+  return typeof preset !== 'string' || !hidden.includes(preset)
+}
+
 /** Join the process catalog with one Session's current value. */
 function optionsOf(
   catalog: PermissionCatalog,
   currentValue: string,
   t: TranslateNS<typeof PERMISSION_ACCESS_NS>,
+  confirmationRequired: (preset: string) => boolean,
 ): SelectOption[] {
   return catalog.options
     .map(option => ({
@@ -92,7 +122,7 @@ function optionsOf(
         ? { detail: t('auto.description') }
         : option.description !== undefined ? { detail: option.description } : {}),
       ...(option.value === currentValue ? { active: true } : {}),
-      ...(option.value === FULL_ACCESS_PRESET || option.value === AUTO_REVIEW_PRESET
+      ...(confirmationRequired(option.value)
         ? {
           confirmation: {
             title: t(option.value === AUTO_REVIEW_PRESET ? 'auto.confirm.title' : 'confirm.title'),
@@ -112,6 +142,9 @@ function optionsOf(
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
+  const page = globalThis as Partial<Record<typeof PERMISSION_OPTIONS_GLOBAL, unknown>>
+  const payload = page[PERMISSION_OPTIONS_GLOBAL]
+  const configured = Config(payload === undefined ? {} : payload)
   const command = ctx.get('commandUi') as CommandUiContract
   const sessions = ctx.sessions
   ctx.effect(
@@ -121,6 +154,18 @@ export function apply(ctx: ClientContext): void {
   const t = ctx.locale.bind(PERMISSION_ACCESS_NS)
   const sessionFor = (session: ClientSessionContext): SessionFace | undefined =>
     sessions.binding(session.sessionId)?.session
+  const controlsAvailable = (sessionId: SessionId): boolean =>
+    localControlsAvailable(sessions.list, sessionId, configured.hiddenAgentPresets)
+  // One acknowledgement mirror feeds every surface that gates Full access.
+  const acknowledgement = new PermissionAcknowledgement(
+    ctx.configForms.get(PERMISSION_CLIENT_SETTINGS_NAMESPACE), configured.rememberFullAccess)
+  ctx.effect(() => () => { acknowledgement.dispose() }, 'ui-permission: acknowledgement mirror')
+  const acknowledgeFullAccess = (): void => {
+    acknowledgement.acknowledgeFullAccess(configured.rememberFullAccess)
+  }
+  // Auto review keeps its own confirmation on every selection.
+  const confirmationRequired = (preset: string): boolean =>
+    preset === AUTO_REVIEW_PRESET || acknowledgement.requiresConfirmation(preset, configured.rememberFullAccess)
   const submit = async (sessionId: SessionId, preset: string): Promise<boolean> => {
     const live = sessions.binding(sessionId)?.session
     if (live === undefined) throw new Error('this session is not materialized yet')
@@ -156,7 +201,9 @@ export function apply(ctx: ClientContext): void {
   const load = (): Promise<void> => controller.load()
   const select = (preset: string): Promise<void> => controller.select(preset)
   const injected = (): PermissionRowInjected => ({
-    hooks: { permission: controller.store },
+    hooks: { permission: controller.store, fullAccessAcknowledged: acknowledgement.acknowledged },
+    acknowledgeFullAccess,
+    fullAccessRemembered: configured.rememberFullAccess,
     load,
     select,
   })
@@ -175,25 +222,38 @@ export function apply(ctx: ClientContext): void {
     name: 'conversation.input.permission',
     locale: PERMISSION_ACCESS_NS,
     inject: (sessionId: SessionId): PermissionSelectInjected => ({
-      hooks: { permissionCatalog: catalog.store },
+      colors: configured.colors,
+      acknowledgeFullAccess,
+      fullAccessRemembered: configured.rememberFullAccess,
+      hooks: { permissionCatalog: catalog.store, fullAccessAcknowledged: acknowledgement.acknowledged },
       select: preset => submit(sessionId, preset),
     }),
   }, PermissionSelect))
 
   ctx.effect(() => command.decorate({
     name: 'permission',
-    // The Session's current value alone decides availability. A missing catalog
-    // surfaces through `options()`, which keeps the picker's own retry entry
-    // reachable after a failed read instead of hiding the command.
-    available: session => selectionOf(sessionFor(session)) !== undefined,
+    // The Session's current value alone decides availability, apart from a
+    // Session configured with another permission mechanism, which keeps this
+    // picker away. A missing catalog surfaces through `options()`, which keeps
+    // the picker's own retry entry reachable after a failed read instead of
+    // hiding the command.
+    available: session => selectionOf(sessionFor(session)) !== undefined
+      && controlsAvailable(session.sessionId),
     ui: {
       kind: 'popupSelect',
       options: async (session) => {
         const selection = selectionOf(sessionFor(session))
         if (selection === undefined) throw new Error('permission presets are not available on this host')
-        return optionsOf(await catalog.load(), selection.currentValue, t)
+        return optionsOf(await catalog.load(), selection.currentValue, t, confirmationRequired)
       },
-      onSelect: (option, session) => submit(session.sessionId, option.id).then(() => undefined),
+      onSelect: (option, session) => submit(session.sessionId, option.id)
+        .then((accepted) => {
+          // The picker's own confirmation, or a direct pick on a deployment
+          // that remembers, is the explicit confirmation either way.
+          if (option.id === FULL_ACCESS_PRESET) acknowledgeFullAccess()
+          return accepted
+        })
+        .then(() => undefined),
     },
   }), 'ui-permission: /permission decoration')
 }

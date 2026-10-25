@@ -539,6 +539,70 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-shortcuts -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-client-ui-agent-preset -->
+<a id="deepseek-aidsh-client-ui-agent-preset"></a>
+
+## `@deepseek-ai/dsh-client-ui-agent-preset`
+
+- `source`: [`packages/client/ui-agent-preset/src/agent-preset-options.ts:11`](../packages/client/ui-agent-preset/src/agent-preset-options.ts)
+
+```ts config-catalog
+/** Page-bootstrap options after schema defaults are applied. */
+export interface Config {
+  /**
+   * Preset ids whose Sessions keep their own presenter: a session running a
+   * preset starting with one of these prefixes shows neither the new-session
+   * picker nor the session-header label. The registry's own
+   * `hiddenPresetPrefixes` only filters the roster this browser lists.
+   */
+  hiddenAgentPresetPrefixes: string[]
+  /**
+   * Show the new-session picker only while Developer tools is on. A preset the
+   * deployment picked stays composed either way; the picker itself is hidden.
+   */
+  seatRequiresDeveloperTools: boolean
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-agent-preset -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-client-ui-permission-presets -->
+<a id="deepseek-aidsh-client-ui-permission-presets"></a>
+
+## `@deepseek-ai/dsh-client-ui-permission-presets`
+
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/client/ui-permission-presets/src/permission-options.ts:12`](../packages/client/ui-permission-presets/src/permission-options.ts)
+
+```ts config-catalog
+/** Page-bootstrap options after schema defaults are applied. */
+export interface Config {
+  /**
+   * Display color per permission preset value, painted on the composer
+   * trigger and the `/permission` menu rows. Unlisted presets keep the native
+   * styles, and the value is applied as a CSS custom property rather than a
+   * literal style, so a theme can override it.
+   */
+  colors: Record<string, string>
+  /**
+   * Stop asking again after the user's first explicit Full access
+   * confirmation in any current-session or Settings surface. Auto review keeps
+   * its own confirmation on every selection.
+   */
+  rememberFullAccess: boolean
+  /**
+   * Agent-preset projection values whose Sessions keep their own permission
+   * mechanism: their composer trigger and `/permission` picker stay hidden.
+   */
+  hiddenAgentPresets: string[]
+  /**
+   * User setting recording one explicit Full access confirmation; read only
+   * when `rememberFullAccess` is on and written by the browser half.
+   */
+  fullAccessAcknowledged: Volatile<boolean>
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-permission-presets -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-client-ui-plugin-manager -->
 <a id="deepseek-aidsh-client-ui-plugin-manager"></a>
 
@@ -4630,7 +4694,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 | `@deepseek-ai/dsh-client-locale` | — | [`packages/client/locale/src/index.ts`](../packages/client/locale/src/index.ts) |
 | `@deepseek-ai/dsh-client-modules` | `loader` | [`packages/client/modules/src/index.ts`](../packages/client/modules/src/index.ts) |
 | `@deepseek-ai/dsh-client-resources` | — | [`packages/client/resources/src/index.ts`](../packages/client/resources/src/index.ts) |
-| `@deepseek-ai/dsh-client-ui-agent-preset` | — | [`packages/client/ui-agent-preset/src/index.ts`](../packages/client/ui-agent-preset/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-approval` | — | [`packages/client/ui-approval/src/index.ts`](../packages/client/ui-approval/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-attachment` | — | [`packages/client/ui-attachment/src/index.ts`](../packages/client/ui-attachment/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-brand-official` | — | [`packages/client/ui-brand-official/src/index.ts`](../packages/client/ui-brand-official/src/index.ts) |
@@ -4649,7 +4712,6 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 | `@deepseek-ai/dsh-client-ui-message-feedback` | — | [`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-model-selection` | — | [`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-open-in-app` | — | [`packages/client/ui-open-in-app/src/index.ts`](../packages/client/ui-open-in-app/src/index.ts) |
-| `@deepseek-ai/dsh-client-ui-permission-presets` | — | [`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-plan` | — | [`packages/client/ui-plan/src/index.ts`](../packages/client/ui-plan/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-plugin-market` | — | [`packages/client/ui-plugin-market/src/index.ts`](../packages/client/ui-plugin-market/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-reference` | — | [`packages/client/ui-reference/src/index.ts`](../packages/client/ui-reference/src/index.ts) |

@@ -37,6 +37,8 @@ kind: "package-reference"
 
 该行从宿主动态的 `defaultPreset` enum 推导选项，使用与当前会话选择器相同的本地化内置标签，并写入一条设置变更操作。`auto` 等仅限当前会话的 contribution 不会出现。该值只在之后创建会话时生效；改变它绝不会切换或改写当前会话。
 
+部署方可以为预设着色、记住一次完全访问确认，并在由会话自身管理权限时让出控件。省略时，三者都保持上文所述行为。该确认保存为 `ui-permission` 条目的易变用户设置 `fullAccessAcknowledged`，常规设置页不列出它。
+
 -----
 
 <a id="understand-the-implementation"></a>

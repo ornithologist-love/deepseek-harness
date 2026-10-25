@@ -57,6 +57,7 @@ export const accessZh = {
   'auto.confirm.description': '自动审查不使用沙箱。每次原生工具调用和 PTC 内层调用前，都会由与当前 agent 相同的模型进行审查；审查拒绝的调用由你批准或拒绝。此功能仍属实验性，可能误放行或误拒绝，并会消耗额外 token。',
   'auto.confirm.acknowledge': '我已了解这些风险，并愿意继续',
   'auto.confirm.enable': '启用自动审查',
+  'switch.failed': '权限修改失败：{message}',
 } satisfies Record<string, string>
 
 /** Current-session popup-gate key union. */
@@ -81,4 +82,5 @@ export const accessEn = {
   'auto.confirm.description': 'Auto review runs without a sandbox. Before every native tool call and PTC inner call, the same model as the current agent reviews whether to allow it; you approve or reject each call it denies. This feature is experimental, can falsely allow or deny actions, and uses additional tokens.',
   'auto.confirm.acknowledge': 'I understand these risks and want to continue',
   'auto.confirm.enable': 'Enable Auto review',
+  'switch.failed': 'Could not change permissions: {message}',
 } satisfies Record<PermissionAccessKey, string>

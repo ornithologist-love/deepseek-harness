@@ -4549,12 +4549,21 @@ importers:
       '@deepseek-ai/dsh-client-ui-slots':
         specifier: workspace:*
         version: link:../ui-slots
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: workspace:*
+        version: link:../../host/webserver
       '@deepseek-ai/dsh-permission-presets':
         specifier: workspace:*
         version: link:../../interaction/permission-presets
       '@deepseek-ai/dsh-remote-mock':
         specifier: workspace:*
         version: link:../../test-support/remote-mock
+      '@deepseek-ai/dsh-settings':
+        specifier: workspace:*
+        version: link:../../settings/settings
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
       clsx:
         specifier: ^2.0.0
         version: 2.1.1

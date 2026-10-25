@@ -553,9 +553,6 @@
   "packages/client/ui-permission-presets/tests/browser-plugin.client.spec.ts": {
     "dc36dd8f678695e3b84ce0573968470941c5b6fc5efe529cba17acb1f2799d1c": 1
   },
-  "packages/client/ui-permission-presets/tests/permission-select.client.spec.tsx": {
-    "887a58a946b46942299752b6d642ef74387bd976b0230b62cf825cd7b19b45a5": 1
-  },
   "packages/client/ui-plan/src/client/plan.ts": {
     "71ab276492b7149d26b62b8f1c6c5d522cf922cad9cb8dcda8037837ef370e60": 1
   },

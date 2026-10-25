@@ -66,16 +66,25 @@ const runtime = {
   ...allowAllAccess,
 }
 
-function mount(controller: PermissionPresetSettingsController) {
-  return render(
+function mount(controller: PermissionPresetSettingsController, options: {
+  fullAccessRemembered?: boolean
+  acknowledged?: boolean
+} = {}) {
+  const acknowledged = createSnapshotStore(options.acknowledged ?? false)
+  const acknowledgeFullAccess = vi.fn(() => { acknowledged.set(true) })
+  const view = render(
     <PermissionRow
       {...runtime}
+      acknowledgeFullAccess={acknowledgeFullAccess}
+      fullAccessRemembered={options.fullAccessRemembered ?? false}
       load={() => controller.load()}
       select={preset => controller.select(preset)}
       usePermission={bindSnapshotSelector(controller.store)}
+      useFullAccessAcknowledged={bindSnapshotSelector(acknowledged)}
       t={t}
     />,
   )
+  return { acknowledgeFullAccess, view }
 }
 
 describe('PermissionRow', () => {
@@ -139,8 +148,8 @@ describe('PermissionRow', () => {
       },
     })
     const rendered = mount(absent)
-    await waitFor(() => { expect(rendered.container.textContent).toBe('') })
-    rendered.unmount()
+    await waitFor(() => { expect(rendered.view.container.textContent).toBe('') })
+    rendered.view.unmount()
 
     const readonly = derivedController({
       settings: {
@@ -175,5 +184,54 @@ describe('PermissionRow', () => {
     fireEvent.click(button)
     fireEvent.click(screen.getByRole('menuitem', { name: '工作区内修改' }))
     expect((await screen.findByRole('alert')).textContent).toBe('changed elsewhere')
+  })
+
+  it('records a Full access confirmation made on this row', async () => {
+    const mutate = vi.fn(() => Promise.resolve(ok(view('danger-full-access', 1))))
+    const controller = derivedController({
+      settings: {
+        describe: () => Promise.resolve(ok({ writable: true, hasDocument: false, namespaces: [view('read-only')] })),
+        mutate,
+      },
+    })
+    const { acknowledgeFullAccess } = mount(controller, { fullAccessRemembered: true })
+    fireEvent.click(await screen.findByRole('button', { name: '仅可查看' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '完全权限' }))
+    expect(acknowledgeFullAccess).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '启用完全权限' }))
+
+    expect(acknowledgeFullAccess).toHaveBeenCalledOnce()
+    await waitFor(() => { expect(mutate).toHaveBeenCalledOnce() })
+  })
+
+  it('skips the Full access confirmation after another surface recorded it', async () => {
+    const mutate = vi.fn(() => Promise.resolve(ok(view('danger-full-access', 1))))
+    const controller = derivedController({
+      settings: {
+        describe: () => Promise.resolve(ok({ writable: true, hasDocument: false, namespaces: [view('read-only')] })),
+        mutate,
+      },
+    })
+    mount(controller, { fullAccessRemembered: true, acknowledged: true })
+    fireEvent.click(await screen.findByRole('button', { name: '仅可查看' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '完全权限' }))
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await waitFor(() => { expect(mutate).toHaveBeenCalledOnce() })
+  })
+
+  it('still asks for Full access when the deployment remembers nothing', async () => {
+    const controller = derivedController({
+      settings: {
+        describe: () => Promise.resolve(ok({ writable: true, hasDocument: false, namespaces: [view('read-only')] })),
+        mutate: vi.fn(),
+      },
+    })
+    mount(controller, { fullAccessRemembered: false, acknowledged: true })
+    fireEvent.click(await screen.findByRole('button', { name: '仅可查看' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '完全权限' }))
+
+    expect(screen.getByRole('dialog', { name: '确认启用完全权限？' })).toBeTruthy()
   })
 })

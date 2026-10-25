@@ -31,6 +31,20 @@
   cursor: default;
 }
 
+/* A deployment-configured preset color enters as a custom property on the
+   element; the label and the currentColor glyph follow it, while the chevron
+   keeps its own caption tone. */
+/* A deployment-configured preset color enters as a custom property on the
+   element; the label and the currentColor glyph follow it. A disabled trigger
+   keeps its dimmed tone, and the chevron keeps its own caption tone. */
+.trigger.toned {
+  color: var(--dsh-permission-tone);
+}
+
+.trigger.toned:disabled {
+  color: var(--dsw-alias-label-dimmed);
+}
+
 .triggerIcon {
   display: inline-flex;
   flex: 0 0 auto;

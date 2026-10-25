@@ -11,10 +11,11 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
 import { remoteDefaultResponses } from '@deepseek-ai/dsh-client-test-runtime/src/assembly/remote-default-responses.ts'
-import { RemoteMock } from '@deepseek-ai/dsh-remote-mock'
+import { ok, RemoteMock } from '@deepseek-ai/dsh-remote-mock'
 import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { CommandDecoration, PopupSelectSpec } from '@deepseek-ai/dsh-client-ui-commands/client'
 import { PopupSelectController } from '@deepseek-ai/dsh-client-ui-commands/client'
@@ -27,7 +28,9 @@ import {
 import { PermissionSelect } from '../src/client/PermissionSelect.tsx'
 import type { PermissionSelectInjected } from '../src/client/PermissionSelect.tsx'
 import { apply, inject } from '../src/client/index.ts'
+import { PERMISSION_CLIENT_SETTINGS_NAMESPACE } from '../src/client/acknowledgement.ts'
 import { accessEn, accessZh } from '../src/client/locales.ts'
+import { PERMISSION_OPTIONS_GLOBAL } from '../src/permission-options.ts'
 
 const sid = (k: string): SessionId => k as SessionId
 
@@ -45,13 +48,29 @@ const CATALOG: PermissionCatalog = {
   ],
 }
 
-async function bench() {
+async function bench(options: { options?: Record<string, unknown> } = {}) {
   const ctx = new Context()
   await ctx.plugin(SlotRegistry)
   const locale = new LocaleRuntime(ctx)
   locale.setLocale('en')
   ctx.provide('locale', locale)
   const mock = RemoteMock.create().load(remoteDefaultResponses)
+  // An accepted acknowledgement write answers with a document naming this
+  // package's namespace; the answer reaches the shared settings mirror, so a
+  // later surface reads the stored value here.
+  const acknowledgedWrites: unknown[][] = []
+  mock.remote.settings.mutate.mockImplementation((ns: string, ops: unknown) => {
+    acknowledgedWrites.push([ns, ops])
+    return Promise.resolve(ok({
+      ns: PERMISSION_CLIENT_SETTINGS_NAMESPACE,
+      schema: { uid: 1, refs: {} },
+      value: { fullAccessAcknowledged: true },
+      autoGenerate: true,
+      applies: 'live' as const,
+      secrets: [],
+      revision: 1,
+    }))
+  })
   onTestFinished(() => { mock.assertNoUnmatched() })
   let catalog = CATALOG
   let catalogCalls = 0
@@ -121,9 +140,21 @@ async function bench() {
     },
   })
   let deferredActivation = false
+  // The agent preset each Session reports; a configured one may own the
+  // permission mechanism itself.
+  const agentPresets = new Map<SessionId, string>()
   ctx.provide('sessions', {
     get deferredActivation() { return deferredActivation },
     binding: (id: SessionId) => (values.has(id) ? { sessionId: id, session: session(id) } : undefined),
+    list: {
+      getSnapshot: () => ({
+        byId: Object.fromEntries([...values.keys()].map(id => [
+          id,
+          { id, projectionValues: agentPresets.has(id) ? { agentPreset: agentPresets.get(id) } : {} },
+        ])),
+      }),
+      subscribe: () => () => {},
+    },
   })
   Object.assign(remote, {
     session: {
@@ -135,13 +166,20 @@ async function bench() {
       },
     },
   })
+  // The Host publishes its configuration as one page-global before activation.
+  if (options.options === undefined) vi.unstubAllGlobals()
+  else vi.stubGlobal(PERMISSION_OPTIONS_GLOBAL, options.options)
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
   await vi.waitFor(() => { expect(catalogCalls).toBe(1) })
   return {
-    ctx, fiber, locale, values, commands, remote, dismissed, staged,
+    ctx, fiber, acknowledgedWrites, locale, values, commands, remote, dismissed, staged,
     setDeferredActivation: (value: boolean) => { deferredActivation = value },
     setStagedResult: (value: { ok: boolean }) => { stagedResult = value },
+    setAgentPreset: (preset: string | undefined) => {
+      if (preset === undefined) agentPresets.delete(sid('s1'))
+      else agentPresets.set(sid('s1'), preset)
+    },
     catalogCalls: () => catalogCalls,
     setCatalog: (value: PermissionCatalog) => {
       catalog = value
@@ -167,6 +205,14 @@ async function bench() {
     permissionSelect: () => ctx.slots.entries('conversation.input.permission')
       .find(entry => entry.component === PermissionSelect),
   }
+}
+
+/** Read one registered entry's inject factory under the face the registration declares. */
+type InjectFactory<T> = (sessionId: SessionId) => T
+
+function slotInjected<T>(entry: StoredEntry | undefined): InjectFactory<T> {
+  if (entry === undefined) throw new Error('expected the component entry to be registered')
+  return entry.inject as InjectFactory<T>
 }
 
 describe('ui-permission browser plugin', () => {
@@ -202,6 +248,79 @@ describe('ui-permission browser plugin', () => {
     await expect(selectInjected.select('auto')).resolves.toBe(true)
     expect(b.commands).toEqual(['/permission auto'])
     expect(b.catalogCalls()).toBe(1)
+  })
+
+  it('hands the surfaces the page configuration and one shared confirmation mirror', async () => {
+    const b = await bench({
+      options: { colors: { 'read-only': 'var(--brand-accent)' }, rememberFullAccess: true },
+    })
+    const row = slotInjected<PermissionRowInjected>(b.permissionRow())(sid('s1'))
+    const seat = slotInjected<PermissionSelectInjected>(b.permissionSelect())(sid('s1'))
+    expect(seat.colors).toEqual({ 'read-only': 'var(--brand-accent)' })
+    expect(row.fullAccessRemembered).toBe(true)
+    expect(seat.fullAccessRemembered).toBe(true)
+    // One mirror feeds every surface: a confirmation recorded on either one
+    // is what the other reads next.
+    expect(row.hooks.fullAccessAcknowledged).toBe(seat.hooks.fullAccessAcknowledged)
+
+    seat.acknowledgeFullAccess()
+    expect(seat.hooks.fullAccessAcknowledged.getSnapshot()).toBe(true)
+    const proj = { sessionId: sid('s1') }
+    b.values.set(sid('s1'), { currentValue: 'workspace-write' })
+    const options = await b.popup().options(proj, new AbortController().signal)
+    expect(options.find(option => option.id === 'danger-full-access')?.confirmation).toBeUndefined()
+  })
+
+  it('keeps the colours empty and the confirmation mandatory under the declared defaults', async () => {
+    const b = await bench()
+    const seat = slotInjected<PermissionSelectInjected>(b.permissionSelect())(sid('s1'))
+    expect(seat.colors).toEqual({})
+    expect(seat.fullAccessRemembered).toBe(false)
+    const proj = { sessionId: sid('s1') }
+    b.values.set(sid('s1'), { currentValue: 'workspace-write' })
+    const options = await b.popup().options(proj, new AbortController().signal)
+    expect(options.find(option => option.id === 'danger-full-access')?.confirmation).toBeDefined()
+  })
+
+  it('stops asking for Full access once the answer is recorded and remembered', async () => {
+    const b = await bench({ options: { rememberFullAccess: true } })
+    const proj = { sessionId: sid('s1') }
+    b.values.set(sid('s1'), { currentValue: 'workspace-write' })
+    const seat = slotInjected<PermissionSelectInjected>(b.permissionSelect())(sid('s1'))
+
+    seat.acknowledgeFullAccess()
+    const options = await b.popup().options(proj, new AbortController().signal)
+    expect(options.find(option => option.id === 'danger-full-access')?.confirmation).toBeUndefined()
+    // Auto review keeps asking every time.
+    expect(options.find(option => option.id === 'auto')?.confirmation).toBeDefined()
+
+    // Picking Full access through the slash picker records the answer too.
+    const fresh = await bench({ options: { rememberFullAccess: true } })
+    fresh.values.set(sid('s1'), { currentValue: 'workspace-write' })
+    await fresh.popup().onSelect({ id: 'danger-full-access', label: 'Full access' }, proj)
+    const after = await fresh.popup().options(proj, new AbortController().signal)
+    expect(after.find(option => option.id === 'danger-full-access')?.confirmation).toBeUndefined()
+    // An ordinary pick records nothing.
+    const ordinary = await bench({ options: { rememberFullAccess: true } })
+    ordinary.values.set(sid('s1'), { currentValue: 'workspace-write' })
+    await ordinary.popup().onSelect({ id: 'read-only', label: 'Read only' }, proj)
+    expect(ordinary.acknowledgedWrites).toEqual([])
+  })
+
+  it('hides the local controls of a Session whose agent preset manages its own permissions', async () => {
+    const b = await bench({ options: { hiddenAgentPresets: ['remote-review'] } })
+    const c = b.decoration()!
+    b.setAgentPreset('remote-review')
+    expect(c.available({ sessionId: sid('s1') })).toBe(false)
+
+    b.values.set(sid('s1'), { currentValue: 'workspace-write' })
+    expect(c.available({ sessionId: sid('s1') })).toBe(false)
+
+    // Exact matches only, and a Session without the projection keeps its controls.
+    b.setAgentPreset('remote-review-extra')
+    expect(c.available({ sessionId: sid('s1') })).toBe(true)
+    b.setAgentPreset(undefined)
+    expect(c.available({ sessionId: sid('s1') })).toBe(true)
   })
 
   it('availability follows the session projection; options mark the current value active', async () => {

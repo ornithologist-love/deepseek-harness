@@ -37,6 +37,8 @@ When the live catalog withdraws a preset, the composer closes its pending confir
 
 The row derives its options from the host's dynamic `defaultPreset` enum, uses the same localized built-in labels as the current-session picker, and writes one settings mutation. Current-session-only contributions such as `auto` are absent. The value applies only when a later session is created; changing it never switches or rewrites the current session.
 
+A deployment may color presets, remember one Full access acknowledgement, and step aside for Sessions that enforce permissions themselves. Omitted, all three keep the behavior described above. The acknowledgement is stored as the volatile `fullAccessAcknowledged` user setting of the `ui-permission` entry, which the General page does not list.
+
 -----
 
 <a id="understand-the-implementation"></a>
