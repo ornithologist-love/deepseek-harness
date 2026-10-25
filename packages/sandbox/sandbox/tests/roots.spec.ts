@@ -43,4 +43,14 @@ describe('writableRoots', () => {
     // Deduplicated after canonicalization (/tmp and os.tmpdir() may coincide).
     expect(new Set(writable).size).toBe(writable.length)
   })
+
+  it('workspace-write grants every member of a multi-folder workspace', () => {
+    const primary = mkdtempSync(join(tmpdir(), 'dsh-ws-'))
+    const member = mkdtempSync(join(tmpdir(), 'dsh-ws-'))
+    roots.push(primary, member)
+    const writable = writableRoots({ mode: 'workspace-write', workspaceRoot: primary, workspaceRoots: [primary, member] })
+    expect(writable).toContain(realpathSync.native(primary))
+    expect(writable).toContain(realpathSync.native(member))
+    expect(writableRoots({ mode: 'read-only', workspaceRoot: primary, workspaceRoots: [primary, member] })).toEqual([])
+  })
 })

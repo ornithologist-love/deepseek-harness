@@ -133,6 +133,34 @@ describe('SandboxPolicyService', () => {
     })
   })
 
+  it('resolves the members of a registered multi-folder workspace, primary first', async () => {
+    const ctx = await mounted({ mode: 'workspace-write', workspaceRoot: '/fallback' })
+    const owned = session('sess-members', '/projects/game')
+    const dispose = ctx.sandboxPolicy.registerWorkspaceRoots(current =>
+      current.id === owned.id ? ['/projects/engine', '/projects/game', '/projects/engine'] : undefined)
+    expect(ctx.sandboxPolicy.resolve({ session: owned })).toEqual({
+      mode: 'workspace-write',
+      workspaceRoot: '/projects/engine',
+      workspaceRoots: ['/projects/engine', '/projects/game'],
+      sessionId: 'sess-members',
+    })
+    expect(ctx.sandboxPolicy.resolve({ session: session('sess-other', '/projects/other') })).not.toHaveProperty('workspaceRoots')
+    expect(ctx.sandboxPolicy.resolve()).not.toHaveProperty('workspaceRoots')
+    dispose()
+    expect(ctx.sandboxPolicy.resolve({ session: owned }).workspaceRoot).toBe('/projects/game')
+  })
+
+  it('rejects an empty member set and a session owned by two workspace sources', async () => {
+    const ctx = await mounted()
+    const owned = session('sess-conflict', '/projects/game')
+    const empty = ctx.sandboxPolicy.registerWorkspaceRoots(() => [])
+    expect(() => ctx.sandboxPolicy.resolve({ session: owned })).toThrow('at least one directory')
+    empty()
+    ctx.sandboxPolicy.registerWorkspaceRoots(() => ['/projects/game'])
+    ctx.sandboxPolicy.registerWorkspaceRoots(() => ['/projects/engine'])
+    expect(() => ctx.sandboxPolicy.resolve({ session: owned })).toThrow('more than one source')
+  })
+
   it('uses the configured root when a session has no cwd', async () => {
     const ctx = await mounted({ workspaceRoot: '/fallback' })
     expect(ctx.sandboxPolicy.resolve({ session: session('sess-no-cwd') }).workspaceRoot).toBe('/fallback')
@@ -179,6 +207,12 @@ describe('sandbox:policy request context', () => {
     } as const
 
     expect(await policyContext(ctx, session(`sess-${mode}`, '/projects/../projects/current'))).toBe(expected[mode])
+  })
+
+  it('lists every member of a multi-folder workspace', async () => {
+    const ctx = await promptMounted({ mode: 'workspace-write' })
+    ctx.sandboxPolicy.registerWorkspaceRoots(() => ['/projects/game', '/projects/engine'])
+    expect(await policyContext(ctx, session('sess-members', '/projects/game'))).toBe(`Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under these workspace member directories: ${JSON.stringify(['/projects/game', '/projects/engine'])}. A single command may write across these members. Some platform temporary areas may also be writable.`)
   })
 
   it('keeps the complete rendered prompt byte-stable across TMPDIR changes', async () => {
