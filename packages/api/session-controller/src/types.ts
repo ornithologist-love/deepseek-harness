@@ -139,6 +139,8 @@ export interface ModelCatalogModel {
   readonly name: string
   readonly description?: string
   readonly reasoning?: ModelReasoning
+  /** Whether the catalog recommends this model; the model menu can then list only recommended models. */
+  readonly recommended?: boolean
 }
 
 /** One provider and its successfully loaded model catalog. */

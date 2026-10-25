@@ -62,9 +62,12 @@ const MEASURE_STYLE: CSSProperties = { visibility: 'hidden', left: 0, top: 0 }
  * @returns the trigger and, while open, the two-level menu.
  */
 export function ModelSelect(
-  { locked, available, directory, load, select, t, renderSlot }:
+  { locked, available, directory, load, select, offersProviderSetup, t, renderSlot }:
   ModelSelectInjected & Pick<PropsRuntime<'conversation.input.model'>, 'locked'> & PropsLocale<'model'>
-    & Omit<PropsRenderSlots<'conversation.input.model.label'>, 'SessionProvider'>,
+    & Omit<PropsRenderSlots<
+      'conversation.input.model.label' | 'conversation.input.model.icon' | 'conversation.input.model.badge'
+      | 'conversation.input.model.provider-setup'
+    >, 'SessionProvider'>,
 ) {
   const state = useSyncExternalStore(
     fn => directory.subscribe(fn),
@@ -73,6 +76,8 @@ export function ModelSelect(
   const [open, setOpen] = useState(false)
   const [pane, setPane] = useState<Pane>('root')
   const [query, setQuery] = useState('')
+  // Providers that mark recommended models list only those until the filter is cleared.
+  const [recommendedOnly, setRecommendedOnly] = useState(true)
   const [highlightedIndex, setHighlightedIndex] = useState<number | null>(null)
   const [selectionFocus, setSelectionFocus] = useState(false)
   // The in-menu error strip serves catalog loads (its Retry re-runs the
@@ -112,9 +117,16 @@ export function ModelSelect(
       } satisfies ModelSelection,
     }))), [groups])
   const showSearch = choices.length > 4
+  const hasRecommended = groups.some(group => group.models.some(model => model.recommended === true))
+  // With a setup contribution, a provider with an empty catalog stays listed (matched by its name while searching).
+  const listEmptyProviders = offersProviderSetup()
   const filteredGroups = useMemo(() => groups.map(group => ({
-    ...group, models: rankByName(group.models, showSearch ? query.trim() : ''),
-  })).filter(group => group.models.length > 0), [groups, query, showSearch])
+    ...group,
+    models: rankByName(group.models.filter(model => !recommendedOnly
+      || !group.models.some(item => item.recommended === true) || model.recommended === true), showSearch ? query.trim() : ''),
+  })).filter(group => group.models.length > 0 || (listEmptyProviders && groups.find(source => source.id === group.id)?.models.length === 0
+    && (query.trim() === '' || group.provider.name.toLowerCase().includes(query.trim().toLowerCase())))),
+  [groups, query, showSearch, recommendedOnly, listEmptyProviders])
   const visibleModels = useMemo(() => filteredGroups.flatMap(group => group.models.map(model => ({
     provider: group.id, model: model.id,
   }))), [filteredGroups])
@@ -481,7 +493,11 @@ export function ModelSelect(
           }
         }}
       >
-        <IconDataOutlineRegular className={css.triggerIcon} size={16} />
+        {renderSlot('conversation.input.model.icon', {
+          provider: currentChoice?.group.provider,
+          model: currentChoice?.model,
+          placement: 'trigger',
+        }, { fallback: <IconDataOutlineRegular className={css.triggerIcon} size={16} /> })}
         <span className={css.triggerLabel}>
           {currentChoice === undefined ? modelLabel : renderModelLabel(currentChoice.group.provider, currentChoice.model, 'trigger', true)}
         </span>
@@ -525,6 +541,16 @@ export function ModelSelect(
 
           {pane === 'model' && (
             <>
+              {hasRecommended && (
+                <label className={css.recommendedFilter}>
+                  <input
+                    type="checkbox"
+                    checked={recommendedOnly}
+                    onChange={(event) => { setRecommendedOnly(event.target.checked); setHighlightedIndex(null) }}
+                  />
+                  {t('filter.recommended')}
+                </label>
+              )}
               {showSearch && <div className={css.searchRow}>
                 <Input
                   ref={searchRef}
@@ -579,7 +605,14 @@ export function ModelSelect(
               >
                 {filteredGroups.map((group) => {
                   return (
-                    <MenuGroup key={group.id} label={group.provider.name}>
+                    <MenuGroup
+                      key={group.id}
+                      label={group.provider.name}
+                      icon={renderSlot('conversation.input.model.icon', { provider: group.provider, model: undefined, placement: 'group' })}
+                    >
+                      {group.models.length === 0 && renderSlot('conversation.input.model.provider-setup', {
+                        provider: group.provider, close: () => { close(true) },
+                      })}
                       {group.models.map((model) => {
                         const index = modelIndex++
                         const selected = state.current?.provider === group.id && state.current.model === model.id
@@ -605,9 +638,11 @@ export function ModelSelect(
                             disabled={busy}
                             onClick={() => { choose({ provider: group.id, model: model.id }) }}
                           >
+                            {renderSlot('conversation.input.model.icon', { provider: group.provider, model, placement: 'option' })}
                             <span className={css.optionCopy}>
                               <span className={css.modelName}>{renderModelLabel(group.provider, model, 'option', selected)}</span>
                             </span>
+                            {renderSlot('conversation.input.model.badge', { provider: group.provider, model, selected })}
                             <span className={css.check}>
                               {pending?.provider === group.id && pending.model === model.id
                                 ? <StateDot state="ongoing" />

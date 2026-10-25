@@ -33,6 +33,7 @@ export const zh = {
   'search.empty': '没有匹配的模型。',
   'empty.models': '暂无可用模型',
   'empty.efforts': '当前模型未提供推理等级。',
+  'filter.recommended': '仅显示推荐模型',
 } satisfies Record<string, string>
 
 /** The model namespace key union. */
@@ -63,4 +64,5 @@ export const en = {
   'search.empty': 'No matching models.',
   'empty.models': 'No models available.',
   'empty.efforts': 'This model provides no reasoning effort levels.',
+  'filter.recommended': 'Recommended models only',
 } satisfies Record<ModelKey, string>

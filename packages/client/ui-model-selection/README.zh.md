@@ -53,6 +53,14 @@ composer 菜单中的模型名称和推理等级均使用 400（regular）字重
 
 以 type-only 方式导入本包的 `/client` 声明，再通过 `ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({ name: 'conversation.input.model.label' }, ModelLabel))` 注册。`ModelLabel` 的 props 从 `PropsRuntime<'conversation.input.model.label'>` 派生；用提供方 ID 选择 CSS Module 类，并保留 `model.name` 作为文字。注册随声明和贡献插件的生命周期清理。不替换组件时，样式也可以在三个显示位置通过名称外层的 `data-provider-id` 和 `data-model-id` 属性定位。
 
+### 图标、徽标与提供方配置
+
+`conversation.input.model.icon` 是会话作用域的内联 `single` slot，为触发按钮（`placement: 'trigger'`）、各提供方标题（`'group'`）和各模型行（`'option'`）提供装饰性标记。owner props 提供 `provider`（触发按钮未选中目录内模型时缺省）、`model`（提供方标题处缺省）和 `placement`。没有贡献时，触发按钮保留 Models 图标，标题和模型行不显示图标。`conversation.input.model.badge` 在每个模型行末尾添加非交互内容，props 与名称 slot 相同：`provider`、`model` 和 `selected`。
+
+目录中任一模型带 `recommended: true` 时，composer 模型菜单提供默认勾选的“仅显示推荐模型”复选框。勾选期间，标记了推荐模型的提供方只列出推荐模型，其他提供方列出全部模型。
+
+目录为空的提供方默认隐藏；注册了 `conversation.input.model.provider-setup` 贡献后，这类提供方保留标题（搜索时按名称匹配），贡献渲染在标题下方，接收 `provider` 和关闭菜单的 `close()`。
+
 ### 不可路由的会话
 
 目录可用性不会阻止使用已保存选择发送消息；请求执行负责报告凭据缺失或模型不可用。刷新及刷新失败期间保留上次显示的选择和分组。Host 重置时清空这些显示。退登后选择器隐藏账号提供方，同时保留已保存的提供方／模型 ID 和推理强度。再次登录且该模型可用时恢复目录名称。既有会话日志保持不变。
