@@ -19,7 +19,7 @@ import clsx from 'clsx'
 import { WorkspaceDialogs } from './WorkspaceDialogs.tsx'
 import {
   AnimatedRows, HoverCardGroup, IconArchiveCheckOutlineRegular, IconArchiveOffOutlineRegular, IconArchiveOutlineRegular,
-  IconChevronsUpDownOutlineRegular, IconClockOutlineRegular, IconCloseFillRegular,
+  IconChevronDownOutlineRegular, IconChevronsUpDownOutlineRegular, IconClockOutlineRegular, IconCloseFillRegular,
   IconFlatListOutlineRegular, IconFolderCloseRegular, IconProjectAddOutlineRegular,
   IconQueueOutlineRegular, IconSearchOutlineRegular, IconSlidersTwoOutlineRegular,
   IconWorkspaceTreeOutlineRegular, Menu, Tooltip,
@@ -32,14 +32,17 @@ import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+import type { ExternalWorkspaceHostId, WorkspacePresentationSnapshot } from '../presentation.ts'
 import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
   deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
   pinCurrentBlank, reconcileManualOrder, sessionMemberIds, UNGROUPED_KEY,
 } from '../tree.ts'
-import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
+import { LocalGlyph, ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
+import { ExternalGroups } from './ExternalGroups.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
+import { RemoteWorkspacePicker } from '../RemoteWorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
 
 /**
@@ -261,6 +264,12 @@ type SessionTreeProps = Pick<
   | 'sidebar.session.row.leading'
   | 'sidebar.session.row.hover'
 > & {
+  /** Deployment presentation: icons, the ungrouped heading and the Edit action. */
+  presentation: WorkspacePresentationSnapshot
+  /** Add a Workspace on one external machine; present when machine sections sit beside the local one. */
+  onAddRemote?: ((hostId: ExternalWorkspaceHostId) => void) | undefined
+  /** Hide the local machine's Workspace rows while keeping local Recent Sessions visible. */
+  localExpanded?: boolean
   shortcuts: readonly import('@deepseek-ai/dsh-client-shortcuts/client').ShortcutCatalogEntry[]
   /** Always-mounted Session list snapshot. */
   list: SessionListState
@@ -310,16 +319,35 @@ function EmptySessions({ rowState, onLeaveArchivedOnly, t }: Pick<SessionTreePro
   )
 }
 
+/**
+ * Apply the presentation's row visibility to the Session list.
+ * @param list - Session list snapshot.
+ * @param presentation - excluded and classified Session ids.
+ * @returns the list itself when nothing is hidden, otherwise a filtered copy.
+ */
+function visibleSessions(list: SessionListState, presentation: WorkspacePresentationSnapshot): SessionListState {
+  const { excludedSessionIds, classifiedSessionIds } = presentation
+  if ((excludedSessionIds === undefined || excludedSessionIds.length === 0) && classifiedSessionIds === undefined) return list
+  const excluded = new Set(excludedSessionIds)
+  const classified = classifiedSessionIds === undefined ? undefined : new Set(classifiedSessionIds)
+  const visible = (id: string): boolean => !excluded.has(id) && (classified === undefined || classified.has(id))
+  return {
+    ...list,
+    ids: list.ids.filter(visible),
+    byId: Object.fromEntries(Object.entries(list.byId).filter(([id]) => visible(id))),
+  }
+}
+
 /** The scrolling session tree; unmounting drops the sessions subscription and the session watermarks. */
 function SessionTree({
-  list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
+  presentation, list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
   rowState, onLeaveArchivedOnly,
   workspaceReady, animationResetKey, usePanelInfo, useRemoteAccess, useSessionAccess, useWorkspaceAccess,
   onSessionRenameRequest,
   renderSlot, openSessionMenu, openWorkspaceMenu, useContextMenuTarget, useContextMenu,
   insertWorkspaceBefore,
   nestWorkspaces, groupExpansion, setGroupExpanded,
-  setSessionOrder, home, t,
+  setSessionOrder, home, t, onAddRemote, localExpanded = true,
   revealSessionId, onSessionRevealed, shortcuts,
 }: SessionTreeProps) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
@@ -364,18 +392,17 @@ function SessionTree({
     }
     return keys
   }, [currentGroup, parents])
+  const recent = presentation.ungrouped === 'recent'
   const expandedGroups = useMemo(() => {
     const ancestorKeys = new Set<string | undefined>(parents.values())
     return [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY]
-      .filter(key => groupExpansion[key] ?? ancestorKeys.has(key))
-  }, [groupExpansion, parents, workspaces])
-  const groups = useMemo(
-    () => deriveGroups(list, workspaces, rowState, statuses, {
-      expandedGroups,
-      ungroupedOrder: ungroupedSessionIds,
-    }),
-    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds],
-  )
+      // The Recent heading cannot be collapsed, so its bucket stays expanded.
+      .filter(key => (key === UNGROUPED_KEY && recent) || (groupExpansion[key] ?? ancestorKeys.has(key)))
+  }, [groupExpansion, parents, workspaces, recent])
+  const groups = useMemo(() => deriveGroups(list, workspaces, rowState, statuses, {
+    expandedGroups,
+    ungroupedOrder: ungroupedSessionIds,
+  }), [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds])
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
       if (groupExpansion[key] === false || (key === revealGroup && groupExpansion[key] !== true)) {
@@ -552,6 +579,8 @@ function SessionTree({
           }}
       >
         <ProjectRowItem
+          recent={recent && group.workspaceId === undefined}
+          icon={presentation.items.find(item => item.workspaceId === group.workspaceId)?.icon}
           newShortcut={shortcuts.find(row => row.id === 'session.new')}
           group={group}
           openWorkspaceMenu={openWorkspaceMenu} useContextMenu={useContextMenu} useContextMenuTarget={useContextMenuTarget}
@@ -578,8 +607,8 @@ function SessionTree({
           </div>
         )}
         {sessions.map((node) => {
-        // Session drag never leaves its browser-local account, and pinned
-        // rows reorder only within their leading pinned block.
+          // Session drag never leaves its browser-local account, and pinned
+          // rows reorder only within their leading pinned block.
           const sameGroupDrag = drag !== null && drag.accountKey === group.key
           const compatibleTarget = sameGroupDrag && drag.pinned === node.pinned
           const normalizeHalf = (half: 'before' | 'after'): 'before' | 'after' =>
@@ -611,6 +640,7 @@ function SessionTree({
           return (
             <SessionNodeItem
               key={node.id}
+              flat={recent && group.workspaceId === undefined}
               node={node}
               currentId={current}
               now={now}
@@ -656,7 +686,8 @@ function SessionTree({
     )
   }
 
-  const groupRows = rootGroups.map(group => renderGroup(group, 0))
+  const groupRows = localExpanded ? rootGroups.filter(group => group.workspaceId !== undefined).map(group => renderGroup(group, 0)) : []
+  const looseRows = rootGroups.filter(group => group.workspaceId === undefined).map(group => renderGroup(group, 0))
   return (
     <HoverCardGroup className={clsx(css.treeBody, css.wide)}>
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
@@ -668,10 +699,16 @@ function SessionTree({
         ready={list.phase === 'ready' && workspaceReady && !nativeDragActive}
         resetKey={JSON.stringify([animationResetKey, watermarkMotionKey])}
       >
-        {groups.length === 0 && (
+        {localExpanded && groups.length === 0 && (
           <EmptySessions rowState={rowState} onLeaveArchivedOnly={onLeaveArchivedOnly} t={t} />
         )}
         {groupRows}
+        <ExternalGroups catalog={presentation.external} active={panelActive} recent={recent}
+          includeUngrouped={rowState.archivedFilter !== 'only'} onAdd={onAddRemote}
+          machineExpansion={presentation.machineExpansion} t={t}
+          useContextMenu={useContextMenu} useContextMenuTarget={useContextMenuTarget} />
+        {/* Local Recent Sessions remain separate from the machine sections. */}
+        {onAddRemote !== undefined && looseRows.length > 0 ? <div className={css.sharedSection}>{looseRows}</div> : looseRows}
       </AnimatedRows>
       <span className={css.fade} />
     </HoverCardGroup>
@@ -682,7 +719,8 @@ function SessionTree({
 function FlatList({
   list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, useSessionAccess, open, onSessionRenameRequest,
   usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
-  revealSessionId, onSessionRevealed, renderSlot, openSessionMenu, useContextMenuTarget, useContextMenu, home, t,
+  revealSessionId, onSessionRevealed, renderSlot, openSessionMenu, useContextMenuTarget, useContextMenu, home, t, external, onAddRemote,
+  localExpanded = true, machineExpansion,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
@@ -704,6 +742,10 @@ function FlatList({
 > & {
   list: SessionListState
   sessionIds: readonly SessionId[]
+  external: WorkspacePresentationSnapshot['external']
+  onAddRemote?: SessionTreeProps['onAddRemote']
+  localExpanded?: boolean
+  machineExpansion?: WorkspacePresentationSnapshot['machineExpansion']
 }) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
@@ -731,14 +773,14 @@ function FlatList({
         className={clsx(css.list, css.flatList)}
         role="tree"
         label={t('section.sessions')}
-        rowKeys={rows.length === 0 ? ['empty'] : rows.map(row => `session:${row.id}`)}
+        rowKeys={!localExpanded ? [] : rows.length === 0 ? ['empty'] : rows.map(row => `session:${row.id}`)}
         ready={list.phase === 'ready' && workspaceReady && drag === null}
         resetKey={animationResetKey}
       >
-        {rows.length === 0 && (
+        {localExpanded && rows.length === 0 && (
           <EmptySessions rowState={rowState} onLeaveArchivedOnly={onLeaveArchivedOnly} t={t} />
         )}
-        {rows.map((node) => {
+        {localExpanded && rows.map((node) => {
           const active = drag !== null && drag.pinned === node.pinned
           const normalizeHalf = (half: 'before' | 'after'): 'before' | 'after' =>
             node.blank ? 'after' : half
@@ -783,6 +825,8 @@ function FlatList({
             />
           )
         })}
+        <ExternalGroups catalog={external} active={panelActive} onAdd={onAddRemote} machineExpansion={machineExpansion} t={t}
+          useContextMenu={useContextMenu} useContextMenuTarget={useContextMenuTarget} />
       </AnimatedRows>
       <span className={css.fade} />
     </HoverCardGroup>
@@ -810,18 +854,25 @@ function SearchResults({
   resultLimit,
   usePanelInfo,
   useSessionAccess,
-  t,
-}: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo' | 'useSessionAccess'> & {
-  workspaces: readonly WorkspaceView[]
-  archivedSessionIds: readonly SessionNode['id'][]
-  /** Search matches follow the archived filter selected for the list. */
-  archivedFilter: ArchivedFilter
-  /** Unarchive an archived result row in place. */
-  onUnarchive: (id: SessionNode['id']) => void
-  query: string
-  remote: RemoteSearchState
-  resultLimit: number
-}) {
+  useContextMenu,
+  useContextMenuTarget,
+  t, external, onAddRemote, machineExpansion,
+}: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo' | 'useSessionAccess'
+  | 'useContextMenu' | 'useContextMenuTarget'> & {
+    workspaces: readonly WorkspaceView[]
+    archivedSessionIds: readonly SessionNode['id'][]
+    /** Search matches follow the archived filter selected for the list. */
+    archivedFilter: ArchivedFilter
+    /** Unarchive an archived result row in place. */
+    onUnarchive: (id: SessionNode['id']) => void
+    query: string
+    remote: RemoteSearchState
+    resultLimit: number
+    external: WorkspacePresentationSnapshot['external']
+    /** Present when each machine section owns its own search, so this query stays local. */
+    onAddRemote?: SessionTreeProps['onAddRemote']
+    machineExpansion?: WorkspacePresentationSnapshot['machineExpansion']
+  }) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const list = useSessions(s => s)
   const statuses = useSessionStatus(s => s)
@@ -886,6 +937,9 @@ function SearchResults({
           </div>
         )}
       </div>
+      <ExternalGroups catalog={external} active={panelActive} query={onAddRemote === undefined ? query : ''}
+        onAdd={onAddRemote} machineExpansion={machineExpansion} t={t}
+        useContextMenu={useContextMenu} useContextMenuTarget={useContextMenuTarget} />
       <span className={css.fade} />
     </div>
   )
@@ -898,6 +952,7 @@ function SearchResults({
  */
 export function WorkspaceBrowser({
   wide,
+  renderFactorySlot,
   usePanelInfo,
   expandSidebar,
   useSessions,
@@ -923,6 +978,7 @@ export function WorkspaceBrowser({
   useHostInfo,
   useShortcuts,
   useWorkspaceShortcuts,
+  useWorkspacePresentation,
   requestSearch,
   requestAddWorkspace,
   closeAddWorkspace,
@@ -936,8 +992,18 @@ export function WorkspaceBrowser({
   const addShortcut = shortcuts.find(row => row.id === 'workspace.add')
   const shortcutState = useWorkspaceShortcuts(state => state)
   // Ordering remains live while the rail or search replaces the list body.
-  const list = useSessions(state => state)
-  const storedWorkspaces = useWorkspaces(state => state.items)
+  const presentation = useWorkspacePresentation(state => state)
+  const allSessions = useSessions(state => state)
+  const list = useMemo(() => visibleSessions(allSessions, presentation), [allSessions, presentation])
+  const registeredWorkspaces = useWorkspaces(state => state.items)
+  const storedWorkspaces = useMemo(() => {
+    const pinned = new Set(presentation.items.filter(item => item.pinned === true).map(item => item.workspaceId))
+    if (pinned.size === 0) return registeredWorkspaces
+    return [
+      ...registeredWorkspaces.filter(item => pinned.has(item.workspaceId)),
+      ...registeredWorkspaces.filter(item => !pinned.has(item.workspaceId)),
+    ]
+  }, [registeredWorkspaces, presentation.items])
   // The resolved name, not `t`, is the memo dependency: the bound seat keeps
   // its identity across a language switch.
   const defaultWorkspaceName = t('workspace.defaultName')
@@ -1215,12 +1281,47 @@ export function WorkspaceBrowser({
       console.warn('session unarchive rejected:', reason)
     })
   }
+  const [remoteAddHost, setRemoteAddHost] = useState<ExternalWorkspaceHostId>()
+
+  // Beside external machines, this header becomes the local machine's section: search and
+  // add act on this machine only, and the view options move to a row above every machine.
+  const machines = wide && !!presentation.external?.hosts.length && !presentation.external.hideLocalWorkspaces
+  const localExpanded = !machines || searchExpanded || normalizedQuery !== '' || presentation.machineExpansion?.local !== false
+  const viewOptions = (
+    <ViewOptionsMenu
+      groupBy={groupBy}
+      orderBy={orderBy}
+      archivedFilter={archivedFilter}
+      onGroupPick={actions.setGroupBy}
+      onOrderPick={(mode) => { actions.setOrderBy(mode, activeSessionOrders) }}
+      onArchivedFilterPick={actions.setArchivedFilter}
+      t={t}
+    />
+  )
+  const onAddRemote = machines ? setRemoteAddHost : undefined
+
   return (
     <div className={clsx(css.root, !wide && css.rail)}>
-      <div className={clsx(css.sectionHeader, wide && searchSpacingMotionEnabled && css.searchSpacingMotion)}>
-        {wide && (
-          <span className={clsx(css.sectionLabel, css.wide, searchExpanded && css.sectionLabelHidden)}>
+      {machines && (
+        <div className={css.sectionHeader}>
+          <span className={clsx(css.sectionLabel, css.wide, css.globalLabel)}>
             {groupBy === 'flat' ? t('section.sessions') : t('section.workspaces')}
+          </span>
+          <div className={css.headerActions}>{viewOptions}</div>
+        </div>
+      )}
+      <div className={clsx(css.sectionHeader, machines && css.localMachineHeader,
+        wide && searchSpacingMotionEnabled && css.searchSpacingMotion)}>
+        {wide && (
+          <span className={clsx(css.sectionLabel, css.wide, searchExpanded && css.sectionLabelHidden, machines && css.machineTitle)}>
+            {machines ? <>
+              {presentation.machineExpansion && <button type="button" className={css.machineToggle}
+                aria-expanded={localExpanded} aria-label={t(localExpanded ? 'machine.collapse' : 'machine.expand', { host: t('section.localWorkspaces') })}
+                onClick={() => { setQuery(''); setSearchExpanded(false); presentation.machineExpansion?.setExpanded(undefined, !localExpanded) }}>
+                <IconChevronDownOutlineRegular size={14} />
+              </button>}
+              <span className={css.machineIcon}><LocalGlyph size={16} /></span>{t('section.localWorkspaces')}</>
+              : groupBy === 'flat' ? t('section.sessions') : t('section.workspaces')}
           </span>
         )}
         {wide && (
@@ -1281,17 +1382,7 @@ export function WorkspaceBrowser({
           </div>
         )}
         <div className={clsx(css.headerActions, wide && searchExpanded && css.headerActionsHidden)}>
-          {wide && (
-            <ViewOptionsMenu
-              groupBy={groupBy}
-              orderBy={orderBy}
-              archivedFilter={archivedFilter}
-              onGroupPick={actions.setGroupBy}
-              onOrderPick={(mode) => { actions.setOrderBy(mode, activeSessionOrders) }}
-              onArchivedFilterPick={actions.setArchivedFilter}
-              t={t}
-            />
-          )}
+          {wide && !presentation.external?.hideLocalWorkspaces && !machines && viewOptions}
           {/* Adding is the button's one action, so a composition with no
               picking affordance has nothing to offer here: the region hides the
               button rather than leaving a dead one in the header. */}
@@ -1318,6 +1409,9 @@ export function WorkspaceBrowser({
           open={wsPickerOpen}
           anchorRef={wsPlusRef}
           useWorkspaces={useWorkspaces}
+          renderFactorySlot={renderFactorySlot}
+          presentationItems={presentation.items}
+          external={machines ? undefined : presentation.external}
           createWorkspace={createWorkspace}
           useDirectoryFlow={useDirectoryFlow}
           renderDirectoryFlow={owner => renderSlot('sidebar.workspaces.directoryFlow', owner)}
@@ -1330,6 +1424,9 @@ export function WorkspaceBrowser({
           }}
           onClose={() => { closeAddWorkspace() }}
         />
+        {remoteAddHost !== undefined && presentation.external && <RemoteWorkspacePicker catalog={presentation.external}
+          hostId={remoteAddHost} renderFactorySlot={renderFactorySlot} t={t}
+          onLocal={() => { setRemoteAddHost(undefined) }} onClose={() => { setRemoteAddHost(undefined) }} />}
       </div>
 
       {/* The collapsed rail keeps search as its own 36px control. */}
@@ -1352,81 +1449,97 @@ export function WorkspaceBrowser({
       {/* Always-mounted seat keeps the region's flex slot while the list
           itself is wide-only. */}
       <div className={css.listArea}>
-        {wide && (normalizedQuery !== ''
-          ? (
-            <SearchResults
-              usePanelInfo={usePanelInfo}
-              useSessionAccess={useSessionAccess}
-              useSessions={useSessions}
-              useSessionStatus={useSessionStatus}
-              open={openSearchResult}
-              onUnarchive={onSessionUnarchive}
-              workspaces={workspaces}
-              archivedSessionIds={archivedSessionIds}
-              archivedFilter={archivedFilter}
-              query={normalizedQuery}
-              remote={remoteSearch}
-              resultLimit={searchResultLimit}
-              t={t}
-            />
-          )
-          : groupBy === 'flat'
+        {wide && (presentation.external?.hideLocalWorkspaces
+          ? <ExternalGroups catalog={presentation.external} active={true} query={normalizedQuery}
+            machineExpansion={presentation.machineExpansion} recent={presentation.ungrouped === 'recent'} t={t}
+            useContextMenu={useContextMenu} useContextMenuTarget={useContextMenuTarget} />
+          : normalizedQuery !== ''
             ? (
-              <FlatList
-                useSessionAccess={useSessionAccess}
-                usePanelInfo={usePanelInfo}
-                list={list}
-                sessionIds={orderedFlatSessionIds}
-                rowState={rowState}
-                onLeaveArchivedOnly={leaveArchivedOnly}
-                workspaceReady={workspaceReady}
-                animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
-                useSessionStatus={useSessionStatus}
-                open={guardedOpen}
-                onSessionRenameRequest={requestSessionRename}
-                renderSlot={renderSlot}
-                openSessionMenu={openSessionMenu} useContextMenu={useContextMenu}
+              <SearchResults
+                external={presentation.external}
+                onAddRemote={onAddRemote}
+                machineExpansion={presentation.machineExpansion}
+                useContextMenu={useContextMenu}
                 useContextMenuTarget={useContextMenuTarget}
-                setSessionOrder={saveSessionOrder}
-                revealSessionId={revealSessionId}
-                onSessionRevealed={acknowledgeSessionReveal}
-                home={home}
+                usePanelInfo={usePanelInfo}
+                useSessionAccess={useSessionAccess}
+                useSessions={useSessions}
+                useSessionStatus={useSessionStatus}
+                open={openSearchResult}
+                onUnarchive={onSessionUnarchive}
+                workspaces={workspaces}
+                archivedSessionIds={archivedSessionIds}
+                archivedFilter={archivedFilter}
+                query={normalizedQuery}
+                remote={remoteSearch}
+                resultLimit={searchResultLimit}
                 t={t}
               />
             )
-            : (
-              <SessionTree
-                useRemoteAccess={useRemoteAccess}
-                useSessionAccess={useSessionAccess}
-                useWorkspaceAccess={useWorkspaceAccess}
-                usePanelInfo={usePanelInfo}
-                list={list}
-                shortcuts={shortcuts}
-                useSessionStatus={useSessionStatus}
-                onSessionRenameRequest={requestSessionRename}
-                renderSlot={renderSlot}
-                openSessionMenu={openSessionMenu} useContextMenu={useContextMenu}
-                openWorkspaceMenu={openWorkspaceMenu}
-                useContextMenuTarget={useContextMenuTarget}
-                workspaces={orderedWorkspaces}
-                ungroupedSessionIds={orderedUngroupedSessionIds}
-                workspaceReady={workspaceReady}
-                nestWorkspaces={groupBy === 'workspace-tree'}
-                animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
-                groupExpansion={groupExpansion}
-                setGroupExpanded={actions.setGroupExpanded}
-                setSessionOrder={saveSessionOrder}
-                rowState={rowState}
-                onLeaveArchivedOnly={leaveArchivedOnly}
-                startSession={startSession}
-                open={guardedOpen}
-                insertWorkspaceBefore={insertWorkspaceBefore}
-                revealSessionId={revealSessionId}
-                onSessionRevealed={acknowledgeSessionReveal}
-                home={home}
-                t={t}
-              />
-            ))}
+            : groupBy === 'flat'
+              ? (
+                <FlatList
+                  useSessionAccess={useSessionAccess}
+                  external={presentation.external}
+                  machineExpansion={presentation.machineExpansion}
+                  localExpanded={localExpanded}
+                  onAddRemote={onAddRemote}
+                  usePanelInfo={usePanelInfo}
+                  list={list}
+                  sessionIds={orderedFlatSessionIds}
+                  rowState={rowState}
+                  onLeaveArchivedOnly={leaveArchivedOnly}
+                  workspaceReady={workspaceReady}
+                  animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
+                  useSessionStatus={useSessionStatus}
+                  open={guardedOpen}
+                  onSessionRenameRequest={requestSessionRename}
+                  renderSlot={renderSlot}
+                  openSessionMenu={openSessionMenu} useContextMenu={useContextMenu}
+                  useContextMenuTarget={useContextMenuTarget}
+                  setSessionOrder={saveSessionOrder}
+                  revealSessionId={revealSessionId}
+                  onSessionRevealed={acknowledgeSessionReveal}
+                  home={home}
+                  t={t}
+                />
+              )
+              : (
+                <SessionTree
+                  useRemoteAccess={useRemoteAccess}
+                  useSessionAccess={useSessionAccess}
+                  useWorkspaceAccess={useWorkspaceAccess}
+                  presentation={presentation}
+                  localExpanded={localExpanded}
+                  onAddRemote={onAddRemote}
+                  usePanelInfo={usePanelInfo}
+                  list={list}
+                  shortcuts={shortcuts}
+                  useSessionStatus={useSessionStatus}
+                  onSessionRenameRequest={requestSessionRename}
+                  renderSlot={renderSlot}
+                  openSessionMenu={openSessionMenu} useContextMenu={useContextMenu}
+                  openWorkspaceMenu={openWorkspaceMenu}
+                  useContextMenuTarget={useContextMenuTarget}
+                  workspaces={orderedWorkspaces}
+                  ungroupedSessionIds={orderedUngroupedSessionIds}
+                  workspaceReady={workspaceReady}
+                  nestWorkspaces={groupBy === 'workspace-tree'}
+                  animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
+                  groupExpansion={groupExpansion}
+                  setGroupExpanded={actions.setGroupExpanded}
+                  setSessionOrder={saveSessionOrder}
+                  rowState={rowState}
+                  onLeaveArchivedOnly={leaveArchivedOnly}
+                  startSession={startSession}
+                  open={guardedOpen}
+                  insertWorkspaceBefore={insertWorkspaceBefore}
+                  revealSessionId={revealSessionId}
+                  onSessionRevealed={acknowledgeSessionReveal}
+                  home={home}
+                  t={t}
+                />
+              ))}
       </div>
 
       {workspaceActionRequest !== null && <WorkspaceDialogs key={`${workspaceActionRequest.action}/${workspaceActionRequest.workspaceId}`}

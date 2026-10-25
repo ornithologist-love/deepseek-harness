@@ -36,7 +36,7 @@
  */
 import type { ContextMenuTarget } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type {
-  HostObservable, InjectFace, PropsHooks, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore, SlotHookFactory,
+  HostObservable, InjectFace, PropsHooks, PropsLocale, PropsRenderFactories, PropsRenderSlots, PropsRuntime, PropsStore, SlotHookFactory,
 } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pull the owner SlotMap merges into programs that resolve the
 // runtime shares below.
@@ -49,6 +49,7 @@ import type { SessionActivity, WorkspaceId, WorkspaceView } from '@deepseek-ai/d
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { WorkspaceShortcutState } from '../shortcuts.ts'
+import type { WorkspacePresentationSnapshot } from '../presentation.ts'
 import type { StartSessionOptions } from '../navigation.ts'
 import type {} from './toast.ts'
 import type { createWorkspaceViewStore } from '../stores.ts'
@@ -257,6 +258,8 @@ export type WorkspaceBrowserInjected = {
      * saw. Select the field the surface needs (`info => info.home`).
      */
     hostInfo: HostObservable<RemoteHostFacts>
+    /** Deployment presentation: icons, pinning, the ungrouped heading and row visibility. */
+    workspacePresentation: HostObservable<WorkspacePresentationSnapshot>
     workspaceShortcuts: HostObservable<WorkspaceShortcutState>
     shortcuts: HostObservable<readonly ShortcutCatalogEntry[]>
   }
@@ -498,6 +501,7 @@ export type RowToastProps =
 /** Full browser props: shell owner share + viewing store + injected actions + the locale seat. */
 export type WorkspaceBrowserProps =
   PropsRuntime<'sidebar.workspaces'>
+  & PropsRenderFactories
   & PropsRenderSlots<
     | 'sidebar.workspaces.directoryFlow'
     | 'sidebar.workspaces.session.row.action'
@@ -515,10 +519,24 @@ export type WorkspaceBrowserProps =
  * callback; this callback creates only the real Host Workspace. A type alias
  * supplies the implicit index signature required by the registry.
  */
-export type WorkspacePickerInjected = DirectoryPickingInjected & {
+export type WorkspacePickerInjected = {
+  hooks: DirectoryPickingInjected['hooks'] & {
+    /** Deployment presentation; the picker reads its Workspace icons. */
+    workspacePresentation: HostObservable<WorkspacePresentationSnapshot>
+  }
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
 }
+
+/** Chip-icon injected share: the presentation whose Workspace icon replaces the folder. */
+export type WorkspaceChipIconInjected = {
+  hooks: { workspacePresentation: HostObservable<WorkspacePresentationSnapshot> }
+}
+
+/** Full chip-icon props: the owner's Workspace and label state plus the presentation hook. */
+export type WorkspaceChipIconProps =
+  PropsRuntime<'conversation.hero.workspace.icon'>
+  & PropsHooks<WorkspaceChipIconInjected['hooks']>
 
 /**
  * Full picker props: the owner share plus the creation callback and the
@@ -527,7 +545,30 @@ export type WorkspacePickerInjected = DirectoryPickingInjected & {
  */
 export type WorkspacePickerProps =
   PropsRuntime<'conversation.hero.workspace'>
+  & PropsRenderFactories
   & PropsRenderSlots<'conversation.hero.workspace.directoryFlow'>
   & Omit<WorkspacePickerInjected, 'hooks'>
   & PropsHooks<WorkspacePickerInjected['hooks']>
   & PropsLocale<'workspace'>
+
+/** Browser directory chooser with operations owned by the requesting Host. */
+export interface DirectoryBrowseOwnerProps {
+  open: boolean
+  busy: boolean
+  title?: string
+  listDirectory: (path?: string, signal?: AbortSignal) => Promise<import('@deepseek-ai/dsh-api-remotes/client').DirectoryListing>
+  createDirectory: (path: string, name: string) => Promise<string>
+  onOpen: (path: string) => void
+  onClose: () => void
+}
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotFactoryMap {
+    /** Reusable directory browser supplied by the composed browse picker. */
+    'workspace.directory.browser': {
+      scope: 'root'
+      props: DirectoryBrowseOwnerProps
+      inject: { t: import('@deepseek-ai/dsh-client-locale/client').Translate }
+    }
+  }
+}

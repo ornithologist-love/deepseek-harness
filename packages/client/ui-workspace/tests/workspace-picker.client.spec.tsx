@@ -13,6 +13,7 @@ import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from '../src/client/contract/slots.ts'
 import { WorkspacePicker } from '../src/client/WorkspacePicker.tsx'
+import { DEFAULT_WORKSPACE_PRESENTATION } from '../src/client/presentation.ts'
 import { zh } from '../src/client/locales.ts'
 
 // Every fixture carries the resource hook the resources plugin merges into GlobalStandardProps.
@@ -102,7 +103,7 @@ function mount(
       useSessionStatus={hook(noPendingInteraction)}
       useSessionRetainInfo={() => undefined}
       usePanelInfo={usePanelInfo} useContextMenu={contextMenuHook()} useResource={useResource}
-      useWorkspaces={hook(workspaceState(nextItems))}
+      useWorkspaces={hook(workspaceState(nextItems))} useWorkspacePresentation={hook(DEFAULT_WORKSPACE_PRESENTATION)}
       {...allowAllAccess}
       onPick={onPick}
       onClose={onClose}
@@ -229,7 +230,7 @@ describe('WorkspacePicker', () => {
     const { renderSlot } = flowProbe()
     render(
       <WorkspacePicker
-        open useSessions={hook(sessions)} useWorkspaces={hook(workspaceState([workspace('alpha', 'Alpha')]))}
+        open useSessions={hook(sessions)} useWorkspaces={hook(workspaceState([workspace('alpha', 'Alpha')]))} useWorkspacePresentation={hook(DEFAULT_WORKSPACE_PRESENTATION)}
         useSessionStatus={hook(noPendingInteraction)}
         useSessionRetainInfo={() => undefined}
         usePanelInfo={usePanelInfo} useContextMenu={contextMenuHook()} useResource={useResource}
@@ -249,6 +250,7 @@ describe('WorkspacePicker', () => {
     render(
       <WorkspacePicker
         open anchorRef={anchor()} useSessions={hook(sessions)} useWorkspaces={hook(state)}
+        useWorkspacePresentation={hook(DEFAULT_WORKSPACE_PRESENTATION)}
         useSessionStatus={hook(noPendingInteraction)}
         useSessionRetainInfo={() => undefined}
         usePanelInfo={usePanelInfo} useContextMenu={contextMenuHook()} useResource={useResource}

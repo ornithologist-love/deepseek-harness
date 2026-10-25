@@ -43,10 +43,13 @@ import {
   type ArchiveSessionInjected, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
   type SessionArchiveConfirmInjected, type SessionArchiveConfirmRequest,
   type RenameSessionInjected, type RowToast, type RowToastInjected, type RowToastState, type SessionRenameDialogInjected,
-  type WorkspaceActionRequest, type SessionIdInjected, type WorkspaceBrowserInjected, type WorkspacePickerInjected,
+  type WorkspaceActionRequest, type SessionIdInjected, type WorkspaceBrowserInjected, type WorkspaceChipIconInjected,
+  type WorkspacePickerInjected,
 } from './contract/slots.ts'
 import { createWorkspaceShortcutControls, installWorkspaceShortcuts } from './shortcuts.ts'
 import { UiWorkspaceService } from './navigation.ts'
+import { WorkspacePresentationService } from './presentation.ts'
+import { Config, parseSessionNavigation, SESSION_NAVIGATION_GLOBAL, WORKSPACE_OPTIONS_GLOBAL } from '../workspace-options.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
 import { ArchiveSessionRowButton, SessionArchiveConfirmDialog } from './session-actions/ArchiveSession.tsx'
@@ -57,9 +60,14 @@ import { SessionRenameDialog } from './session-actions/RenameSession.tsx'
 import { RowActionToast } from './session-actions/RowActionToast.tsx'
 import { registerToasts } from './toast/register.ts'
 import { WorkspacePicker } from './WorkspacePicker.tsx'
+import { WorkspaceChipIcon } from './WorkspaceChipIcon.tsx'
 import { en, ja, es, fr, de, ru, pt, zh, type WorkspaceKey } from './locales.ts'
 
-export type { StartSessionOptions, UiWorkspace } from './navigation.ts'
+export type { MainSelection, StartSessionOptions, UiWorkspace } from './navigation.ts'
+export type {
+  ExternalWorkspaceCatalog, ExternalWorkspaceHostId, ExternalWorkspaceKey,
+  WorkspacePresentation, WorkspacePresentationIcon, WorkspacePresentationSnapshot,
+} from './presentation.ts'
 export type {
   DirectoryFlowOwnerProps, DirectoryFlowSlotName, DirectoryPickingHooks, DirectoryPickingInjected,
   MenuOpenState, RowToast, SessionRenameTarget, SessionRowOwnerProps, UseMenuOpenState, WorkspaceBrowserInjected,
@@ -111,6 +119,11 @@ export const inject = ['contextMenus',
  * @param ctx - client root context.
  */
 export function apply(ctx: Context): void {
+  const page = globalThis as Partial<Record<typeof WORKSPACE_OPTIONS_GLOBAL | typeof SESSION_NAVIGATION_GLOBAL, unknown>>
+  const options = page[WORKSPACE_OPTIONS_GLOBAL]
+  const { restoreOnStartup } = Config(options === undefined ? {} : options)
+  const selection = parseSessionNavigation(page[SESSION_NAVIGATION_GLOBAL])
+  const presentation = new WorkspacePresentationService(ctx)
   const sessions = ctx.get('sessions') as ISessions
   const workspaces = ctx.get('workspaces') as IWorkspaces
   // One viewing-store instance, created here as ui-layout does for its layout
@@ -123,7 +136,8 @@ export function apply(ctx: Context): void {
   let toastSeq = 0
   const notify = (toast: RowToast): void => { rowToast.set({ ...toast, seq: ++toastSeq }) }
   const uiWorkspace = new UiWorkspaceService(
-    ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify,
+    ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify, presentation.getSnapshot,
+    selection === undefined ? { restoreOnStartup } : { restoreOnStartup, selection },
   )
   ctx.slots.provideRoot({
     hooks: { workspaces: workspaces.list },
@@ -278,8 +292,13 @@ export function apply(ctx: Context): void {
   })
   ctx.effect(() => ctx.contextMenus.register({
     id: 'workspace.rename', target: 'workspace', order: 100,
-    resolve: ({ workspaceId, displayTitle }) => ctx.remoteAccess.source('workspace', workspaceId, 'workspace/rename').getSnapshot()
-      ? [{ id: 'rename', label: ctx.locale.bind(NS)('rename'), icon: { key: 'workspace.rename' }, run: () => { requestWorkspaceAction(workspaceId, displayTitle, 'rename') } }] : [],
+    resolve: ({ workspaceId, displayTitle }) => {
+      // A deployment Edit callback replaces Rename; Edit runs outside the native rename request.
+      const edit = presentation.getSnapshot().editWorkspace
+      if (edit !== undefined) return [{ id: 'edit', label: ctx.locale.bind(NS)('edit.workspace'), icon: { key: 'workspace.rename' }, run: () => { edit(workspaceId) } }]
+      return ctx.remoteAccess.source('workspace', workspaceId, 'workspace/rename').getSnapshot()
+        ? [{ id: 'rename', label: ctx.locale.bind(NS)('rename'), icon: { key: 'workspace.rename' }, run: () => { requestWorkspaceAction(workspaceId, displayTitle, 'rename') } }] : []
+    },
   }), 'workspace: rename menu action')
   ctx.effect(() => ctx.contextMenus.register({
     id: 'workspace.delete', target: 'workspace', order: 300,
@@ -318,12 +337,14 @@ export function apply(ctx: Context): void {
     requestAddWorkspace: shortcutControls.add,
     closeAddWorkspace: shortcutControls.closeAdd,
     setDirectoryBusy: shortcutControls.directoryBusy,
-    hooks: { workspaceActionRequest, contextMenuTarget: ctx.contextMenus.active, directoryFlow: browserFlowSource, hostInfo,
-      workspaceShortcuts: shortcutControls.state, shortcuts: ctx.shortcuts.catalog },
+    hooks: {
+      workspaceActionRequest, contextMenuTarget: ctx.contextMenus.active, directoryFlow: browserFlowSource, hostInfo,
+      workspacePresentation: presentation, workspaceShortcuts: shortcutControls.state, shortcuts: ctx.shortcuts.catalog,
+    },
   })
   const pickerInjected = (): WorkspacePickerInjected => ({
     createWorkspace: input => workspaces.create(input),
-    hooks: { directoryFlow: pickerFlowSource },
+    hooks: { directoryFlow: pickerFlowSource, workspacePresentation: presentation },
   })
   // Each registration declares its owned children in the same call; slot
   // injection follows both the owner and declaration HMR lifetimes.
@@ -370,6 +391,10 @@ export function apply(ctx: Context): void {
       children: { 'workspace.toast': { kind: 'keyed', scope: 'root' } },
     }, RowActionToast)
   })
+  ctx.slots.inject('conversation.hero.workspace.icon', () => ctx.slots.register({
+    name: 'conversation.hero.workspace.icon',
+    inject: (): WorkspaceChipIconInjected => ({ hooks: { workspacePresentation: presentation } }),
+  }, WorkspaceChipIcon))
   ctx.slots.inject('conversation.hero.workspace', () => ctx.slots.register(
     {
       name: 'conversation.hero.workspace',

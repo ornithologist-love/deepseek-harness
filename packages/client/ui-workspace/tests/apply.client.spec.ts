@@ -16,6 +16,7 @@ import { RemoteError, StaticRemoteAccess, TestRemote } from '@deepseek-ai/dsh-cl
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { WorkspaceBrowserInjected, WorkspacePickerInjected } from '@deepseek-ai/dsh-client-ui-workspace/client'
+import type { WorkspaceChipIconInjected } from '../src/client/contract/slots.ts'
 import {
   type ArchiveSessionInjected, menuOpenStateFactory, type PinSessionInjected,
   type RowToastInjected, type SessionArchiveConfirmInjected, type SessionRenameDialogInjected,
@@ -30,7 +31,7 @@ import type { ArchiveToastInjected, ToastDisplayInjected } from '../src/client/c
 import { WorkspacePicker } from '../src/client/WorkspacePicker.tsx'
 import { FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
-import { apply as hostApply } from '../src/index.ts'
+import { DEFAULT_WORKSPACE_PRESENTATION } from '../src/client/presentation.ts'
 
 const sid = (id: string) => id as SessionId
 const summary = (id: string, updatedAt: number): SessionSummary => ({
@@ -176,7 +177,7 @@ async function bench(access: 'fake' | 'static' = 'fake') {
   }
 }
 
-type HoleName = 'sidebar.workspaces' | 'conversation.hero.workspace' | 'conversation.empty.workspace' | 'shell.overlay'
+type HoleName = 'sidebar.workspaces' | 'conversation.hero.workspace' | 'conversation.empty.workspace' | 'conversation.hero.workspace.icon' | 'shell.overlay'
 
 const MENU_ITEM = 'sidebar.workspaces.session.menu.item'
 const ROW_ACTION = 'sidebar.workspaces.session.row.action'
@@ -234,8 +235,48 @@ function viewInstance(slots: SlotRegistry) {
 const settled = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 0) })
 
 describe('ui-workspace apply', () => {
-  it('keeps the host Loader entry inert', () => {
-    expect(hostApply).not.toThrow()
+  it('starts from the page startup options and shares one presentation with the browser and picker', async () => {
+    vi.stubGlobal('__DSH_WORKSPACE_OPTIONS__', { restoreOnStartup: false })
+    vi.stubGlobal('__DSH_SESSION_NAVIGATION__', { sessionId: 'chosen' })
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    const b = await bench()
+    declare(b.slots, 'sidebar.workspaces', 'conversation.hero.workspace', 'conversation.hero.workspace.icon')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    await settled()
+    expect(b.initializeDefault).not.toHaveBeenCalled()
+    expect(b.retain).not.toHaveBeenCalled()
+    const browser = faceOf(b.slots.entries('sidebar.workspaces')[0]!) as WorkspaceBrowserInjected
+    const picker = faceOf(b.slots.entries('conversation.hero.workspace')[0]!) as WorkspacePickerInjected
+    const chipIcon = faceOf(b.slots.entries('conversation.hero.workspace.icon')[0]!) as WorkspaceChipIconInjected
+    const snapshot = { ...DEFAULT_WORKSPACE_PRESENTATION, ungrouped: 'recent' as const }
+    b.ctx.workspacePresentation.register(createSnapshotStore(snapshot))
+    expect(browser.hooks.workspacePresentation.getSnapshot()).toEqual({ ...snapshot, external: undefined })
+    expect(picker.hooks.workspacePresentation.getSnapshot()).toEqual({ ...snapshot, external: undefined })
+    expect(chipIcon.hooks.workspacePresentation.getSnapshot()).toEqual({ ...snapshot, external: undefined })
+  })
+
+  it('offers the deployment Edit action instead of Rename in the Workspace menu', async () => {
+    const b = await bench()
+    b.setWorkspaces(workspaceState([workspace('alpha', [])]))
+    declare(b.slots, 'sidebar.workspaces')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const browser = faceOf(b.slots.entries('sidebar.workspaces')[0]!) as WorkspaceBrowserInjected
+    const editWorkspace = vi.fn()
+    b.ctx.workspacePresentation.register(createSnapshotStore({ ...DEFAULT_WORKSPACE_PRESENTATION, editWorkspace }))
+    const menu = b.ctx.contextMenus.resolve({ kind: 'workspace', value: { workspaceId: 'alpha' as WorkspaceId, path: '/projects/alpha', displayTitle: 'Alpha' } })
+    await menu.ready
+    expect(menu.source.getSnapshot().map(item => item.id)).toEqual(['workspace.rename/edit', 'workspace.delete/delete'])
+    menu.select('workspace.rename/edit')
+    expect(editWorkspace).toHaveBeenCalledExactlyOnceWith('alpha')
+    expect(browser.hooks.workspaceActionRequest.getSnapshot()).toBeNull()
+  })
+
+  it('adopts the page startup selection when restoration is on', async () => {
+    vi.stubGlobal('__DSH_SESSION_NAVIGATION__', { sessionId: 'chosen' })
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    const b = await bench()
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    expect(b.ctx.uiWorkspace.selection.getSnapshot()).toEqual({ sessionId: 'chosen' })
   })
 
   it('declares the services it drives', () => {

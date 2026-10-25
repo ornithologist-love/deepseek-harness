@@ -15,9 +15,17 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { BrowseFlowInjected } from './flow.ts'
 import { BrowseDirectoryFlow } from './flow.ts'
+import { DirectoryBrowser } from './DirectoryBrowser.tsx'
 
 /** Locale namespace owning the browser dialog's copy. */
 const LOCALE_NS = 'directory-browser'
+
+/**
+ * Shadowing rank of the browse flow in both directory-flow holes. A picker
+ * registered at the default rank 0 (such as -native) renders instead, so a
+ * composition may mount this package beside it for the reusable dialog Factory.
+ */
+const FLOW_PRIORITY = 1
 
 /** Required services (cordis fiber inject): the slot registry, workspace UI service, and locale. */
 export const inject = ['slots', 'uiWorkspace', 'locale']
@@ -170,16 +178,19 @@ export function apply(ctx: ClientContext): void {
     createDirectory: (path, name) => ctx.uiWorkspace.createDirectory(path, name),
     t: ctx.locale.bind(LOCALE_NS),
   })
+  ctx.effect(() => ctx.slots.registerFactory({ name: 'workspace.directory.browser', scope: 'root',
+    inject: () => ({ t: ctx.locale.bind(LOCALE_NS) }),
+  }, DirectoryBrowser), 'directory-picker-browse: reusable dialog')
   // Both declaration lifetimes must be live before the pair installs; the
   // generator makes the two registrations one transactional effect. The
   // outer/inner nesting order is arbitrary; neither hole has precedence.
   ctx.slots.inject('conversation.hero.workspace.directoryFlow', () =>
     ctx.slots.inject('sidebar.workspaces.directoryFlow', function* () {
       yield ctx.slots.register({
-        name: 'conversation.hero.workspace.directoryFlow', inject: injected,
+        name: 'conversation.hero.workspace.directoryFlow', inject: injected, priority: FLOW_PRIORITY,
       }, BrowseDirectoryFlow)
       yield ctx.slots.register({
-        name: 'sidebar.workspaces.directoryFlow', inject: injected,
+        name: 'sidebar.workspaces.directoryFlow', inject: injected, priority: FLOW_PRIORITY,
       }, BrowseDirectoryFlow)
     }))
 }

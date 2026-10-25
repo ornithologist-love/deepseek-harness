@@ -26,6 +26,7 @@ import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { WorkspaceId } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
+import type { WorkspacePresentationIcon } from '../presentation.ts'
 import css from './Rows.module.css'
 
 /** Sidebar-owned layout values needed by row copies mounted outside the sidebar. */
@@ -220,11 +221,15 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
 
 /** Owner props of one Workspace header row; the access Hooks are the browser root's own standard seats. */
 type ProjectRowItemProps = {
+  recent?: boolean
+  remoteHost?: string | undefined
+  subtitle?: string | undefined
+  icon?: WorkspacePresentationIcon | undefined
   group: GroupNode
   newShortcut?: ShortcutCatalogEntry | undefined
   containsCurrentDescendant?: boolean
   onToggle: () => void
-  onCreate: () => void
+  onCreate?: (() => void) | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
@@ -245,6 +250,8 @@ interface ProjectRowAccess {
  * `containsCurrent` arrives on the node (derivation fact, no renderer scan).
  * Create and drag follow the Workspace access snapshot. Menu providers own
  * their access checks; the ungrouped bucket has no Workspace menu.
+ * @param props.recent - render the ungrouped bucket as the non-collapsible "Recent" heading.
+ * @param props.icon - deployment image replacing the folder icon.
  * @param props.group - derived group node.
  * @param props.containsCurrentDescendant - highlight an ancestor even when its subtree is collapsed.
  * @param props.onToggle - expand/collapse the group.
@@ -278,25 +285,28 @@ function WorkspaceProjectRow({ workspaceId, ...props }: ProjectRowItemProps & { 
 }
 
 function ProjectRow({
-  group, containsCurrentDescendant = false, onToggle, onCreate, drag: offeredDrag, home, newShortcut, t, access,
+  recent = false, icon, remoteHost, subtitle, group, containsCurrentDescendant = false, onToggle, onCreate, drag: offeredDrag, home,
+  newShortcut, t, access,
   openWorkspaceMenu, useContextMenuTarget, useContextMenu,
 }: ProjectRowItemProps & { access: ProjectRowAccess }) {
   const { getTriggerProps } = useContextMenu()
   const drag = access.reorder ? offeredDrag : undefined
   const row = group
   // The ungrouped bucket has no workspace title: its label is dictionary copy.
-  const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
+  const label = row.workspaceId === undefined ? t(recent ? 'group.recent' : 'group.ungrouped') : row.label
   const active = containsCurrentDescendant || (group.expanded && group.containsCurrent)
   const menuOpen = useContextMenuTarget(target => target?.kind === 'workspace' && target.value.workspaceId === row.workspaceId)
   const dragPreview = useRowDragPreview(css.dragPreview as string, DRAG_PREVIEW_PROPERTIES)
   const workspaceMenuTarget = row.workspaceId !== undefined && row.cwd !== undefined
     ? { workspaceId: row.workspaceId, path: row.cwd } : undefined
+  if (recent) return <div className={css.recentHeading} role="heading" aria-level={2}>{label}</div>
   const ownRow = (
     <div
       className={clsx(css.projectRow, menuOpen && css.menuOpen)}
       data-row-key={`workspace:${group.key}`}
       role="treeitem"
       aria-expanded={row.expanded}
+      aria-description={remoteHost === undefined ? undefined : t('remote.workspace', { host: remoteHost })}
       onClick={onToggle}
       {...getTriggerProps(workspaceMenuTarget === undefined ? undefined : { kind: 'workspace', value: { ...workspaceMenuTarget, displayTitle: label } })}
       draggable={drag !== undefined}
@@ -311,13 +321,16 @@ function ProjectRow({
       onDragEnd={() => { if (dragPreview.clear()) drag?.end() }}
     >
       <span className={clsx(css.slot, css.folder, active && css.folderActive)}>
-        {row.expanded ? <IconFolderOpenRegular /> : <IconFolderCloseRegular />}
+        {icon !== undefined
+          ? <img className={css.rowIcon} src={icon.src} alt={icon.alt} title={icon.title} aria-label={icon.ariaLabel} />
+          : row.expanded ? <IconFolderOpenRegular /> : <IconFolderCloseRegular />}
       </span>
       <span className={clsx(css.slot, css.chevron)}>
         <IconTriangleRightFillRegular className={clsx(css.arrow, row.expanded && css.arrowOpen)} />
       </span>
       <span className={css.projectText}>
         <span className={css.title}>{label}</span>
+        {subtitle && <small className={css.subtitle}>{subtitle}</small>}
       </span>
       <span className={css.rowActions}>
         {workspaceMenuTarget !== undefined && (
@@ -329,7 +342,7 @@ function ProjectRow({
               openWorkspaceMenu(workspaceMenuTarget.workspaceId, workspaceMenuTarget.path, label, { x: rect.left, y: rect.bottom }, 'toggle')
             }}><IconEllipsisOutlineRegular /></button>
         )}
-        {access.create && (
+        {access.create && onCreate !== undefined && (
           <Tooltip label={t('actions.newSession')} shortcutKeys={newShortcut?.keys} side="bottom" align="end" delayMs={500} portal>
             <button
               type="button"
@@ -447,6 +460,24 @@ function SessionStatusDots({ statuses }: { statuses: readonly [SessionStatus, ..
 }
 
 /** Non-interactive pinned-row marker; the enclosing row remains the only action. */
+/**
+ * Cloud outline marking rows owned by another Host.
+ * @param size - Rendered width and height in pixels.
+ * @returns The decorative glyph.
+ */
+export function RemoteGlyph({ size }: { size: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M7 18a4 4 0 0 1-.6-8 6 6 0 0 1 11.5-1A4.5 4.5 0 1 1 18 18H7Z" /></svg>
+}
+
+/**
+ * Monitor outline marking the local machine's section.
+ * @param size - Rendered width and height in pixels.
+ * @returns The decorative glyph.
+ */
+export function LocalGlyph({ size }: { size: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2" /><path d="M9 20h6M12 16.5V20" /></svg>
+}
+
 function PinnedIndicator({ t }: { t: RowTranslate }) {
   const label = t('row.pinned')
   return (
@@ -588,6 +619,7 @@ export function SearchResultItem({
  * @param props.onReveal - scroll this row into view after search navigation, then acknowledge it.
  * @param props.drag - optional row-drag target wiring; blank rows, and rows whose access excludes
  * `workspace/insertSessionBefore`, cannot start a drag.
+ * @param props.flat - drop the leading cell of an idle row; live status still shows.
  * @param props.home - host account home for POSIX hover-path abbreviation.
  * @param props.useSessionAccess - the browser root's Session access Hook; the title double-click
  * renames only while it allows `session/rename`.
@@ -596,12 +628,19 @@ export function SearchResultItem({
  */
 export function SessionNodeItem({
   node, currentId, now, onOpen, onRenameRequest, renderSlot, openSessionMenu, useContextMenuTarget,
-  useContextMenu, onReveal, drag, home, useSessionAccess, t,
+  useContextMenu, onReveal, drag, flat = false, navigationOnly = false, remoteHost, rowKey, home, useSessionAccess, t,
 }: {
   useContextMenu: WorkspaceBrowserProps['useContextMenu']
   openSessionMenu: WorkspaceBrowserProps['openSessionMenu']
   useContextMenuTarget: WorkspaceBrowserProps['useContextMenuTarget']
   node: SessionNode
+  flat?: boolean
+  /** External navigation cannot mutate local Session rows. */
+  navigationOnly?: boolean
+  /** Owning remote machine, shown beside the update time. */
+  remoteHost?: string | undefined
+  /** Host-scoped identity for external rows whose Session ids may overlap local ones. */
+  rowKey?: string | undefined
   currentId: string | undefined
   now: number
   onOpen: (id: SessionNode['id']) => void
@@ -655,7 +694,8 @@ export function SessionNodeItem({
   const ownRow = (
     <div
       ref={rowRef}
-      data-row-key={`session:${node.id}`}
+      data-row-key={rowKey ?? `session:${node.id}`}
+      data-navigation-only={navigationOnly || undefined}
       className={clsx(
         css.sessionRow, selected && css.selected, menuOpen && css.menuOpen,
         row.archived && css.archived,
@@ -663,7 +703,8 @@ export function SessionNodeItem({
       )}
       role="treeitem"
       aria-selected={selected}
-      aria-description={row.archived ? t('toast.archivedNotOpenable') : undefined}
+      aria-description={row.archived ? t('toast.archivedNotOpenable')
+        : remoteHost === undefined ? undefined : t('remote.session', { host: remoteHost })}
       tabIndex={0}
 
       onClick={() => { onOpen(node.id) }}
@@ -706,21 +747,23 @@ export function SessionNodeItem({
           and is cleared by opening the session. Archived rows keep the slot
           blank — the grayed row carries the archived look — and their live
           status stays on the hover card only. */}
-      <span className={css.slot}>
-        {!row.archived && !row.blank && (showStatus
-          ? <SessionStatusDots statuses={statuses} />
-          : renderSlot('sidebar.session.row.leading', { sessionId: node.id }))}
-      </span>
+      {(!flat || showStatus) && (
+        <span className={css.slot}>
+          {!row.archived && !row.blank && (showStatus
+            ? <SessionStatusDots statuses={statuses} />
+            : renderSlot('sidebar.session.row.leading', { sessionId: node.id }))}
+        </span>
+      )}
       <span
         ref={titleRef}
-        className={css.title}
+        className={clsx(css.title, flat && !showStatus && css.flatTitle)}
         onMouseDown={(e) => {
           if (e.detail !== 1) return
           renameArmed.current = true
           // One shared function and options: repeated presses add one listener.
           window.addEventListener('blur', disarmRename, { once: true })
         }}
-        onDoubleClick={row.blank || !renamable
+        onDoubleClick={row.blank || !renamable || navigationOnly
           ? undefined
           : (e) => {
             e.stopPropagation()
@@ -732,8 +775,9 @@ export function SessionNodeItem({
         {title}
       </span>
       {/* Blank rows have no first prompt, so neither trailing details nor
-          actions for existing content are available. */}
-      {!row.blank && (
+          actions for existing content are available; external navigation
+          rows cannot act on local Session content. */}
+      {!row.blank && !navigationOnly && (
         <span className={css.rowResting}>
           <span
             className={clsx(css.time, primaryStatus.trailingLabel === undefined && css.timestamp)}
@@ -745,10 +789,16 @@ export function SessionNodeItem({
           {row.pinned && !row.archived && <PinnedIndicator t={t} />}
         </span>
       )}
+      {/* One fixed cell, so a remote marker occupies its own column beyond the
+          time whichever label the row's status puts there; a local row reserves
+          the same cell empty and keeps the column from moving between rows. */}
+      <span className={css.remoteMarker} title={remoteHost} aria-hidden="true">
+        {remoteHost === undefined ? null : <RemoteGlyph size={14} />}
+      </span>
       {/* The strip's clicks stay in the strip: the trigger and every
           row.action entry act without also opening the row, so an entry's
           button needs no propagation handling of its own. */}
-      {!row.blank && (
+      {!row.blank && !navigationOnly && (
         <span className={css.rowActions} onClick={(e) => { e.stopPropagation() }}>
           <button type="button" className={css.iconButton}
             aria-label={t('actions.session.aria', { name: title })}

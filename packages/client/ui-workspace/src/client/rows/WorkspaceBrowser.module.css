@@ -14,6 +14,26 @@
   padding-right: 0;
 }
 
+.hostFilters { flex: none; min-width: 0; margin: 4px 6px 10px; }
+.hostMenu { width: 100%; }
+.hostSelect { width: 100%; min-width: 0; display: flex; align-items: center; padding: 0; border: 0.5px solid var(--dsw-alias-border-l3); border-radius: var(--dsw-radius-md); background: var(--dsw-alias-bg-module-platform); color: var(--dsw-alias-label-secondary); font: inherit; font-size: 13px; line-height: 20px; cursor: pointer; }
+.hostSelect[aria-expanded='true'] { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+@media (hover: hover) {
+  .hostSelect:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+}
+.hostSelect:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: 2px; }
+.hostLabel { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 8px 12px; text-align: left; }
+.hostArrow { flex: none; display: flex; align-items: center; justify-content: center; width: 34px; align-self: stretch; border-left: 0.5px solid var(--dsw-alias-border-l3); }
+.hostName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hostPanel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.hostStatus { width: 6px; height: 6px; border-radius: 50%; corner-shape: round; flex: none; background: var(--dsw-alias-label-tertiary); }
+.hostStatus[data-online='true'] { background: var(--dsw-alias-state-success-primary, var(--dsw-alias-brand-primary)); }
+.memberDirectories { margin: 3px 8px 10px 30px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.memberDirectories summary { cursor: pointer; padding: 6px 0; }
+.memberDirectories > div { display: grid; gap: 2px; margin: 5px 0; }
+.memberDirectories code { white-space: normal; overflow-wrap: anywhere; font-size: 11px; }
+:global([data-single-column]) .hostSelect { min-height: 44px; }
+
 .iconButton {
   flex: none;
   display: inline-flex;
@@ -355,6 +375,94 @@
   position: relative;
 }
 
+/* Machines are peer sections: a rule and air separate each one from the
+   section above, so a machine's rows never read as part of its neighbour. */
+.machineSection,
+.sharedSection {
+  margin-top: 4px;
+  padding-top: 2px;
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+/* A machine band that opens the gateway's list needs no rule above it. */
+.list > .machineSection:first-child {
+  margin-top: 6px;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Every machine header (the local one included) shares this title type:
+   icon, name, then that machine's own actions. */
+.machineHeader {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 30px;
+  margin: 0 -4px 2px 4px;
+}
+
+.machineTitle {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.sectionLabel.machineTitle {
+  flex: none;
+  display: inline-flex;
+  max-width: none;
+}
+
+.machineIcon { display: inline-flex; flex: none; color: var(--dsw-alias-label-tertiary); }
+.machineToggle { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 24px; padding: 0; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: inherit; cursor: pointer; }
+.machineToggle[aria-expanded='false'] svg { transform: rotate(-90deg); }
+@media (hover: hover) {
+  .machineToggle:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+}
+.machineToggle:focus-visible { outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary)); outline-offset: -2px; }
+.machineActions { flex: none; display: inline-flex; align-items: center; gap: 4px; }
+/* An offline machine fades; its rows also show the reconnecting notice. */
+.machineHeader[data-online='false'] .machineTitle { opacity: .5; }
+
+/* The global row has no search slot to push its label to the start. */
+.globalLabel { margin-right: auto; }
+
+/* The local machine's header follows the global view row instead of opening the region. */
+.root:not(.rail) .localMachineHeader { height: 30px; margin-top: 0; margin-bottom: 2px; }
+
+.machineSearch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  margin: 0 2px 4px;
+  padding: 0 4px 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  color: var(--dsw-alias-label-caption);
+}
+
+.machineSearchInput {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.machineSearchInput::placeholder { color: var(--dsw-alias-label-tertiary); }
+
 /* Bottom fade: compact overlay pinned to the visible bottom,
    transparent -> sidebar fill so it tracks the theme. */
 .fade {
@@ -402,6 +510,10 @@
      above the gradient instead of under it. */
   padding-bottom: 16px;
   scrollbar-gutter: stable;
+  /* The list is the sheet's scroll container and the sidebar it fills is an
+     elevated surface, so it rebinds the pair scrollbar.css defaults to l1. */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
 .flatList > * + *,
