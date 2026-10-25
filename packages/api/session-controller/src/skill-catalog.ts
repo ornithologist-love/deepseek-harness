@@ -38,7 +38,10 @@ export class SessionSkillCatalog extends TypertRemoteService {
     let cwd: string
     let agentPreset: string | undefined
     try {
-      using observation = await this.ctx.sessionQuery.observeSession(sessionId)
+      const controller = this.ctx.get('sessionController')
+      using observation = controller
+        ? await controller.observe(sessionId)
+        : await this.ctx.sessionQuery.observeSession(sessionId)
       if (observation.projections === undefined) {
         throw new Error('skill catalog requires a projected Session observation')
       }

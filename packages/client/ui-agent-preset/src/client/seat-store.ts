@@ -15,6 +15,7 @@
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls the ctx.remote merge into this program.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
 import type { SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry/types'
@@ -85,6 +86,8 @@ export class AgentPresetSeatController {
       'id' | 'blank' | 'projectionValues'
     > | undefined,
     private readonly staged: AgentPresetStage = { id: undefined, introduce: false },
+    /** Save the preset on the draft through `session.configure` instead of recomposing a live Agent. */
+    private readonly deferredActivation = false,
   ) {}
 
   private set(patch: Partial<AgentPresetSeatState>): void {
@@ -241,7 +244,11 @@ export class AgentPresetSeatController {
     }
     try {
       this.set({ busy: true, error: null })
-      const result = await this.ctx.remote.agentPresets.select(session.id, staged)
+      // A deferred draft has no Agent to recompose; the preset is saved with the draft instead.
+      const result = this.deferredActivation
+        ? await this.ctx.remote.session.configure({ sessionId: session.id, agentPreset: staged })
+          .then(result => result.ok ? { ...result, value: result.value.agentPreset ?? staged } : result)
+        : await this.ctx.remote.agentPresets.select(session.id, staged)
       if (!result.ok) {
         const { error } = result
         // Prefer the bare cause; the Toast already names the rejected preset.

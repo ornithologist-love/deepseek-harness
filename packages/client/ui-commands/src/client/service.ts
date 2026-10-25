@@ -17,6 +17,7 @@ import type { Context } from '@deepseek-ai/cordis'
 // Type-only: pulls the ctx.remote merge and the forwarded-event key face
 // (`commands/change` rides the allowlist) into this program.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
 import type { CommandResult } from '@deepseek-ai/dsh-commands/types'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { ISessions, SessionBinding } from '@deepseek-ai/dsh-api-session-controller/client'
@@ -74,7 +75,7 @@ interface LiveState {
 
 /** Command surface: session-keyed directory + '/' source + contribution registry + per-session popups. */
 export class CommandUiRuntime extends Service implements CommandUiContract {
-  static inject = ['inputTriggers', 'sessions', 'remote', 'remote.commands']
+  static inject = ['inputTriggers', 'sessions', 'remote', 'remote.commands', 'remote.session']
 
   private readonly directory: CommandDirectory
   private readonly live: LiveState = {
@@ -105,8 +106,11 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
         if (state.openState !== 'open') {
           throw state.openError ?? new Error(`session "${sessionId}" is not open`)
         }
-        const result = await ctx.remote.commands.list(sessionId)
-        if (!result.ok) throw new Error(`command.list failed: ${result.error.code}: ${result.error.message}`)
+        // A deferred Host lists only a live Agent's commands, so reading the catalog never starts one.
+        const result = sessions.deferredActivation
+          ? await ctx.remote.session.commandCatalog(sessionId)
+          : await ctx.remote.commands.list(sessionId)
+        if (!result.ok) throw new Error(`command catalog failed: ${result.error.code}: ${result.error.message}`)
         return result.value
       })
     })
@@ -127,6 +131,10 @@ export class CommandUiRuntime extends Service implements CommandUiContract {
     // registers nothing globally. Drop that key's old composition before
     // prewarming so a newly opened menu waits for the replacement catalog.
     ctx.remote.$on('agent-preset/selected', (sessionId) => { this.directory.resetSession(sessionId) })
+    // Under deferred activation, starting an Agent makes its live-only commands discoverable.
+    if (this.sessions().deferredActivation) {
+      ctx.remote.$on('api-session/status', (sessionId) => { this.directory.resetSession(sessionId) })
+    }
     ctx.on('connection/reset', () => { this.directory.resetConnected() })
   }
 

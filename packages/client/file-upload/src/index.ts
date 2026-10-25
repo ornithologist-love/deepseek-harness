@@ -31,6 +31,8 @@ interface StagedFileUpload {
 
 /** Resolve or resume the ordinary Agent that owns one Session identity. */
 export type AgentResolver = (sessionId: SessionId) => Promise<Agent>
+/** Authorize composer intake for a Session that has no Agent yet. */
+export type SessionUploadValidator = (sessionId: SessionId) => Promise<void>
 
 /** Prompt receipt binding that restores its previous owners unless delivery commits it. */
 export interface PromptFileBinding extends Disposable {
@@ -63,6 +65,9 @@ export class FileUploads extends TypertRemoteService {
   // for every function-valued property read from `this`, so `===` against the
   // registered resolver would always be false; a plain object is returned as is.
   private readonly agentResolution: { resolver: AgentResolver | undefined } = { resolver: undefined }
+  private readonly sessionValidation: { validator: SessionUploadValidator | undefined } = { validator: undefined }
+  /** Receipts accepted before activation, adopted by the Session's first Agent. */
+  private readonly pendingFiles = new Map<SessionId, Map<FileUploadReceiptId, StagedFileUpload>>()
 
   /** @param ctx - Host context carrying Agent, attachment, command, and Connection services. */
   constructor(ctx: Context) {
@@ -87,6 +92,18 @@ export class FileUploads extends TypertRemoteService {
     )
     ctx.on('session/event', (session, event) => { this.observeSessionEvent(session, event) })
     ctx.on('session/disposed', (session) => { this.stagedFiles.delete(session) })
+    ctx.effect(() => () => { this.pendingFiles.clear() }, 'file-upload: pre-activation receipts')
+  }
+
+  /**
+   * Accept uploads without resolving an Agent; receipts wait for the Session's first Agent.
+   * @param validate - authenticated Session metadata check, run before and after storage.
+   * @returns registration disposer.
+   */
+  registerSessionValidator(validate: SessionUploadValidator): () => void {
+    if (this.sessionValidation.validator !== undefined) throw new Error('file-upload: Session validator already registered')
+    this.sessionValidation.validator = validate
+    return () => { if (this.sessionValidation.validator === validate) this.sessionValidation.validator = undefined }
   }
 
   /**
@@ -130,6 +147,18 @@ export class FileUploads extends TypertRemoteService {
     readonly signal?: AbortSignal
     readonly name?: string
   }): Promise<FileUploadValue> {
+    const validate = this.sessionValidation.validator
+    if (validate !== undefined) {
+      await validate(request.sessionId)
+      const file = await this.ctx.attachments.saveFileStream({ data: request.data,
+        ...(request.signal ? { signal: request.signal } : {}), ...(request.name ? { name: request.name } : {}) })
+      await validate(request.sessionId)
+      const receiptId = randomUUID() as FileUploadReceiptId
+      const staged = this.pendingFiles.get(request.sessionId) ?? new Map<FileUploadReceiptId, StagedFileUpload>()
+      staged.set(receiptId, { attachment: { type: 'file', attachment: file } })
+      this.pendingFiles.set(request.sessionId, staged)
+      return { receiptId, file }
+    }
     const agent = await this.resolveAgent(request.sessionId)
     const file = await this.store(agent, async () => this.ctx.attachments.saveFileStream({
       data: request.data,
@@ -192,6 +221,7 @@ export class FileUploads extends TypertRemoteService {
    * @returns the staged file or image, or `undefined` for an unknown or foreign receipt.
    */
   resolve(agent: Agent, receiptId: FileUploadReceiptId): StagedAttachment | undefined {
+    this.adoptPending(agent)
     return this.stagedFiles.get(agent.session)?.get(receiptId)?.attachment
   }
 
@@ -208,6 +238,7 @@ export class FileUploads extends TypertRemoteService {
     receiptIds: readonly FileUploadReceiptId[],
     requestId: string,
   ): PromptFileBinding {
+    this.adoptPending(agent)
     const staged = this.stagedFiles.get(agent.session)
     const bound = receiptIds.map((receiptId) => {
       const upload = staged?.get(receiptId)
@@ -278,6 +309,15 @@ export class FileUploads extends TypertRemoteService {
       throw new RemoteError('session/not-found', `session "${sessionId}" is not attached`, { sessionId })
     }
     return resolver(sessionId)
+  }
+
+  private adoptPending(agent: Agent): void {
+    const pending = this.pendingFiles.get(agent.id)
+    if (!pending) return
+    const staged = this.stagedFiles.get(agent.session) ?? new Map<FileUploadReceiptId, StagedFileUpload>()
+    for (const [id, upload] of pending) staged.set(id, upload)
+    this.stagedFiles.set(agent.session, staged)
+    this.pendingFiles.delete(agent.id)
   }
 
   private assertOrdinaryAgent(agent: Agent): void {

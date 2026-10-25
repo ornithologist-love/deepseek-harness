@@ -47,6 +47,11 @@ export interface SessionRetainInfo {
 
 /** The sessions-service face injected as `ctx.sessions`. */
 export interface ISessions {
+  /**
+   * Whether the Host saves composer choices on drafts and starts an Agent only for execution.
+   * Composer controls then write `session.configure` / `session.selectPermission` instead of live-Agent Remotes.
+   */
+  readonly deferredActivation: boolean
   /** Host catalog and local reference-source counts; navigation belongs to view owners. */
   readonly list: ObservableSnapshot<SessionListState>
   /**

@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconChevronDownOutlineRegular, Menu, PermissionIconAutoReviewRegular, PermissionIconFullAccessRegular,
-  PermissionIconReadOnlyRegular, PermissionIconWorkspaceWriteRegular, RiskConfirmation,
+  IconChevronDownOutlineRegular, IconWarningOutlineRegular, Menu, PermissionIconAutoReviewRegular,
+  PermissionIconFullAccessRegular,
+  PermissionIconReadOnlyRegular, PermissionIconWorkspaceWriteRegular, RiskConfirmation, Toast,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
@@ -58,9 +59,30 @@ function optionDescription(
   return option.value === AUTO_REVIEW ? t('auto.description') : option.description
 }
 
+/**
+ * Presentation for one preset's configured color, or undefined to keep the
+ * native styles. The color enters as a custom property so no literal color
+ * reaches the stylesheet.
+ * @param colors - configured color per preset value.
+ * @param value - preset value the element renders.
+ * @returns the inline custom-property declaration, or undefined.
+ */
+function tone(colors: Readonly<Record<string, string>>, value: string): CSSProperties | undefined {
+  const color = colors[value]
+  return color === undefined ? undefined : { '--dsh-permission-tone': color } as CSSProperties
+}
+
 /** Business face injected by the permission package's slot registration. */
 export interface PermissionSelectInjected {
+  /** Optional composition-owned colors; absent entries retain native styles. */
+  colors: Readonly<Record<string, string>>
+  /** Record one explicit Full access confirmation in the shared mirror. */
+  acknowledgeFullAccess: () => void
+  /** The Full access confirmation is no longer shown for this deployment. */
+  fullAccessRemembered: boolean
   hooks: {
+    /** Shared explicit Full access acknowledgement mirror. */
+    fullAccessAcknowledged: HostObservable<boolean>
     /** One process catalog shared with the slash popup. */
     permissionCatalog: HostObservable<PermissionCatalogState>
   }
@@ -75,14 +97,19 @@ export type PermissionSelectProps =
   & PropsLocale<typeof PERMISSION_ACCESS_NS>
 
 export function PermissionSelect({
-  locked, select, usePermissionCatalog, useProjection, t,
+  locked, select, usePermissionCatalog, useProjection, useFullAccessAcknowledged,
+  acknowledgeFullAccess, fullAccessRemembered, colors, t,
 }: PermissionSelectProps) {
   const selection = useProjection('permissions')
   const catalog = usePermissionCatalog(state => state.value)
+  const fullAccessAcknowledged = useFullAccessAcknowledged(value => value)
   const [pick, setPick] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [confirmation, setConfirmation] = useState<string | null>(null)
   const [acknowledged, setAcknowledged] = useState(false)
+  const [failure, setFailure] = useState<{ seq: number; text: string } | null>(null)
+  const failureSeq = useRef(0)
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
 
   useEffect(() => {
     if (!locked && selection !== undefined && catalog !== null
@@ -101,6 +128,9 @@ export function PermissionSelect({
     ? permissionLabel(currentValue, currentValue, t)
     : permissionLabel(current.value, current.name, t)
   const busy = pick !== null || confirmation !== null
+  // Full access stops asking once any surface recorded the acknowledgement;
+  // Auto review asks on every selection.
+  const remembered = fullAccessRemembered && fullAccessAcknowledged
 
   const items: MenuEntry[] = catalog.options.map((option) => {
     const icon = permissionGlyph(option.value)
@@ -123,14 +153,19 @@ export function PermissionSelect({
   const submit = (id: string): void => {
     setPick(id)
     void select(id)
-      .catch(() => false)
+      .catch((error: unknown) => {
+        setFailure({
+          seq: ++failureSeq.current,
+          text: t('switch.failed', { message: error instanceof Error ? error.message : String(error) }),
+        })
+      })
       .then(() => { setPick(null) })
   }
 
   const choose = (id: string): void => {
     setOpen(false)
     if (id === selection.currentValue) return
-    if (id === FULL_ACCESS || id === AUTO_REVIEW) {
+    if (id === AUTO_REVIEW || (id === FULL_ACCESS && !remembered)) {
       setAcknowledged(false)
       setConfirmation(id)
       return
@@ -144,6 +179,7 @@ export function PermissionSelect({
   }
 
   const confirmSelection = (id: string): void => {
+    if (id === FULL_ACCESS) acknowledgeFullAccess()
     closeConfirmation()
     submit(id)
   }
@@ -160,6 +196,11 @@ export function PermissionSelect({
   const confirmationEnable = confirmation === AUTO_REVIEW
     ? t('auto.confirm.enable')
     : t('confirm.enable')
+  // The trigger's accessibility name names the badge too, so an experimental
+  // mode is never announced as its bare label.
+  const currentBadge = optionBadge(currentValue, t)
+  const currentAccessibleLabel = currentBadge === undefined
+    ? currentLabel : `${currentLabel} ${currentBadge}`
 
   return (
     <>
@@ -173,9 +214,11 @@ export function PermissionSelect({
         portal
         anchor={
           <button
+            ref={triggerRef}
             type="button"
-            className={css.trigger}
-            aria-label={t('mode', { name: currentLabel })}
+            className={clsx(css.trigger, colors[currentValue] !== undefined && css.toned)}
+            style={tone(colors, currentValue)}
+            aria-label={t('mode', { name: currentAccessibleLabel })}
             title={current === undefined ? undefined : optionDescription(current, t)}
             disabled={locked || busy}
             onClick={() => { setOpen(!open) }}
@@ -190,6 +233,17 @@ export function PermissionSelect({
           </button>
         }
       />
+      {failure !== null && (
+        <Toast
+          key={failure.seq}
+          text={failure.text}
+          icon={<IconWarningOutlineRegular />}
+          // The composer card this trigger sits inside: a window-centered
+          // banner would drift off the chat column while the sidebar is open.
+          anchor={triggerRef.current?.closest<HTMLElement>('[data-composer-card]') ?? null}
+          onDone={() => { setFailure(null) }}
+        />
+      )}
       {confirmation !== null && (
         <RiskConfirmation
           open

@@ -107,6 +107,8 @@ export interface TestSessionRemoteDefaults {
   readonly revealPath?: (path: string, signal: AbortSignal) => Promise<void>
   readonly canOpenPath?: () => boolean
   readonly listWorkSliceMs?: number
+  /** Deferred-activation configuration directory; omitted keeps immediate activation. */
+  readonly configurationDirectory?: string
 }
 
 const installed = new WeakMap<Context, SessionController>()
@@ -309,6 +311,7 @@ async function installControllers(
       {
         ...defaults.nativeOpen === undefined ? {} : { nativeOpen: defaults.nativeOpen },
         ...defaults.listWorkSliceMs === undefined ? {} : { listWorkSliceMs: defaults.listWorkSliceMs },
+        ...defaults.configurationDirectory === undefined ? {} : { configurationDirectory: defaults.configurationDirectory },
       },
       {
         ...defaults.openPath === undefined ? {} : { openPath: defaults.openPath },

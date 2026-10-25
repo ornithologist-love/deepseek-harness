@@ -24,7 +24,9 @@ import type { AgentPresetSeatInjected } from '../src/client/AgentPresetSeat.tsx'
 import { AgentPresetSeatController } from '../src/client/seat-store.ts'
 import { CreatePluginMenuItem, type CreatePluginMenuItemInjected } from '../src/client/CreatePluginMenuItem.tsx'
 import { AgentPresetSectionController } from '../src/client/section-store.ts'
-import { apply as hostApply } from '../src/index.ts'
+import { apply as hostApply, Config as hostConfig } from '../src/index.ts'
+import { AGENT_PRESET_OPTIONS_GLOBAL } from '../src/agent-preset-options.ts'
+import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
 import type { AgentPresetRow } from '@deepseek-ai/dsh-agent-preset-registry/types'
 
 // These specs assert the shipped Chinese copy. The lane has no jsdom `window`,
@@ -175,6 +177,7 @@ async function bench(options: {
   }
   ctx.provide('remote.agentPresets', agentPresets as never)
   Object.assign(remote, { agentPresets })
+  remote.provideNamespaces({ session: {} })
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
   if (options.describeGate === undefined) {
     await vi.waitFor(() => {
@@ -302,6 +305,15 @@ async function settingsWithoutChip(initialPreset: string, settingsRosterGate?: P
   return { ...b, bindingOwner, feature, section, sessions }
 }
 
+/** A slot entry's inject factory, typed by the face the registration declares. */
+type InjectFactory<T> = (arg: never) => T
+
+function slotInjected<T>(slots: SlotRegistry, name: string, id?: string): InjectFactory<T> {
+  const entry = slots.entries(name).find(candidate => id === undefined || candidate.options.id === id)
+  if (entry === undefined) throw new Error(`no ${name} entry registered`)
+  return entry.inject as InjectFactory<T>
+}
+
 describe('ui-agent-preset apply', () => {
   const settingsActions = [
     { action: 'makeDefault', initial: 'standard', selected: 'minimal', run: (section: AgentPresetSectionInjected) => section.makeDefault('minimal') },
@@ -341,13 +353,39 @@ describe('ui-agent-preset apply', () => {
     },
   )
 
-  it('keeps the host Loader entry inert', () => {
-    expect(hostApply).not.toThrow()
+  it('publishes the surface options into the browser page and keeps today’s behavior by default', () => {
+    expect(hostConfig({})).toEqual({ hiddenAgentPresetPrefixes: [], seatRequiresDeveloperTools: false })
+    expect(hostConfig['~standard'].validate({ seatRequiresDeveloperTools: 'yes' })).toHaveProperty('issues')
+    expect(hostConfig['~standard'].validate({ hiddenAgentPresetPrefixes: 'external-' })).toHaveProperty('issues')
+
+    const listeners: ((table: IndexInjection[]) => void)[] = []
+    hostApply({ on: (_event: string, listener: (table: IndexInjection[]) => void) => {
+      listeners.push(listener)
+    } } as never, hostConfig({}))
+    const table: IndexInjection[] = []
+    listeners[0]!(table)
+    expect(table).toEqual([{
+      kind: 'global',
+      name: AGENT_PRESET_OPTIONS_GLOBAL,
+      value: { hiddenAgentPresetPrefixes: [], seatRequiresDeveloperTools: false },
+    }])
+
+    const configured: IndexInjection[] = []
+    const configuredListeners: ((table: IndexInjection[]) => void)[] = []
+    hostApply({ on: (_event: string, listener: (table: IndexInjection[]) => void) => {
+      configuredListeners.push(listener)
+    } } as never, hostConfig({ hiddenAgentPresetPrefixes: ['external-'], seatRequiresDeveloperTools: true }))
+    configuredListeners[0]!(configured)
+    expect(configured).toEqual([{
+      kind: 'global',
+      name: AGENT_PRESET_OPTIONS_GLOBAL,
+      value: { hiddenAgentPresetPrefixes: ['external-'], seatRequiresDeveloperTools: true },
+    }])
   })
 
   it('declares the services it uses', () => {
     expect(inject).toEqual([
-      'slots', 'sessions', 'locale', 'remote', 'remote.agentPresets', 'remote.settings', 'configForms',
+      'slots', 'sessions', 'locale', 'remote', 'remote.agentPresets', 'remote.session', 'remote.settings', 'configForms',
     ])
   })
 
@@ -1050,6 +1088,48 @@ describe('ui-agent-preset apply', () => {
     expect(label.hooks.agentPresets.getSnapshot().options).toEqual([{ id: 'standard' }])
   })
 
+  it('hands the chip and the label this deployment’s page options', async () => {
+    const { ctx, slots } = await bench()
+    declareRoot(slots)
+    declareConversation(slots)
+    ctx.provide('conversation', {} as never)
+    ctx.provide('sessions', sessionsDouble(ctx, { byId: {} }) as never)
+    ctx.provide('uiWorkspace', uiWorkspaceDouble() as never)
+
+    // The Host's page row, staged the way the shell assigns it before activation.
+    vi.stubGlobal(AGENT_PRESET_OPTIONS_GLOBAL, {
+      hiddenAgentPresetPrefixes: ['external-'],
+      seatRequiresDeveloperTools: true,
+    })
+    try {
+      await ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'uiWorkspace'], apply }).await()
+      const seat = slotInjected<AgentPresetSeatInjected>(slots, 'conversation.hero.agentPreset')()
+      const label = slotInjected<AgentPresetLabelInjected>(slots, 'conversation.session.header.actions')()
+      expect(seat.hiddenPrefixes).toEqual(['external-'])
+      expect(seat.seatRequiresDeveloperTools).toBe(true)
+      expect(label.hiddenPrefixes).toEqual(['external-'])
+
+      // Under the declared defaults nothing hides.
+      await ctx.fiber.dispose()
+      vi.unstubAllGlobals()
+      const defaults = await bench()
+      declareRoot(defaults.slots)
+      declareConversation(defaults.slots)
+      defaults.ctx.provide('conversation', {} as never)
+      defaults.ctx.provide('sessions', sessionsDouble(defaults.ctx, { byId: {} }) as never)
+      defaults.ctx.provide('uiWorkspace', uiWorkspaceDouble() as never)
+      await defaults.ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'uiWorkspace'], apply }).await()
+      const defaultSeat = slotInjected<AgentPresetSeatInjected>(defaults.slots, 'conversation.hero.agentPreset')()
+      const defaultLabel = slotInjected<AgentPresetLabelInjected>(defaults.slots, 'conversation.session.header.actions')()
+      expect(defaultSeat.hiddenPrefixes).toEqual([])
+      expect(defaultSeat.seatRequiresDeveloperTools).toBe(false)
+      expect(defaultLabel.hiddenPrefixes).toEqual([])
+      await defaults.ctx.fiber.dispose()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('stages the creator preset and starts a session from the section', async () => {
     const { ctx, slots } = await bench()
     declareRoot(slots)
@@ -1439,6 +1519,58 @@ describe('AgentPresetSeatController reconciliation', () => {
     await Promise.all([first, settings])
     await controller.apply()
     expect(select).toHaveBeenCalledExactlyOnceWith(SessionId('first'), 'minimal')
+  })
+
+  it('saves the preset on a deferred draft through session.configure instead of recomposing', async () => {
+    const configure = vi.fn((request: { sessionId: SessionId; agentPreset?: string }) => Promise.resolve({
+      ok: true as const, value: { sessionId: request.sessionId, agentPreset: request.agentPreset },
+    }))
+    const select = vi.fn()
+    const controller = new AgentPresetSeatController({
+      ...developerTools(),
+      remote: { agentPresets: { select }, session: { configure } },
+    } as never,
+    () => ({ id: SessionId('blank'), blank: true, projectionValues: { agentPreset: 'standard' } }),
+    { id: undefined, introduce: false }, true)
+
+    expect(await controller.select('minimal')).toBeUndefined()
+
+    expect(configure).toHaveBeenCalledExactlyOnceWith({ sessionId: SessionId('blank'), agentPreset: 'minimal' })
+    expect(select).not.toHaveBeenCalled()
+    expect(controller.store.getSnapshot()).toMatchObject({ current: 'minimal', busy: false, error: null })
+  })
+
+  it('reports a deferred configure refusal without naming the preset twice', async () => {
+    const configure = vi.fn(() => Promise.resolve({
+      ok: false as const,
+      error: new RemoteError('gateway/internal', 'Session execution has already started', {}),
+    }))
+    const controller = new AgentPresetSeatController({
+      ...developerTools(),
+      remote: { agentPresets: { select: vi.fn() }, session: { configure } },
+    } as never,
+    () => ({ id: SessionId('blank'), blank: true, projectionValues: { agentPreset: 'standard' } }),
+    { id: undefined, introduce: false }, true)
+
+    expect(await controller.select('minimal')).toBe('Session execution has already started')
+    expect(controller.store.getSnapshot()).toMatchObject({
+      current: 'standard', error: { preset: { id: 'minimal' }, reason: 'Session execution has already started' },
+    })
+  })
+
+  it('falls back to the staged preset when a deferred configure answer omits it', async () => {
+    const configure = vi.fn((request: { sessionId: SessionId }) => Promise.resolve({
+      ok: true as const, value: { sessionId: request.sessionId },
+    }))
+    const controller = new AgentPresetSeatController({
+      ...developerTools(),
+      remote: { agentPresets: { select: vi.fn() }, session: { configure } },
+    } as never,
+    () => ({ id: SessionId('blank'), blank: true, projectionValues: { agentPreset: 'standard' } }),
+    { id: undefined, introduce: false }, true)
+
+    expect(await controller.select('minimal')).toBeUndefined()
+    expect(controller.store.getSnapshot()).toMatchObject({ current: 'minimal', busy: false, error: null })
   })
 
   it('does not capture a non-blank Session', () => {

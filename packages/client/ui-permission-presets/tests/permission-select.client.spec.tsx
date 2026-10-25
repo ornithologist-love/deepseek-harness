@@ -35,6 +35,9 @@ function setup(options: {
   catalog?: PermissionCatalog | null
   locked?: boolean
   select?: (preset: string) => Promise<boolean>
+  colors?: Record<string, string>
+  fullAccessRemembered?: boolean
+  fullAccessAcknowledged?: boolean
 } = {}) {
   const selection = createSnapshotStore<{ value: PermissionSelection | undefined }>({
     value: 'selection' in options ? options.selection : { currentValue: 'workspace-write' },
@@ -42,18 +45,27 @@ function setup(options: {
   const catalog = createSnapshotStore<PermissionCatalogState>({
     value: options.catalog === undefined ? CATALOG : options.catalog,
   })
+  const acknowledged = createSnapshotStore(options.fullAccessAcknowledged ?? false)
+  const acknowledgeFullAccess = vi.fn(() => { acknowledged.set(true) })
+  // The renderer binds one hook per source; a hook rebuilt per render would
+  // re-subscribe and drop the selection.
+  const boundSelection = bindSnapshotSelector(selection)
   const useProjection = (_key: string, selector?: (value: unknown) => unknown) =>
-    bindSnapshotSelector(selection)(state => (selector ?? (value => value))(state.value))
+    boundSelection(state => (selector ?? (value => value))(state.value))
   const select = vi.fn(options.select ?? (() => Promise.resolve(true)))
   const props = {
     locked: options.locked ?? false,
     useProjection,
     usePermissionCatalog: bindSnapshotSelector(catalog),
+    useFullAccessAcknowledged: bindSnapshotSelector(acknowledged),
+    acknowledgeFullAccess,
+    fullAccessRemembered: options.fullAccessRemembered ?? false,
+    colors: options.colors ?? {},
     select,
     t,
-  } as unknown as PermissionSelectProps
+  } satisfies Omit<PermissionSelectProps, 'useProjection'>
   const view = render(<PermissionSelect {...props} />)
-  return { catalog, props, select, selection, view }
+  return { acknowledged, acknowledgeFullAccess, catalog, props, select, selection, view }
 }
 
 function trigger(): HTMLButtonElement {
@@ -159,7 +171,9 @@ describe('PermissionSelect', () => {
     act(() => { selection.set({ value: { currentValue: 'auto' } }) })
     await act(async () => {})
 
-    expect(trigger().getAttribute('aria-label')).toBe('访问模式，当前：自动审查')
+    // The accessibility name carries the badge, so an experimental mode is
+    // never announced as its bare label.
+    expect(trigger().getAttribute('aria-label')).toBe('访问模式，当前：自动审查 EXP')
     expect(trigger().textContent).toBe('自动审查')
     expect(trigger().querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(2)
     expect(trigger().getAttribute('title')).toBe('无沙箱运行；每次原生工具调用和 PTC 内层调用前由同一模型进行实验性审查。')
@@ -237,5 +251,116 @@ describe('PermissionSelect', () => {
     expect(trigger().textContent).toBe('Custom')
     act(() => { selection.set({ value: { currentValue: 'workspace-write' } }) })
     expect(trigger().textContent).toBe('工作区内修改')
+  })
+
+  it('reports a refused switch through the localized Toast instead of dropping it', async () => {
+    const { select } = setup({
+      selection: { currentValue: 'read-only' },
+      select: () => Promise.reject(new Error('gateway/internal: refused')),
+    })
+    fireEvent.click(trigger())
+    fireEvent.click(screen.getByRole('menuitem', { name: '工作区内修改' }))
+    // The optimistic label shows the pick while the command is in flight.
+    expect(trigger().textContent).toBe('工作区内修改')
+    await act(async () => {})
+
+    const banner = screen.getByRole('alert')
+    expect(banner.textContent).toBe('权限修改失败：gateway/internal: refused')
+    expect(select).toHaveBeenCalledExactlyOnceWith('workspace-write')
+    // The Session still reports the old value, so the applied label returns
+    // and the trigger is usable again.
+    expect(trigger().textContent).toBe('仅可查看')
+    expect(trigger().disabled).toBe(false)
+  })
+
+  it('names a non-Error refusal by its string form', async () => {
+    // oxlint-disable-next-line typescript/prefer-promise-reject-errors -- the case under test is a non-Error refusal.
+    setup({ selection: { currentValue: 'read-only' }, select: () => Promise.reject('offline') })
+    fireEvent.click(trigger())
+    fireEvent.click(screen.getByRole('menuitem', { name: '工作区内修改' }))
+    await act(async () => {})
+
+    expect(screen.getByRole('alert').textContent).toBe('权限修改失败：offline')
+  })
+
+  it('dismisses the failure Toast once its hold elapses', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      setup({ selection: { currentValue: 'read-only' }, select: () => Promise.reject(new Error('refused')) })
+      fireEvent.click(trigger())
+      fireEvent.click(screen.getByRole('menuitem', { name: '工作区内修改' }))
+      await act(async () => {})
+      expect(screen.getByRole('alert')).toBeTruthy()
+      // The default hold plus the fade the shared Toast also waits out.
+      act(() => { vi.advanceTimersByTime(4001) })
+      expect(screen.queryByRole('alert')).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('skips the Full access confirmation once another surface recorded it', () => {
+    const { select } = setup({ fullAccessRemembered: true, fullAccessAcknowledged: true })
+    fireEvent.click(trigger())
+    fireEvent.click(screen.getByRole('menuitem', { name: '完全权限' }))
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(select).toHaveBeenCalledExactlyOnceWith('danger-full-access')
+  })
+
+  it('keeps asking for Full access when the deployment remembers nothing', () => {
+    const { select } = setup({ fullAccessRemembered: false, fullAccessAcknowledged: true })
+    fireEvent.click(trigger())
+    fireEvent.click(screen.getByRole('menuitem', { name: '完全权限' }))
+
+    expect(screen.getByRole('dialog', { name: '确认启用完全权限？' })).toBeTruthy()
+    expect(select).not.toHaveBeenCalled()
+  })
+
+  it('records the acknowledgement when the Full access confirmation lands', async () => {
+    const { acknowledgeFullAccess, select } = setup({ fullAccessRemembered: true })
+    fireEvent.click(trigger())
+    fireEvent.click(screen.getByRole('menuitem', { name: '完全权限' }))
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '启用完全权限' }))
+
+    expect(acknowledgeFullAccess).toHaveBeenCalledOnce()
+    expect(select).toHaveBeenCalledExactlyOnceWith('danger-full-access')
+    // The shared mirror now suppresses the gate for the next pick.
+    await act(async () => {})
+    fireEvent.click(trigger())
+    fireEvent.click(screen.getByRole('menuitem', { name: '完全权限' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('never records an acknowledgement for Auto review', async () => {
+    const { acknowledgeFullAccess } = setup({ fullAccessRemembered: true, fullAccessAcknowledged: true })
+    fireEvent.click(trigger())
+    fireEvent.click(screen.getByRole('menuitem', { name: '自动审查 EXP' }))
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '启用自动审查' }))
+    await act(async () => {})
+
+    expect(acknowledgeFullAccess).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('paints a configured preset color through a custom property only', () => {
+    const { selection } = setup({
+      selection: { currentValue: 'read-only' },
+      colors: { 'read-only': 'var(--brand-accent)', 'danger-full-access': 'var(--brand-danger)' },
+    })
+    // A configured preset carries the custom property; the stylesheet, not the
+    // component, decides which property reads it.
+    expect(trigger().style.getPropertyValue('--dsh-permission-tone')).toBe('var(--brand-accent)')
+    expect(trigger().getAttribute('style')).not.toContain('color')
+
+    act(() => { selection.set({ value: { currentValue: 'workspace-write' } }) })
+    // An unconfigured preset keeps the native styles.
+    expect(trigger().style.getPropertyValue('--dsh-permission-tone')).toBe('')
+    expect(trigger().className).not.toContain('toned')
+
+    act(() => { selection.set({ value: { currentValue: 'danger-full-access' } }) })
+    expect(trigger().style.getPropertyValue('--dsh-permission-tone')).toBe('var(--brand-danger)')
   })
 })

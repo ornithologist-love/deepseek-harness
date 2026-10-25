@@ -22,6 +22,7 @@ import {
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { AgentPresetSeatState } from './seat-store.ts'
 import { presetDisplayText } from './locales.ts'
+import { hidesPreset } from './preset-visibility.ts'
 import { requiresCodingTools } from './settings-store.ts'
 import css from './AgentPresetSeat.module.css'
 
@@ -33,6 +34,16 @@ export interface AgentPresetSeatInjected {
     /** Seat snapshot bound by the renderer as useAgentPresetSeat. */
     agentPresetSeat: SnapshotStore<AgentPresetSeatState>
   }
+  /**
+   * Preset ids this deployment presents elsewhere: the chip hides once the
+   * seat's preset starts with one of these prefixes.
+   */
+  hiddenPrefixes: readonly string[]
+  /**
+   * Hide the whole chip while Developer tools is off, instead of only
+   * removing the choices that need it.
+   */
+  seatRequiresDeveloperTools: boolean
   /** Read the roster when the chip first renders. */
   load: () => Promise<void>
   /** Stage one preset for the next session; resolves to a refusal, or undefined. */
@@ -79,7 +90,8 @@ export type AgentPresetSeatProps =
  * @returns The chip and any pending selection refusal, or null outside the main view.
  */
 export function AgentPresetSeat({
-  sessionId, useSessionRetainInfo, load, select, dismissRefusal, introduced, useAgentPresetSeat, useDeveloperTools, t,
+  sessionId, useSessionRetainInfo, load, select, dismissRefusal, introduced, useAgentPresetSeat, useDeveloperTools,
+  hiddenPrefixes, seatRequiresDeveloperTools, t,
 }: AgentPresetSeatProps) {
   const developerTools = useDeveloperTools(value => value)
   const state = useAgentPresetSeat(snapshot => snapshot)
@@ -138,6 +150,11 @@ export function AgentPresetSeat({
 
   // A refused initial composition still needs its Toast when there is no chip to show.
   if (!main) return null
+  // The chip is this deployment's control; a preset it presents elsewhere
+  // (or the whole chip, while Developer tools is required and off) leaves the
+  // screen to the surface that owns the choice instead.
+  if (hidesPreset(state.current, hiddenPrefixes)
+    || (seatRequiresDeveloperTools && !developerTools)) return null
 
   // One wrapper span: the chip is a flex row with a gap, so loose character
   // spans would each pick up the gap between them.

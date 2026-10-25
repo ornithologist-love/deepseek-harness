@@ -56,7 +56,7 @@ export function createRelayTransport(environment: RelayEnvironment = processRela
       // Tests replace the global fetch to stand in for the Relay. Production keeps its private
       // dispatcher even when instrumentation replaces the global, so this branch is test-only.
       if (process.env.NODE_ENV === 'test' && globalThis.fetch !== plainFetch) {
-        return await (globalThis.fetch(input, init as globalThis.RequestInit) as Promise<Response>)
+        return await (globalThis.fetch(input, init as globalThis.RequestInit) as never)
       }
       return await runRelayH2Scoped(async () => {
         const { fetch } = await import('undici')

@@ -24,8 +24,14 @@ export class HistoryController {
   /** Reconnect state for this controller's assistant subscriptions. */
   readonly streamsListener: SessionAssistantStreamsListener
 
-  /** @param ctx - Host context carrying Session reads and projections. */
-  constructor(private readonly ctx: Context) {
+  /**
+   * @param ctx - Host context carrying Session reads and projections.
+   * @param observeDraft - reads a saved draft without an Agent, or undefined for durable history.
+   */
+  constructor(
+    private readonly ctx: Context,
+    private readonly observeDraft?: (sessionId: SessionId) => Promise<SessionObservation | undefined>,
+  ) {
     this.streamsListener = new SessionAssistantStreamsListener(this.ctx)
   }
 
@@ -169,7 +175,8 @@ export class HistoryController {
   ): Promise<SessionObservation | Awaited<T>> {
     let observation: SessionObservation
     try {
-      observation = await this.ctx.sessionQuery.observeSession(sessionId, { signal, projectionMode: projection ? 'all' : 'none' })
+      observation = await this.observeDraft?.(sessionId)
+        ?? await this.ctx.sessionQuery.observeSession(sessionId, { signal, projectionMode: projection ? 'all' : 'none' })
     } catch (error: unknown) {
       const code = (error as { readonly code?: unknown } | null | undefined)?.code
       if (code === 'SESSION_QUERY_SESSION_NOT_FOUND') {

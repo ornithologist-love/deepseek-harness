@@ -15,12 +15,12 @@ export class WebController {
   /**
    * @param ctx - Host context carrying Session queries and identity projections.
    * @param historyController - passive reading and listener construction.
-   * @param promote - background activation requested before an opening snapshot is delivered.
+   * @param promote - background activation requested before an opening snapshot is delivered; absent on deferred hosts.
    */
   constructor(
     private readonly ctx: Context,
     private readonly historyController: HistoryController,
-    private readonly promote: (observation: SessionObservation) => void,
+    private readonly promote: ((observation: SessionObservation) => void) | undefined,
   ) {}
 
   /**
@@ -59,12 +59,13 @@ export class WebController {
     // Increments come from the queue, so the opening ends this lease in every branch;
     // activation continues on its own retained lease. Promotion starts before the opening is
     // delivered, so a consumer that stops after the snapshot still gets the activation it asked for.
-    if (request.activate === true && !signal.aborted
+    const promote = this.promote
+    if (promote !== undefined && request.activate === true && !signal.aborted
       && observation.header.origin !== 'subagent' && observation.source === 'prepared') {
       const promotion = observation.retain()
       observation[Symbol.dispose]()
       try {
-        this.promote(promotion)
+        promote(promotion)
       } catch (error: unknown) {
         promotion[Symbol.dispose]()
         throw error
