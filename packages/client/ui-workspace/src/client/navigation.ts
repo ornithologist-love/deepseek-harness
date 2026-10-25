@@ -13,7 +13,7 @@ import type {
 } from '@deepseek-ai/dsh-api-session-controller/client'
 // Type-only: pulls the `agentPreset` Session projection value into this program.
 import type {} from '@deepseek-ai/dsh-agent-preset-registry/types'
-import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { createSnapshotStore, type ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type {
   IWorkspaces, WorkspaceId, WorkspaceSnapshot, WorkspaceView,
@@ -24,10 +24,20 @@ import type { DraftInitializationOptions } from '@deepseek-ai/dsh-client-ui-conv
 import type { RowToast } from './contract/slots.ts'
 import { pinOrderAccounts, pinOrderSource } from './pin-order.ts'
 import type { WorkspaceViewStoreActions } from './stores.ts'
+import type { WorkspacePresentationSnapshot } from './presentation.ts'
 
-interface MainSelection {
+/** The Session or subagent the main view shows. */
+export interface MainSelection {
   readonly sessionId?: SessionId
   readonly subagentAddress?: SubagentAddress
+}
+
+/** Page startup choices supplied by the deployment. */
+export interface WorkspaceStartup {
+  /** False skips restoring the previous main view at startup; explicit navigation is unaffected. */
+  readonly restoreOnStartup: boolean
+  /** Main view selected for this page; adopted only when restoration is on. */
+  readonly selection?: MainSelection
 }
 
 /** Content preparation and Agent preset for the Session a Workspace flow opens. */
@@ -38,6 +48,8 @@ export interface StartSessionOptions extends DraftInitializationOptions {
 
 /** Workspace archive and directory operations consumed by Client UI domains. */
 export interface UiWorkspace {
+  /** Main view selection; observing it retains no Session. */
+  readonly selection: ObservableSnapshot<MainSelection>
   /**
    * Select a Session and show its Conversation as one UI navigation action.
    * @param target - known Session identity or durable direct-parent subagent address to display.
@@ -164,13 +176,15 @@ export class DirectoryBrowseError extends Error {
 
 /** Implements Workspace archive and directory UI operations. */
 class UiWorkspaceService extends Service implements UiWorkspace {
+  /** In-flight `fresh` creation per Workspace target; concurrent requests share it. */
+  private readonly freshCreating = new Map<WorkspaceId | undefined, Promise<SessionId>>()
   /** The latest in-flight connection per Workspace; a request joins it only when both name the same preset. */
   private readonly connecting = new Map<WorkspaceId, {
     readonly agentPreset: string | undefined
     readonly attempt: Promise<SessionId>
   }>()
   private readonly lifetime = new AbortController()
-  private readonly selection = createSnapshotStore<MainSelection>(
+  readonly selection = createSnapshotStore<MainSelection>(
     {}, { persist: { name: 'dsh.sessions.current' } },
   )
   private mainReference: SessionReference | undefined
@@ -183,6 +197,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
    * @param sessions - pure Session Controller.
    * @param view - the browser's viewing-store write set (one instance shared with its registration).
    * @param notify - show one notice through the Workspace notice channel.
+   * @param presentation - current deployment presentation.
+   * @param startup - page startup choices.
    */
   constructor(
     ctx: Context,
@@ -191,8 +207,11 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     private readonly sessions: ISessions,
     private readonly view: Pick<WorkspaceViewStoreActions, 'pinSessionOrder'>,
     private readonly notify: (toast: RowToast) => void,
+    private readonly presentation: () => WorkspacePresentationSnapshot,
+    private readonly startup: WorkspaceStartup,
   ) {
     super(ctx, 'uiWorkspace')
+    if (startup.restoreOnStartup && startup.selection !== undefined) this.selection.set(startup.selection)
     ctx.effect(() => {
       const stop = this.watchNavigation()
       return () => {
@@ -335,6 +354,22 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void {
+    const external = this.presentation().external
+    if (workspaceId === undefined && external?.activeKey) {
+      const active = external.items.find(item => item.key === external.activeKey)
+      const target = active?.workspaceId !== undefined ? active
+        : external.items.find(item => item.hostId === active?.hostId && item.workspaceId !== undefined)
+      if (target) { external.create(target.key); return }
+    }
+    if (workspaceId === undefined && external?.hideLocalWorkspaces) {
+      const workspace = external.items.find(item => item.online && item.workspaceId !== undefined)
+      if (workspace) external.create(workspace.key)
+      return
+    }
+    if (options === undefined && this.presentation().newSession === 'fresh') {
+      this.startFreshSession(workspaceId)
+      return
+    }
     const { agentPreset, ...draft } = options ?? {}
     const draftOptions = options === undefined ? undefined : draft
     const initializeDraft = draftOptions !== undefined && (draftOptions.prompt !== undefined
@@ -428,8 +463,24 @@ class UiWorkspaceService extends Service implements UiWorkspace {
     return access.whenResourceAccess('workspace', workspaceId, action, callback)
   }
 
+  private startFreshSession(workspaceId: WorkspaceId | undefined): void {
+    const navigation = AbortSignal.any([this.ctx.layout.beginNavigation(), this.lifetime.signal])
+    let pending = this.freshCreating.get(workspaceId)
+    if (pending === undefined) {
+      pending = this.sessions.create(workspaceId === undefined ? {} : { workspaceId })
+        .finally(() => { this.freshCreating.delete(workspaceId) })
+      this.freshCreating.set(workspaceId, pending)
+    }
+    void pending.then((sessionId) => {
+      if (!navigation.aborted) this.replaceMain(sessionId, navigation, 'reveal')
+    }, (reason: unknown) => {
+      if (!navigation.aborted) this.notify({ kind: 'createFailed', message: creationFailureMessage(reason) })
+    })
+  }
+
   private watchNavigation(): () => void {
-    let initial: 'waiting' | 'connecting' | 'done' = 'waiting'
+    // Skipping restoration leaves archive handling and explicit navigation unchanged.
+    let initial: 'waiting' | 'connecting' | 'done' = this.startup.restoreOnStartup ? 'waiting' : 'done'
     const reconcile = (): void => {
       if (this.lifetime.signal.aborted) return
       if (this.clearArchivedCurrent()) return
@@ -489,6 +540,7 @@ class UiWorkspaceService extends Service implements UiWorkspace {
       target = prepared?.workspaceId
     }
     if (sessionId === undefined && target !== undefined) sessionId = await this.connectWorkspace(target)
+    if (sessionId === undefined && this.presentation().newSession === 'fresh') sessionId = await this.sessions.create({})
     if (sessionId !== undefined && !navigation.aborted) {
       this.replaceMain(sessionId, navigation, 'preserve')
     }

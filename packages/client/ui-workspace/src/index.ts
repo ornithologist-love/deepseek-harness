@@ -1,9 +1,28 @@
 /**
- * Workspace picker plugin, node half. Pure UI plugin: the empty apply exists
- * so the plugin appears in the host cordis.yml / Loader (load and lifecycle
- * follow the host; the browser half ships via exports["./client"], discovered
- * through the package.json dsh.client declaration).
+ * Workspace picker plugin, node half. Publishes the page's startup options and
+ * the deployment's initial main view before browser plugins activate; the
+ * browser half ships via exports["./client"], discovered through the
+ * package.json dsh.client declaration.
  */
 
-/** Host plugin body — no host-side behavior for the workspace picker plugin. */
-export function apply(): void {}
+import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-host-webserver'
+import { SESSION_NAVIGATION_GLOBAL, WORKSPACE_OPTIONS_GLOBAL, type Config } from './workspace-options.ts'
+
+export { Config } from './workspace-options.ts'
+export type { SessionNavigationInput } from './workspace-options.ts'
+
+/**
+ * Publish startup options and the optional initial main view for each page.
+ * @param ctx - Host context collecting the page's initialization data.
+ * @param config - plugin options with schema defaults applied by the Loader.
+ */
+export function apply(ctx: Context, config: Config): void {
+  ctx.on('webserver/index-inject', (table) => {
+    if (!config.restoreOnStartup) {
+      table.push({ kind: 'global', name: WORKSPACE_OPTIONS_GLOBAL, value: { restoreOnStartup: false } })
+    }
+    const input = ctx.get('sessionNavigationInput')
+    if (input) table.push({ kind: 'global', name: SESSION_NAVIGATION_GLOBAL, value: input.current() })
+  })
+}

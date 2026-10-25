@@ -1,0 +1,18 @@
+/* Host selection and remote directory browsing. */
+.hostChoices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+.hostChoices .hostChoice {
+  height: auto;
+  min-height: 60px;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 14px;
+  text-align: left;
+}
+.hostName { font-weight: 500; overflow-wrap: anywhere; }
+.hostDetails { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
