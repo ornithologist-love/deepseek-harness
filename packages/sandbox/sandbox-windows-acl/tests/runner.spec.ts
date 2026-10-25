@@ -107,6 +107,26 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
     expect(existsSync(join(writableDir, 'child-wrote.txt'))).toBe(true)
   }, 30_000)
 
+  it('workspace-write: one confined command writes every repeated --workspace member', () => {
+    const member = join(scratchRoot, 'member')
+    mkdirSync(member)
+    const probe = [
+      "$ErrorActionPreference='SilentlyContinue';",
+      `try{Set-Content -Path '${writableDir}\\primary.txt' -Value ok -ErrorAction Stop;'PRIMARY-WRITE: OK'}catch{'PRIMARY-WRITE: DENIED'};`,
+      `try{Set-Content -Path '${member}\\member.txt' -Value ok -ErrorAction Stop;'MEMBER-WRITE: OK'}catch{'MEMBER-WRITE: DENIED'};`,
+      `try{Set-Content -Path '${escapeFile}' -Value ok -ErrorAction Stop;'ESCAPE-WRITE: OK (ESCAPE!)'}catch{'ESCAPE-WRITE: DENIED'}`,
+    ].join('')
+    const result = runRunner([
+      '--workspace', writableDir, '--workspace', member, '--temp', isolatedTemp, '--mode', 'workspace-write',
+      '--', 'pwsh', '/NoLogo', '/NonInteractive', '/NoProfile', '/Command', probe,
+    ])
+    expect(result.status, `stderr: ${result.stderr}`).toBe(0)
+    expect(result.stdout).toContain('PRIMARY-WRITE: OK')
+    expect(result.stdout).toContain('MEMBER-WRITE: OK')
+    expect(result.stdout).toContain('ESCAPE-WRITE: DENIED')
+    expect(existsSync(escapeFile)).toBe(false)
+  }, 30_000)
+
   it('read-only: no write-SID grants — workspace/temp writes denied, reads and $null redirection fine, CIM unavailable', () => {
     const probe = [
       "$ErrorActionPreference='SilentlyContinue';",

@@ -30,6 +30,7 @@
     "lib/runner.js",
     "lib/types-*.js",
     "assets",
+    "THIRD_PARTY_NOTICES.md",
     "lib/types/**/*.d.ts"
   ],
   "license": "MIT",

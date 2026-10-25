@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { tempWriteSid, workspaceWriteSid } from '../src/index.ts'
+import { memberSetWriteSid, tempWriteSid, workspaceWriteSid } from '../src/index.ts'
 
 describe('workspaceWriteSid', () => {
   it('derives a stable capability-shaped SID per workspace path', () => {
@@ -26,6 +26,24 @@ describe('workspaceWriteSid', () => {
   it('is byte-sensitive: the canonical path is the caller\'s contract (an alias spelling derives a second identity)', () => {
     expect(workspaceWriteSid('C:\\Repo')).not.toBe(workspaceWriteSid('c:\\repo'))
     expect(workspaceWriteSid('C:\\Repo\\')).not.toBe(workspaceWriteSid('C:\\Repo'))
+  })
+})
+
+describe('memberSetWriteSid', () => {
+  it('keeps the single-root identity for one member', () => {
+    expect(memberSetWriteSid(['C:\\Repo', 'C:\\Repo'])).toBe(workspaceWriteSid('C:\\Repo'))
+  })
+
+  it('depends on the member set only, and changes when the set changes', () => {
+    const set = memberSetWriteSid(['C:\\Game', 'C:\\Engine'])
+    expect(memberSetWriteSid(['C:\\Engine', 'C:\\Game'])).toBe(set)
+    expect(set).toMatch(/^S-1-4-\d+-\d+$/u)
+    expect(set).not.toBe(memberSetWriteSid(['C:\\Game']))
+    expect(set).not.toBe(memberSetWriteSid(['C:\\Game', 'C:\\Engine', 'C:\\Tools']))
+  })
+
+  it('rejects an empty member set', () => {
+    expect(() => memberSetWriteSid([])).toThrow('must not be empty')
   })
 })
 

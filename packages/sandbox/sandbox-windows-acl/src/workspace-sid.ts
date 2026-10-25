@@ -40,6 +40,21 @@ export function workspaceWriteSid(workspaceRoot: string): string {
 }
 
 /**
+ * Derive the write SID of a multi-folder workspace's whole member set. Members
+ * are deduplicated and sorted, so the identity depends only on the set; a
+ * single member keeps its {@link workspaceWriteSid} identity. Changing the set
+ * derives a new SID, so standing ACEs of a removed member grant nothing to
+ * processes confined for the new set.
+ * @param workspaceRoots - the canonical member paths, in any order.
+ * @returns the SDDL string form.
+ */
+export function memberSetWriteSid(workspaceRoots: readonly string[]): string {
+  const roots = [...new Set(workspaceRoots)].sort()
+  if (roots.length === 0) throw new Error('workspace member set must not be empty')
+  return workspaceWriteSid(roots.join('\0'))
+}
+
+/**
  * Derive one private temp directory's write SID. The random directory path
  * is the capability identity; a fixed third subauthority domain-separates
  * the result from every two-subauthority workspace SID.
