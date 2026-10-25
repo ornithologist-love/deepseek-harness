@@ -403,6 +403,10 @@ export type ConvViewProps = PropsRuntime<'conversation.view'>
 
 /** Business callbacks injected into the resident Conversation shell. */
 export interface ConversationInjected {
+  /** Show the built-in hero headline and preview badge. */
+  showHeroText: boolean
+  /** Workspace chip label for a Session outside every registered Workspace; absent shows the placeholder. */
+  unboundWorkspaceLabel?: string | undefined
   /** Connect and open a blank Session in the selected Workspace. */
   selectWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /** Session-addressed composer block source, or the stable absent source. */

@@ -138,6 +138,8 @@ function mount(
     nestedSubagent?: boolean
     /** A composer block another plugin raised for this session. */
     composerBlock?: { reason: string }
+    /** Deployment presentation the Conversation registration injects. */
+    presentation?: { showHeroText?: boolean; unboundWorkspaceLabel?: string }
     /** Mutable view ledger used by registration-order regressions. */
     viewTabs?: ViewTab[]
   } = {},
@@ -349,6 +351,8 @@ function mount(
       renderSlotChain,
       renderFactorySlot,
       selectWorkspace: retargetWorkspace,
+      showHeroText: options.presentation?.showHeroText ?? true,
+      unboundWorkspaceLabel: options.presentation?.unboundWorkspaceLabel,
       t,
     }
     const useFactorySlot = ((name: string, fallback: (props: never) => ReactNode) => (
@@ -388,7 +392,7 @@ function mount(
 describe('Hero chrome', () => {
   it('renders the English preview badge through the hero locale seat', () => {
     const renderSlot = vi.fn<HeroShellProps['renderSlot']>(() => null)
-    const view = render(<HeroShell t={makeTranslate(en, commonEn)} renderSlot={renderSlot} />)
+    const view = render(<HeroShell t={makeTranslate(en, commonEn)} renderSlot={renderSlot} showHeroText />)
     expect(view.getByText('Into the Unknown')).toBeTruthy()
     expect(view.getByText('Preview')).toBeTruthy()
     expect(renderSlot).toHaveBeenCalledOnce()
@@ -679,6 +683,20 @@ describe('ConversationRoot resident composer', () => {
     expect(selectWorkspace).toHaveBeenCalledWith(wid('second'))
     expect(b.view.queryByText('Selected Folder')).toBeNull()
     expect(b.view.getByText('one')).toBeTruthy()
+  })
+
+  it('hides the hero headline and badge when the deployment turns hero text off, keeping the brand mark', () => {
+    const b = mount(sessionSnapshotOf({ blank: true }), undefined, undefined, { presentation: { showHeroText: false } })
+    expect(b.view.queryByText('探索未至之境')).toBeNull()
+    expect(b.slotCalls).toContain('conversation.hero.brand.mark')
+  })
+
+  it('labels a Session outside every registered Workspace with the deployment label once the list is ready', () => {
+    const unbound = mount(sessionSnapshotOf({ blank: true }), [], undefined, { presentation: { unboundWorkspaceLabel: 'Scratch' } })
+    expect(unbound.view.getByText('Scratch')).toBeTruthy()
+    cleanup()
+    const placeholder = mount(sessionSnapshotOf({ blank: true }), [])
+    expect(placeholder.view.queryByText('Scratch')).toBeNull()
   })
 
   it('blank session keeps the interactive picker chip (workspace switchable until the first message)', () => {

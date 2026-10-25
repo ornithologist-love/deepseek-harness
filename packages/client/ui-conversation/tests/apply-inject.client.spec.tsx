@@ -189,6 +189,17 @@ describe('Conversation inject API', () => {
     expect(contributions.size).toBe(0)
   })
 
+  it('injects the page presentation options into the Conversation content', async () => {
+    const plain = await bench()
+    expect(plain.residentApi(ROOT)).toMatchObject({ showHeroText: true, unboundWorkspaceLabel: undefined })
+    await plain.runtime.dispose()
+    vi.stubGlobal('__DSH_CONVERSATION_OPTIONS__', { showHeroText: false, unboundWorkspaceLabel: 'Scratch' })
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    const b = await bench()
+    onTestFinished(() => b.runtime.dispose())
+    expect(b.residentApi(ROOT)).toMatchObject({ showHeroText: false, unboundWorkspaceLabel: 'Scratch' })
+  })
+
   it('assembles the target-neutral read face without Session side effects', async () => {
     const b = await bench()
     const { injected } = b.conversationApi(ROOT)
