@@ -260,6 +260,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.composer': { kind: 'chain'; scope: 'session'; owner: ComposerChainProps }
     /** Workspace picker shown by the blank-session Hero. */
     'conversation.hero.workspace': { kind: 'single'; scope: 'root'; owner: EmptyWorkspaceOwnerProps }
+    /** Icon leading the blank-session Workspace chip; empty keeps the folder icon. */
+    'conversation.hero.workspace.icon': { kind: 'single'; scope: 'root'; owner: HeroWorkspaceIconOwnerProps }
     /** Brand mark shown before the blank-session headline. */
     'conversation.hero.brand.mark': { kind: 'single'; scope: 'root'; owner: HeroBrandMarkOwnerProps }
     /** Agent-preset control staged for a New Session. */
@@ -310,6 +312,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         'conversation.input.dock': { kind: 'list'; scope: 'session' }
         'conversation.hero.brand.mark': { kind: 'single'; scope: 'root' }
         'conversation.hero.workspace': { kind: 'single'; scope: 'root' }
+        'conversation.hero.workspace.icon': { kind: 'single'; scope: 'root' }
         'conversation.hero.agentPreset': { kind: 'single'; scope: 'session-maybe' }
         'conversation.hero.options': { kind: 'list'; scope: 'session' }
       }
@@ -593,6 +596,14 @@ export type ComposerAttachmentsProps =
   PropsRuntime<'conversation.input.attachments'> & PropsLocale<'conversation'>
 
 /** Owner share common to blank-session Workspace pickers. */
+/** Workspace the blank-session chip names, offered to its icon. */
+export interface HeroWorkspaceIconOwnerProps {
+  /** Selected or pending Workspace; absent when the chip shows no registered Workspace. */
+  selectedId?: WorkspaceId | undefined
+  /** Whether the chip shows a label rather than the Choose workspace placeholder. */
+  hasLabel: boolean
+}
+
 export interface EmptyWorkspaceOwnerProps {
   open: boolean
   anchorRef?: RefObject<HTMLElement>

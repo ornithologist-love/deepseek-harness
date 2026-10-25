@@ -7,6 +7,7 @@ import {
   FISH_LOGO_PATH, FISH_LOGO_VIEWBOX, IconChevronDownOutlineRegular, IconFolderCloseRegular, IconFolderOpenRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace/types'
 import type { ConversationContentProps } from '../contract/slots.ts'
 import css from './HeroShell.module.css'
 
@@ -30,14 +31,18 @@ export function workspaceLabel(cwd: string): string {
  * moves the New Session flow to that workspace's blank session. Without a
  * label the chip renders its placeholder state: closed folder + the
  * "Choose workspace" call to action.
+ * @param props.selectedId - Workspace offered to the `conversation.hero.workspace.icon` occupant.
+ * @param props.renderSlot - authorized renderer for the icon slot; empty keeps the folder icon.
  * @param props.label - chip label (see {@link workspaceLabel}); omitted → placeholder.
  * @param props.menuOpen - menu expansion echo.
  * @param props.onClick - menu toggle.
  * @returns the chip button element.
  */
-export function WorkspaceChip({ buttonRef, label, menuOpen = false, onClick, t }: {
+export function WorkspaceChip({ buttonRef, label, selectedId, renderSlot, menuOpen = false, onClick, t }: {
   buttonRef?: RefObject<HTMLButtonElement>
   label?: string | undefined
+  selectedId?: WorkspaceId | undefined
+  renderSlot: ConversationContentProps['renderSlot']
   menuOpen?: boolean
   onClick?: () => void
   t: HeroTranslate
@@ -52,9 +57,11 @@ export function WorkspaceChip({ buttonRef, label, menuOpen = false, onClick, t }
       aria-expanded={menuOpen}
       onClick={onClick}
     >
-      {label === undefined
-        ? <IconFolderCloseRegular className={css.folder} size={16} />
-        : <IconFolderOpenRegular className={css.folder} size={16} />}
+      {renderSlot('conversation.hero.workspace.icon', { selectedId, hasLabel: label !== undefined }, {
+        fallback: label === undefined
+          ? <IconFolderCloseRegular className={css.folder} size={16} />
+          : <IconFolderOpenRegular className={css.folder} size={16} />,
+      })}
       <span className={css.workspaceLabel}>{label ?? t('hero.chooseWorkspace')}</span>
       <IconChevronDownOutlineRegular className={css.chevron} size={12} />
     </button>

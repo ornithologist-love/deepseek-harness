@@ -138,6 +138,8 @@ function mount(
     nestedSubagent?: boolean
     /** A composer block another plugin raised for this session. */
     composerBlock?: { reason: string }
+    /** Occupant of the Workspace chip icon slot; absent renders the slot fallback. */
+    workspaceIcon?: ReactNode
     /** Deployment presentation the Conversation registration injects. */
     presentation?: { showHeroText?: boolean; unboundWorkspaceLabel?: string }
     /** Mutable view ledger used by registration-order regressions. */
@@ -201,6 +203,10 @@ function mount(
       seatOwners.push({ key, owner })
     }
     if (key === 'conversation.hero.workspace') { pickerOwner = owner; return null }
+    if (key === 'conversation.hero.workspace.icon') {
+      seatOwners.push({ key, owner })
+      return options.workspaceIcon ?? opts?.fallback ?? null
+    }
     if (key === 'conversation.session.header.lineage') {
       lineageOwners.push(owner as ConversationHeaderLineageOwnerProps)
       return opts?.fallback ?? null
@@ -697,6 +703,19 @@ describe('ConversationRoot resident composer', () => {
     cleanup()
     const placeholder = mount(sessionSnapshotOf({ blank: true }), [])
     expect(placeholder.view.queryByText('Scratch')).toBeNull()
+  })
+
+  it('offers the chip Workspace to its icon slot and keeps the folder icons without an occupant', () => {
+    const named = mount(sessionSnapshotOf({ blank: true }))
+    expect(named.seatOwners).toContainEqual({ key: 'conversation.hero.workspace.icon', owner: { selectedId: wid('one'), hasLabel: true } })
+    const chip = named.view.getByRole('button', { name: '选择工作区' })
+    expect(chip.querySelectorAll('svg')).toHaveLength(2)
+    cleanup()
+    const placeholder = mount(sessionSnapshotOf({ blank: true }), [])
+    expect(placeholder.seatOwners).toContainEqual({ key: 'conversation.hero.workspace.icon', owner: { selectedId: undefined, hasLabel: false } })
+    cleanup()
+    const custom = mount(sessionSnapshotOf({ blank: true }), undefined, undefined, { workspaceIcon: <img alt="Workspace image" /> })
+    expect(within(custom.view.getByRole('button', { name: '选择工作区' })).getByRole('img', { name: 'Workspace image' })).toBeTruthy()
   })
 
   it('blank session keeps the interactive picker chip (workspace switchable until the first message)', () => {
