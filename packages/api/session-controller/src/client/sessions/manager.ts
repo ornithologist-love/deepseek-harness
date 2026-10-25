@@ -460,6 +460,7 @@ export class SessionManager {
           // clears; how the present keys merge depends on the block's kind.
           for (const s of result.value.items) {
             if (s.projections !== undefined) this.applyListBlock(s.sessionId, s.projections)
+            if (s.configuration) this.projectionStore(s.sessionId).configure(s.configuration.revision, s.configuration.values)
           }
         } else {
           this.listState = 'error'
@@ -598,6 +599,9 @@ export class SessionManager {
    * Local create/fork placeholders only fill metadata on an existing row.
    */
   private mergeSummary(summary: SessionSummary): void {
+    if (summary.configuration) {
+      this.projectionStore(summary.sessionId).configure(summary.configuration.revision, summary.configuration.values)
+    }
     this.recordMutation({ kind: 'upsert', summary })
     this.updateParentAvailability()
   }
@@ -837,6 +841,9 @@ function applyMutation(summaries: readonly SessionSummary[], mutation: SessionLi
     case 'placeholder': {
       const existing = summaries.find(summary => summary.sessionId === mutation.summary.sessionId)
       if (existing === undefined) return [mutation.summary, ...summaries]
+      const configurationChanged = mutation.kind === 'upsert' && mutation.summary.configuration !== undefined
+        && mutation.summary.configuration.revision > (existing.configuration?.revision ?? -1)
+      const configuration = configurationChanged ? mutation.summary.configuration : undefined
       const filled: SessionSummary = {
         ...existing,
         // Blank only lowers: a stale true (session-added racing the local
@@ -847,6 +854,8 @@ function applyMutation(summaries: readonly SessionSummary[], mutation: SessionLi
           running: mutation.summary.running,
           ...(mutation.summary.formatStatus === undefined ? {} : { formatStatus: mutation.summary.formatStatus }),
         } : {}),
+        ...(configuration === undefined ? {} : { configuration,
+          ...(mutation.summary.cwd === undefined ? {} : { cwd: mutation.summary.cwd }) }),
         ...(existing.cwd === undefined && mutation.summary.cwd !== undefined ? { cwd: mutation.summary.cwd } : {}),
         ...(existing.parentSessionId === undefined && mutation.summary.parentSessionId !== undefined
           ? { parentSessionId: mutation.summary.parentSessionId } : {}),
@@ -857,6 +866,7 @@ function applyMutation(summaries: readonly SessionSummary[], mutation: SessionLi
         && filled.origin === existing.origin && filled.blank === existing.blank
         && filled.agentAvailable === existing.agentAvailable && filled.running === existing.running
         && filled.formatStatus === existing.formatStatus
+        && filled.configuration === existing.configuration
       ) return [...summaries]
       return summaries.map(summary => summary.sessionId === mutation.summary.sessionId ? filled : summary)
     }

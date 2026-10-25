@@ -12,6 +12,8 @@ import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
 import { RemoteError, remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/dsh-typert-registry'
+import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type { SessionConfigurations } from './configuration.ts'
 
 /** Cold Session identity absent from persistence. */
 export class ApiSessionNotFound extends Error {}
@@ -128,26 +130,34 @@ export class ApiSessionAgentController {
   private readonly claims = new Map<SessionId, Promise<void>>()
   private readonly imageAdmissionChains = new WeakMap<Agent, Promise<void>>()
 
-  /** @param ctx - Host context carrying Agent, model, persistence, and Typert services. */
-  constructor(private readonly ctx: Context) {}
+  /**
+   * @param ctx - Host context carrying Agent, model, persistence, and Typert services.
+   * @param configurations - deferred composer choices; absent keeps immediate activation.
+   */
+  constructor(private readonly ctx: Context, private readonly configurations?: SessionConfigurations) {}
 
   /**
    * Configure Session and Agent lookups for Typert.
    */
   initialize(): void {
     const ctx = this.ctx
+    // Deferred hosts route Typert only to executing Agents; activation stays with execution.
+    const lookup = async (sessionId: SessionId): Promise<ApiSessionAgentResult> => {
+      if (this.configurations) return this.liveAgent(sessionId) ?? { error: new RemoteError('session/not-found', 'Agent is not executing', { sessionId }) }
+      return this.resolveAgent(sessionId)
+    }
     ctx.typert.lookups.configure('agent', async (sessionId: SessionId) => {
-      const found = await this.resolveAgent(sessionId)
+      const found = await lookup(sessionId)
       if ('error' in found) throw found.error
       return found.agent
     })
     ctx.typert.lookups.configure('session', async (sessionId: SessionId) => {
-      const found = await this.resolveAgent(sessionId)
+      const found = await lookup(sessionId)
       if ('error' in found) throw found.error
       return found.agent.session
     })
     ctx.typert.contexts.configureHost('agent', async (sessionId: SessionId) => {
-      const found = await this.resolveAgent(sessionId)
+      const found = await lookup(sessionId)
       if ('error' in found) throw found.error
       return found.agent.ctx
     })
@@ -176,7 +186,7 @@ export class ApiSessionAgentController {
     observation?: SessionObservation,
   ): Promise<ApiSessionAgentResult> {
     const live = this.liveAgent(sessionId)
-    if (live !== undefined) return live
+    if (live !== undefined && !this.configurations) return live
     const attached = this.ctx.sessions.get(sessionId)
     if (attached !== undefined && hasApiSessionSubagentOwner(this.ctx, attached, undefined)) {
       return { error: apiSessionSubagentOwnershipError(sessionId) }
@@ -184,7 +194,9 @@ export class ApiSessionAgentController {
 
     let resume = this.resumes.get(sessionId)
     if (resume === undefined) {
-      resume = this.resume(sessionId, observation).finally(() => { this.resumes.delete(sessionId) })
+      resume = (this.configurations
+        ? this.configurations.run(sessionId, () => this.activateConfigured(sessionId))
+        : this.resume(sessionId, observation)).finally(() => { this.resumes.delete(sessionId) })
       this.resumes.set(sessionId, resume)
     }
     try {
@@ -303,6 +315,32 @@ export class ApiSessionAgentController {
       }
       throw error
     }
+  }
+
+  /** Create a draft's first Agent, or resume a saved Session, and replay its saved choices. */
+  private async activateConfigured(sessionId: SessionId): Promise<Agent> {
+    const configurations = this.configurations
+    if (configurations === undefined) throw new Error('Deferred Session configuration is not enabled')
+    const record = await configurations.read(sessionId)
+    let agent = this.ctx.agents.get(sessionId)
+    if (!agent) {
+      if (record?.draft) {
+        await mkdir(record.cwd, { recursive: true })
+        const composition = await this.composeAgent(record.agentPreset)
+        agent = (await this.ctx.agents.create({ sessionId, agentOptions: this.agentOptions(), seed: record.events ?? [],
+          meta: { cwd: record.cwd, ...(composition.agentPreset ? { agentPreset: composition.agentPreset } : {}) },
+          setup: composition.setup })).agent
+      } else agent = await this.resume(sessionId)
+    }
+    if (hasApiSessionSubagentOwner(this.ctx, agent.session, agent)) throw new ApiSessionSubagentOwnership(sessionId)
+    if (record?.model) agent.model.select({ provider: record.model.provider, model: record.model.model,
+      ...(record.model.reasoningEffort === undefined ? {} : { reasoningEffort: ReasoningEffortId(record.model.reasoningEffort) }) })
+    if (record?.permissionPreset) configurations.applyPermission(agent.session, record.permissionPreset)
+    // Retiring the draft keeps its choices in the log the new Agent already runs.
+    if (record?.draft || record?.model || record?.permissionPreset) {
+      await configurations.save({ ...record, draft: false, model: undefined, permissionPreset: undefined })
+    }
+    return agent
   }
 
   private async resumeObserved(

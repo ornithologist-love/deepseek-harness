@@ -54,6 +54,7 @@ function renderSeat(
   select: () => Promise<string | undefined> = () => Promise.resolve(undefined),
   session?: { id: string; retainInfo: SessionRetainInfo | undefined },
   enabled = true,
+  surface: { hiddenPrefixes?: readonly string[]; seatRequiresDeveloperTools?: boolean } = {},
 ) {
   const store = createSnapshotStore<AgentPresetSeatState>({ ...SEAT_READY, ...state })
   const developerTools = createSnapshotStore(enabled)
@@ -67,6 +68,8 @@ function renderSeat(
   }
   const props = {
     ...actions,
+    hiddenPrefixes: surface.hiddenPrefixes ?? [],
+    seatRequiresDeveloperTools: surface.seatRequiresDeveloperTools ?? false,
     sessionId: session === undefined ? undefined : SessionId(session.id),
     useDeveloperTools: bindSnapshotSelector(developerTools),
     useAgentPresetSeat: bindSnapshotSelector(store),
@@ -82,6 +85,7 @@ function renderSeat(
 function renderLabel(
   summary: { blank: boolean; projectionValues?: { agentPreset?: string | null } } | undefined,
   roster: Partial<AgentPresetSettingsState> = {},
+  hiddenPrefixes: readonly string[] = [],
 ) {
   // The chip and the label read the same roster, metadata included.
   const store = createSnapshotStore<AgentPresetSettingsState>({
@@ -89,13 +93,17 @@ function renderLabel(
   })
   const sessions = createSnapshotStore({ byId: summary === undefined ? {} : { s1: summary } })
   const load = vi.fn(() => Promise.resolve())
-  const view = render(<AgentPresetLabel {...({
+  // The caller supplies the binding and copy seats the label reads; the
+  // framework's own session-scope seats are unused here.
+  const seats = {
     load,
+    hiddenPrefixes,
     sessionId: 's1',
     useSessions: bindSnapshotSelector(sessions),
     useAgentPresets: bindSnapshotSelector(store),
     t: (key: keyof typeof en) => en[key],
-  } as unknown as AgentPresetLabelProps)} />)
+  } satisfies AgentPresetLabelInjected & Pick<AgentPresetLabelProps, 'sessionId' | 'useSessions' | 'useAgentPresets' | 't'>
+  const view = render(<AgentPresetLabel {...seats as Omit<AgentPresetLabelProps, 'useSessionRetainInfo' | 'useResource' | 'usePanelInfo' | 'useSessions' | 'useWorkspaces' | 'useSessionStatus'>} />)
   return { load, view }
 }
 
@@ -245,6 +253,61 @@ describe('the new-session chip', () => {
     fireEvent.keyDown(document, { key: 'Escape' })
 
     expect(screen.getByRole('button').getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('leaves the screen to another presenter once the preset matches a hidden prefix', () => {
+    const actions = renderSeat({ current: 'external-review' }, undefined, undefined, true, {
+      hiddenPrefixes: ['external-'],
+    })
+
+    expect(screen.queryByRole('button')).toBeNull()
+    // The roster is not consulted for a chip that will not render, and a
+    // refusal banner has nothing to sit above.
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(actions.load).toHaveBeenCalled()
+  })
+
+  it('keeps the chip for a preset a configured prefix does not match', () => {
+    renderSeat({ current: 'remote-review' }, undefined, undefined, true, { hiddenPrefixes: ['external-'] })
+
+    expect(screen.getByRole('button').textContent).toContain('remote-review')
+  })
+
+  it('follows the staged preset between a hidden and a shown one', () => {
+    const actions = renderSeat({ current: 'external-review' }, undefined, undefined, true, {
+      hiddenPrefixes: ['external-'],
+    })
+    expect(screen.queryByRole('button')).toBeNull()
+
+    act(() => { actions.store.set({ ...actions.store.getSnapshot(), current: 'standard' }) })
+    expect(screen.getByRole('button').textContent).toContain(en.presetStandardName)
+
+    act(() => { actions.store.set({ ...actions.store.getSnapshot(), current: 'external-review' }) })
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('renders as the only preset control while Developer tools is on by default', () => {
+    renderSeat()
+
+    expect(screen.getByRole('button')).toBeTruthy()
+  })
+
+  it('hides the whole chip while a Developer-tools-requiring seat is off', () => {
+    const actions = renderSeat({}, undefined, undefined, false, { seatRequiresDeveloperTools: true })
+
+    expect(screen.queryByRole('button')).toBeNull()
+    act(() => { actions.developerTools.set(true) })
+    expect(screen.getByRole('button')).toBeTruthy()
+    act(() => { actions.developerTools.set(false) })
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('keeps its filtered choices, not the whole chip, when the seat does not require Developer tools', () => {
+    renderSeat({}, undefined, undefined, false, { seatRequiresDeveloperTools: false })
+
+    // The default deployment keeps today's behavior: the chip stays and only
+    // the Coding Tools choices leave the menu.
+    expect(screen.getByRole('button')).toBeTruthy()
   })
 })
 
@@ -423,5 +486,28 @@ describe('the session-header label', () => {
     await act(async () => { await Promise.resolve() })
     expect(absent.load).not.toHaveBeenCalled()
     expect(unknown.load).not.toHaveBeenCalled()
+  })
+
+  it('leaves the label to another presenter when the preset matches a hidden prefix', async () => {
+    const hidden = renderLabel({
+      blank: false,
+      projectionValues: { agentPreset: 'external-review' },
+    }, {}, ['external-'])
+
+    expect(hidden.view.container.firstChild).toBeNull()
+    await act(async () => { await Promise.resolve() })
+    // A label nobody shows must not cost a roster read.
+    expect(hidden.load).not.toHaveBeenCalled()
+    cleanup()
+
+    // The prefix is a prefix, not a substring: it must match the id's start.
+    renderLabel({ blank: false, projectionValues: { agentPreset: 'team-external-review' } }, {}, ['external-'])
+    expect(screen.getByTitle(en.headerHint).textContent).toBe('team-external-review')
+  })
+
+  it('still labels an ordinary preset beside a configured hidden prefix list', () => {
+    renderLabel({ blank: false, projectionValues: { agentPreset: 'standard' } }, {}, ['external-'])
+
+    expect(screen.getByTitle(en.presetStandardDescription).textContent).toBe(en.presetStandardName)
   })
 })

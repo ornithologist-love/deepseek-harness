@@ -446,6 +446,35 @@ describe('Session-addressed file upload', () => {
     await fiber.dispose()
   })
 
+  it('sends exact bytes through the HTTP route on a deferred-activation Host', async () => {
+    const remote = vi.fn()
+    const seen: RequestInit[] = []
+    const fetch = vi.fn((_url: string | URL, init: RequestInit) => {
+      seen.push(init)
+      return Promise.resolve(new Response(JSON.stringify({
+        ok: true,
+        value: { receiptId: 'http-receipt', file: { attachmentId: 'http-file', name: 'bytes.bin', bytes: 3 } },
+      }), { status: 200 }))
+    })
+    ;(globalThis as UploadGlobal).__DSH_FILE_UPLOAD__ = { fetch }
+    Reflect.set(globalThis, '__DSH_DEFERRED_AGENT__', true)
+    try {
+      const { fiber, service } = await scopedService({ remote })
+      const bytes = Uint8Array.of(1, 2, 3)
+
+      await expect(service.upload(SESSION_ID, bytes, 'bytes.bin')).resolves.toMatchObject({ ok: true })
+
+      // No Agent exists yet to receive the encoded Remote, so the bytes take the HTTP route.
+      expect(remote).not.toHaveBeenCalled()
+      expect(fetch).toHaveBeenCalledWith('api/session/uploadFileBinary?sessionId=s1&name=bytes.bin',
+        expect.objectContaining({ method: 'POST', body: expect.any(Blob) }))
+      await expect((seen[0]!.body as Blob).arrayBuffer()).resolves.toEqual(bytes.buffer)
+      await fiber.dispose()
+    } finally {
+      Reflect.deleteProperty(globalThis, '__DSH_DEFERRED_AGENT__')
+    }
+  })
+
   it('rejects malformed background results', async () => {
     ;(globalThis as UploadGlobal).__DSH_FILE_UPLOAD__ = {
       fetch: () => Promise.resolve(new Response(null, { status: 413 })),

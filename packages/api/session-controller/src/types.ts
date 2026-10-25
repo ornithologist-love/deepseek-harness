@@ -115,6 +115,11 @@ export interface ModelCatalogModel {
   readonly badge?: LlmModelBadge
   /** Whether the catalog recommends this model; the model menu can then list only recommended models. */
   readonly recommended?: boolean
+  /**
+   * Display facts a deployment attaches to this model (for example through the
+   * session command policy's catalog hook); selection and validation ignore them.
+   */
+  readonly metadata?: Readonly<Record<string, JsonValue>>
 }
 
 /** One provider and its successfully loaded model catalog. */
@@ -164,6 +169,8 @@ export interface SessionSummary {
   readonly origin?: 'subagent'
   readonly cwd?: string
   readonly projections?: SessionProjectionHints
+  /** Saved composer choices of a deferred Session; a higher revision replaces the previous values. */
+  readonly configuration?: { readonly revision: number; readonly values: SessionProjectionValues }
 }
 
 /** One session-content search result. */

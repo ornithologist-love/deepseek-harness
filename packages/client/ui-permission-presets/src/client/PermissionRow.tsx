@@ -6,7 +6,9 @@
 
 import { useEffect, useState } from 'react'
 import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
-import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type {
+  HostObservable, InjectFace, PropsLocale, PropsRuntime,
+} from '@deepseek-ai/dsh-client-ui-slots'
 import {
   IconChevronDownOutlineRegular, Menu, RiskConfirmation,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -18,9 +20,15 @@ import css from './PermissionRow.module.css'
 /** Registration-side business face for the host-backed preference. */
 export interface PermissionRowInjected {
   hooks: {
+    /** Shared explicit Full access acknowledgement mirror. */
+    fullAccessAcknowledged: HostObservable<boolean>
     /** Permission settings snapshot bound by the renderer as usePermission. */
     permission: SnapshotStore<PermissionSettingsState>
   }
+  /** Record one explicit Full access confirmation in the shared mirror. */
+  acknowledgeFullAccess: () => void
+  /** The Full access confirmation is no longer shown for this deployment. */
+  fullAccessRemembered: boolean
   /** Load the descriptor when the row first renders. */
   load: () => Promise<void>
   /** Persist one advertised preset. */
@@ -38,11 +46,15 @@ export type PermissionRowProps =
  * @param props - composed slot props.
  * @returns the row, or null when the host does not expose permission settings.
  */
-export function PermissionRow({ load, select, usePermission, t }: PermissionRowProps) {
+export function PermissionRow({
+  load, select, usePermission, useFullAccessAcknowledged, acknowledgeFullAccess,
+  fullAccessRemembered, t,
+}: PermissionRowProps) {
   const state = usePermission(snapshot => snapshot)
+  const acknowledged = useFullAccessAcknowledged(value => value)
   const [open, setOpen] = useState(false)
   const [confirmingFullAccess, setConfirmingFullAccess] = useState(false)
-  const [acknowledged, setAcknowledged] = useState(false)
+  const [confirmed, setConfirmed] = useState(false)
 
   useEffect(() => {
     void load()
@@ -51,7 +63,7 @@ export function PermissionRow({ load, select, usePermission, t }: PermissionRowP
   useEffect(() => {
     if (state.writable && state.status !== 'unavailable') return
     setOpen(false)
-    setAcknowledged(false)
+    setConfirmed(false)
     setConfirmingFullAccess(false)
   }, [state.status, state.writable])
 
@@ -78,8 +90,10 @@ export function PermissionRow({ load, select, usePermission, t }: PermissionRowP
           onSelect={(id) => {
             setOpen(false)
             if (id === state.currentValue) return
-            if (id === FULL_ACCESS_PRESET) {
-              setAcknowledged(false)
+            // Full access asks once per deployment that remembers the answer;
+            // Auto review and a non-remembering deployment always ask here.
+            if (id === FULL_ACCESS_PRESET && !(fullAccessRemembered && acknowledged)) {
+              setConfirmed(false)
               setConfirmingFullAccess(true)
               return
             }
@@ -110,15 +124,16 @@ export function PermissionRow({ load, select, usePermission, t }: PermissionRowP
         cancelLabel={t('confirm.cancel')}
         closeLabel={t('close')}
         confirmLabel={t('confirm.enable')}
-        acknowledged={acknowledged}
+        acknowledged={confirmed}
         disabled={!state.writable || state.status === 'saving'}
-        onAcknowledgedChange={setAcknowledged}
+        onAcknowledgedChange={setConfirmed}
         onCancel={() => {
-          setAcknowledged(false)
+          setConfirmed(false)
           setConfirmingFullAccess(false)
         }}
         onConfirm={() => {
-          setAcknowledged(false)
+          acknowledgeFullAccess()
+          setConfirmed(false)
           setConfirmingFullAccess(false)
           void select(FULL_ACCESS_PRESET)
         }}

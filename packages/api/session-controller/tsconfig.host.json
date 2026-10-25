@@ -13,6 +13,7 @@
     "src/assistant-stream.ts",
     "src/catalog.ts",
     "src/commands.ts",
+    "src/configuration.ts",
     "src/control.ts",
     "src/file-references.ts",
     "src/history.ts",
@@ -63,6 +64,9 @@
     },
     {
       "path": "../../client/connection/tsconfig.host.json"
+    },
+    {
+      "path": "../../host/webserver"
     },
     {
       "path": "../../interaction/permission-presets"

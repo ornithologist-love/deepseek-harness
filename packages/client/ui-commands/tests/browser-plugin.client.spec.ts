@@ -43,6 +43,7 @@ async function bench() {
   // the Remote face needs `$on` even where this spec dispatches none.
   ctx.provide('remote', { commands: commandsRemote, $on: () => () => {} })
   ctx.provide('remote.commands', commandsRemote)
+  ctx.provide('remote.session', {})
   await ctx.plugin(SlotRegistry).await()
   ctx.slots.register({
     name: 'root', children: { 'conversation.input.overlay': { kind: 'list', scope: 'session' } },
@@ -60,7 +61,7 @@ async function bench() {
 
 describe('apply', () => {
   it('declares the services it binds', () => {
-    expect(inject).toEqual(['inputTriggers', 'sessions', 'remote', 'remote.commands', 'locale'])
+    expect(inject).toEqual(['inputTriggers', 'sessions', 'remote', 'remote.commands', 'remote.session', 'locale'])
   })
 
   it('mounts ctx.commandUi, registers the source and the overlay entry, and folds up on disposal', async () => {

@@ -167,6 +167,10 @@ export type Config = PresetDefinition
 export interface Config {
   /** Deployment default when the caller omits a preset. */
   default: string
+  /** Preset ID prefixes left out of the remote roster; the presets stay resolvable and mountable. */
+  hiddenPresetPrefixes?: string[]
+  /** Preset ID prefixes the remote `select` refuses; Host-side composition may still assign them. */
+  lockedPresetPrefixes?: string[]
   /** User-selected default; edited through Settings. */
   selectedDefault: Volatile<string | undefined>
 }
@@ -245,15 +249,19 @@ export interface Config {
 ## `@deepseek-ai/dsh-api-session-controller`
 
 - `inject`: `agentDefaultModel` · `agents` · `attachments` · `fileUploads` · `fs` · `llm` · `remoteAccess` · `sessions` · `sessionProjections` · `sessionQuery` · `typert` · `typertGateway` · `workspaceRegistry`
-- `source`: [`packages/api/session-controller/src/index.ts:110`](../packages/api/session-controller/src/index.ts)
+- `source`: [`packages/api/session-controller/src/index.ts:146`](../packages/api/session-controller/src/index.ts)
 
 ```ts config-catalog
 /** Session Controller deployment policy. */
 export interface Config {
+  /** Save composer drafts separately and activate Agents only for execution. */
+  readonly configurationDirectory?: string
   /** Override platform desktop-opener detection. */
   readonly nativeOpen?: boolean
   /** Positive integral milliseconds of list work before yielding between complete rows. */
   readonly listWorkSliceMs?: number
+  /** Reject commands until the deployment policy is mounted. */
+  readonly policyRequired?: boolean
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-api-session-controller -->
@@ -556,6 +564,70 @@ export interface Config {
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-shortcuts -->
 
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-client-ui-agent-preset -->
+<a id="deepseek-aidsh-client-ui-agent-preset"></a>
+
+## `@deepseek-ai/dsh-client-ui-agent-preset`
+
+- `source`: [`packages/client/ui-agent-preset/src/agent-preset-options.ts:11`](../packages/client/ui-agent-preset/src/agent-preset-options.ts)
+
+```ts config-catalog
+/** Page-bootstrap options after schema defaults are applied. */
+export interface Config {
+  /**
+   * Preset ids whose Sessions keep their own presenter: a session running a
+   * preset starting with one of these prefixes shows neither the new-session
+   * picker nor the session-header label. The registry's own
+   * `hiddenPresetPrefixes` only filters the roster this browser lists.
+   */
+  hiddenAgentPresetPrefixes: string[]
+  /**
+   * Show the new-session picker only while Developer tools is on. A preset the
+   * deployment picked stays composed either way; the picker itself is hidden.
+   */
+  seatRequiresDeveloperTools: boolean
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-agent-preset -->
+
+<!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-client-ui-permission-presets -->
+<a id="deepseek-aidsh-client-ui-permission-presets"></a>
+
+## `@deepseek-ai/dsh-client-ui-permission-presets`
+
+- `refs`: `Volatile` (`@deepseek-ai/cordis`)
+- `source`: [`packages/client/ui-permission-presets/src/permission-options.ts:12`](../packages/client/ui-permission-presets/src/permission-options.ts)
+
+```ts config-catalog
+/** Page-bootstrap options after schema defaults are applied. */
+export interface Config {
+  /**
+   * Display color per permission preset value, painted on the composer
+   * trigger and the `/permission` menu rows. Unlisted presets keep the native
+   * styles, and the value is applied as a CSS custom property rather than a
+   * literal style, so a theme can override it.
+   */
+  colors: Record<string, string>
+  /**
+   * Stop asking again after the user's first explicit Full access
+   * confirmation in any current-session or Settings surface. Auto review keeps
+   * its own confirmation on every selection.
+   */
+  rememberFullAccess: boolean
+  /**
+   * Agent-preset projection values whose Sessions keep their own permission
+   * mechanism: their composer trigger and `/permission` picker stay hidden.
+   */
+  hiddenAgentPresets: string[]
+  /**
+   * User setting recording one explicit Full access confirmation; read only
+   * when `rememberFullAccess` is on and written by the browser half.
+   */
+  fullAccessAcknowledged: Volatile<boolean>
+}
+```
+<!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-permission-presets -->
+
 <!-- BEGIN GENERATED config-catalog:@deepseek-ai/dsh-client-ui-plugin-manager -->
 <a id="deepseek-aidsh-client-ui-plugin-manager"></a>
 
@@ -631,13 +703,36 @@ export type OnboardingProcess = 'compact' | 'standard' | 'detailed'
 
 ## `@deepseek-ai/dsh-client-ui-settings-models`
 
-- `source`: [`packages/client/ui-settings-models/src/onboarding-config.ts:6`](../packages/client/ui-settings-models/src/onboarding-config.ts)
+- `source`: [`packages/client/ui-settings-models/src/onboarding-config.ts:16`](../packages/client/ui-settings-models/src/onboarding-config.ts)
 
 ```ts config-catalog
 /** Onboarding options after schema defaults are applied. */
 export interface Config {
   /** Offer the browser API-key step when no native shell owns credential onboarding. */
   credentialOnboarding: boolean
+  /** Whether to register the preview welcome notice among the `settings.onboarding` steps (the entry whose id is `welcome-notice`). */
+  welcomeNotice: boolean
+  /**
+   * Provider routes whose model catalog the deployment manages: their card
+   * edits credentials only and shows no custom-provider tag.
+   */
+  credentialOnlyProviders: string[]
+  /** Provider routes omitted from the settings cards and add-provider catalog; model availability is unchanged. */
+  hiddenProviders: string[]
+  /** Provider icon per provider route id. */
+  providerIcons: Record<string, ProviderIconConfig>
+  /** Explicit editor family per adapter settings namespace; unlisted namespaces keep the built-in mapping. */
+  providerEditorLayouts: Record<string, 'deepseek' | 'pi-ai'>
+}
+
+/** One configured provider icon. */
+export interface ProviderIconConfig {
+  /** Image URL the row and editor title render. */
+  src: string
+  /** Paint the image as a mask filled with the current text color. */
+  monochrome?: boolean
+  /** Uniform scale applied to the icon. */
+  scale?: number
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-client-ui-settings-models -->
@@ -2665,6 +2760,8 @@ export interface Config {
   detailFetchTimeoutMs?: number
   /** npm file CDNs that offered bundles are read from, in order; a read's `npmFileSources` moves the CDNs it names first. */
   detailNpmFileSources?: NpmFileSource[]
+  /** Bundle package names the manager refuses to disable or remove, in addition to the bundles carrying its own components. */
+  protectedBundles?: string[]
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-plugin-manager -->
@@ -2874,7 +2971,7 @@ export interface Config {
 
 ## `@deepseek-ai/dsh-sandbox-local`
 
-- `source`: [`packages/sandbox/sandbox-local/src/index.ts:45`](../packages/sandbox/sandbox-local/src/index.ts)
+- `source`: [`packages/sandbox/sandbox-local/src/index.ts:43`](../packages/sandbox/sandbox-local/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config. All optional — `static Config` supplies the defaults. */
@@ -4850,7 +4947,6 @@ export interface Config {
 | `@deepseek-ai/dsh-client-modules` | `loader` | [`packages/client/modules/src/index.ts`](../packages/client/modules/src/index.ts) |
 | `@deepseek-ai/dsh-client-resources` | — | [`packages/client/resources/src/index.ts`](../packages/client/resources/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-action-cards` | — | [`packages/experimental/client-ui-action-cards/src/index.ts`](../packages/experimental/client-ui-action-cards/src/index.ts) |
-| `@deepseek-ai/dsh-client-ui-agent-preset` | — | [`packages/client/ui-agent-preset/src/index.ts`](../packages/client/ui-agent-preset/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-approval` | — | [`packages/client/ui-approval/src/index.ts`](../packages/client/ui-approval/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-attachment` | — | [`packages/client/ui-attachment/src/index.ts`](../packages/client/ui-attachment/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-brand-official` | — | [`packages/client/ui-brand-official/src/index.ts`](../packages/client/ui-brand-official/src/index.ts) |
@@ -4873,7 +4969,6 @@ export interface Config {
 | `@deepseek-ai/dsh-client-ui-message-feedback` | — | [`packages/client/ui-message-feedback/src/index.ts`](../packages/client/ui-message-feedback/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-model-selection` | — | [`packages/client/ui-model-selection/src/index.ts`](../packages/client/ui-model-selection/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-open-in-app` | — | [`packages/client/ui-open-in-app/src/index.ts`](../packages/client/ui-open-in-app/src/index.ts) |
-| `@deepseek-ai/dsh-client-ui-permission-presets` | — | [`packages/client/ui-permission-presets/src/index.ts`](../packages/client/ui-permission-presets/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-plan` | — | [`packages/client/ui-plan/src/index.ts`](../packages/client/ui-plan/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-plugin-market` | — | [`packages/client/ui-plugin-market/src/index.ts`](../packages/client/ui-plugin-market/src/index.ts) |
 | `@deepseek-ai/dsh-client-ui-plugin-recommendations` | — | [`packages/experimental/client-ui-plugin-recommendations/src/index.ts`](../packages/experimental/client-ui-plugin-recommendations/src/index.ts) |

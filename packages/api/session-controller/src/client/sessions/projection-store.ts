@@ -90,6 +90,8 @@ interface Channel {
  * manager's list projection reads the `title` key).
  */
 export class ProjectionValueStore {
+  private configurationRevision = -1
+  private configuration: Readonly<Record<string, unknown>> = {}
   private readonly rows = new Map<string, Row>()
   private readonly channels = new Map<string, Channel>()
   private valuesCache: Readonly<Partial<SessionProjectionMap>> | undefined
@@ -114,7 +116,7 @@ export class ProjectionValueStore {
    * @returns the value, or undefined while the key is absent.
    */
   get(key: string): unknown {
-    return this.rows.get(key)?.value
+    return Object.hasOwn(this.configuration, key) ? this.configuration[key] : this.rows.get(key)?.value
   }
 
   /**
@@ -133,9 +135,9 @@ export class ProjectionValueStore {
    */
   values(): Readonly<Partial<SessionProjectionMap>> {
     if (this.valuesCache === undefined) {
-      this.valuesCache = Object.freeze(Object.fromEntries(
+      this.valuesCache = Object.freeze({ ...Object.fromEntries(
         [...this.rows].map(([key, row]) => [key, row.value]),
-      ))
+      ), ...this.configuration })
     }
     return this.valuesCache
   }
@@ -213,10 +215,23 @@ export class ProjectionValueStore {
 
   /** Discard one Host generation's values and watermarks while preserving subscribed faces. */
   clear(): void {
+    const configured = Object.keys(this.configuration)
+    this.configuration = {}
+    this.configurationRevision = -1
+    for (const key of configured) this.changed(key)
     for (const key of this.rows.keys()) {
       this.rows.delete(key)
       this.changed(key)
     }
+  }
+
+  /** @param revision - composer-write revision. @param values - pending choices, independent of log sequence. */
+  configure(revision: number, values: Readonly<Record<string, unknown>>): void {
+    if (revision <= this.configurationRevision) return
+    const keys = new Set([...Object.keys(this.configuration), ...Object.keys(values)])
+    this.configurationRevision = revision
+    this.configuration = values
+    for (const key of keys) this.changed(key)
   }
 
   private changed(key: string): void {
@@ -233,7 +248,7 @@ export class ProjectionValueStore {
       channel = {
         notifier,
         face: {
-          getSnapshot: () => this.rows.get(key)?.value,
+          getSnapshot: () => this.get(key),
           subscribe: listener => notifier.subscribe(listener),
         },
       }

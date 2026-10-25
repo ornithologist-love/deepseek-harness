@@ -57,6 +57,7 @@ export const accessZh = {
   'auto.confirm.description': '自动审查不使用沙箱。每次原生工具调用和 PTC 内层调用前，都会由与当前 agent 相同的模型进行审查；审查拒绝的调用由你批准或拒绝。此功能仍属实验性，可能误放行或误拒绝，并会消耗额外 token。',
   'auto.confirm.acknowledge': '我已了解这些风险，并愿意继续',
   'auto.confirm.enable': '启用自动审查',
+  'switch.failed': '权限修改失败：{message}',
 } satisfies Record<string, string>
 
 /** Current-session popup-gate key union. */
@@ -81,6 +82,7 @@ export const accessEn = {
   'auto.confirm.description': 'Auto review runs without a sandbox. Before every native tool call and PTC inner call, the same model as the current agent reviews whether to allow it; you approve or reject each call it denies. This feature is experimental, can falsely allow or deny actions, and uses additional tokens.',
   'auto.confirm.acknowledge': 'I understand these risks and want to continue',
   'auto.confirm.enable': 'Enable Auto review',
+  'switch.failed': 'Could not change permissions: {message}',
 } satisfies Record<PermissionAccessKey, string>
 
 /** Japanese copy, checked against the English keys. */
@@ -198,6 +200,7 @@ export const accessJa = {
   'auto.confirm.description': '自動認可レビューはサンドボックスなしで実行されます。ネイティブツール呼び出しと PTC 内部呼び出しのたびに、現在のエージェントと同じモデルが許可可否をレビューし、拒否された呼び出しはあなたが承認または却下します。この機能は実験的であり、操作を誤って許可・拒否する可能性があり、追加のトークンを消費します。',
   'auto.confirm.acknowledge': 'これらのリスクを理解し、続行します',
   'auto.confirm.enable': '自動認可レビューを有効にする',
+  'switch.failed': '権限を変更できませんでした: {message}',
 } satisfies Record<keyof typeof accessEn, string>
 
 /** Spanish dictionary, checked against the English keys. */
@@ -219,6 +222,7 @@ export const accessEs = {
   'auto.confirm.description': 'Auto review se ejecuta sin zona de pruebas. Antes de cada llamada a la herramienta nativa y llamada interna PTC, el mismo modelo que el agente actual revisa si se permite; usted aprueba o rechaza cada llamada que rechaza. Esta característica es experimental, puede permitir o denegar acciones falsamente y utiliza tokens adicionales.',
   'auto.confirm.acknowledge': 'Entiendo estos riesgos y quiero continuar',
   'auto.confirm.enable': 'Habilitar Auto review',
+  'switch.failed': 'No se pudieron cambiar los permisos: {message}',
 } satisfies typeof accessEn
 
 /** French dictionary, checked against the English keys. */
@@ -240,6 +244,7 @@ export const accessFr = {
   'auto.confirm.description': "Auto review fonctionne sans bac à sable. Avant chaque appel d'outil natif et appel interne PTC, le même modèle que l'agent actuel vérifie s'il doit l'autoriser ; vous approuvez ou rejetez chaque appel qu'il refuse. Cette fonctionnalité est expérimentale, peut autoriser ou refuser à tort des actions et utilise des jetons supplémentaires.",
   'auto.confirm.acknowledge': 'Je comprends ces risques et je veux continuer',
   'auto.confirm.enable': 'Activer Auto review',
+  'switch.failed': 'Impossible de modifier les autorisations : {message}',
 } satisfies typeof accessEn
 
 /** German dictionary, checked against the English keys. */
@@ -261,6 +266,7 @@ export const accessDe = {
   'auto.confirm.description': 'Auto review läuft ohne Sandbox. Vor jedem nativen Tool-Aufruf und PTC-Innenaufruf überprüft dasselbe Modell wie der aktuelle Agent, ob dies zulässig ist. Sie genehmigen oder lehnen jeden abgelehnten Aufruf ab. Diese Funktion ist experimentell, kann Aktionen fälschlicherweise zulassen oder verweigern und verwendet zusätzliche Token.',
   'auto.confirm.acknowledge': 'Ich verstehe diese Risiken und möchte weitermachen',
   'auto.confirm.enable': 'Aktivieren Sie Auto review',
+  'switch.failed': 'Berechtigungen konnten nicht geändert werden: {message}',
 } satisfies typeof accessEn
 
 /** Russian dictionary, checked against the English keys. */
@@ -282,6 +288,7 @@ export const accessRu = {
   'auto.confirm.description': 'Auto review работает без песочницы. Перед каждым вызовом собственного инструмента и внутренним вызовом PTC та же модель, что и текущий агент, проверяет, разрешить ли это; вы одобряете или отклоняете каждый вызов, который он отклоняет. Эта функция является экспериментальной, может ошибочно разрешать или запрещать действия и использует дополнительные токены.',
   'auto.confirm.acknowledge': 'Я понимаю эти риски и хочу продолжить',
   'auto.confirm.enable': 'Включить Auto review',
+  'switch.failed': 'Не удалось изменить разрешения: {message}',
 } satisfies typeof accessEn
 
 /** Portuguese dictionary, checked against the English keys. */
@@ -303,4 +310,5 @@ export const accessPt = {
   'auto.confirm.description': 'Auto review é executado sem sandbox. Antes de cada chamada de ferramenta nativa e chamada interna PTC, o mesmo modelo do agente atual analisa se deve permitir isso; você aprova ou rejeita cada chamada negada. Este recurso é experimental, pode permitir ou negar ações falsamente e usa tokens adicionais.',
   'auto.confirm.acknowledge': 'Entendo esses riscos e quero continuar',
   'auto.confirm.enable': 'Ativar Auto review',
+  'switch.failed': 'Não foi possível alterar as permissões: {message}',
 } satisfies typeof accessEn
