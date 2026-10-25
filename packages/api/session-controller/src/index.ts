@@ -14,7 +14,7 @@ import z from '@deepseek-ai/schemastery'
 import { errorChain, ReasoningEffortId, type MessageSource } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-client-file-upload'
 import { canOpenNativePath, nativeFileManager, nativeFileApplications, openNativeFileApplication, openNativeAssociatedPath, revealNativePath } from '@deepseek-ai/dsh-native-command'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionInspection } from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-projection-cache'
 import { SessionQueryError, type SessionObservation } from '@deepseek-ai/dsh-session-query'
@@ -82,10 +82,36 @@ export { SessionSkillCatalog } from './skill-catalog.ts'
 /** Index global telling clients that composer choices are saved without activating an Agent. */
 const DEFERRED_ACTIVATION_KEY = '__DSH_DEFERRED_AGENT__'
 
+/** Host policy around commands; continuation retains canonical validation and admission. */
+export interface SessionCommandPolicy {
+  /** Validate and record permission choices without constructing an Agent. */
+  configurePermission?(session: Session, preset: string): void
+  /** Apply creation defaults; initial selection validates without saving a global default. */
+  create?(
+    request: SessionCreateRequest,
+    next: (request: SessionCreateRequest) => Promise<SessionCreateValue>,
+    selectInitialModel: (request: SessionSelectModelRequest) => Promise<SessionSelectModelValue>,
+  ): Promise<SessionCreateValue>
+  /** The continuation serializes selection with image admission; defaults save unless explicitly disabled. */
+  selectModel?(
+    request: SessionSelectModelRequest,
+    next: (request: SessionSelectModelRequest, persistDefault?: boolean) => Promise<SessionSelectModelValue>,
+  ): Promise<SessionSelectModelValue>
+  /** Transform or refuse one prompt; the continuation rechecks cancellation before admission. */
+  prompt?(
+    request: SessionPromptRequest,
+    signal: AbortSignal,
+    next: (request: SessionPromptRequest) => Promise<SessionPromptValue>,
+  ): Promise<SessionPromptValue>
+  /** Decorate the catalog without replacing model resolution or validation. */
+  modelCatalog?(catalog: ModelCatalog): ModelCatalog | Promise<ModelCatalog>
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Host Session business API and Remote namespace owner. */
     sessionController: SessionController
+    sessionCommandPolicy: SessionCommandPolicy
   }
 }
 
@@ -107,6 +133,8 @@ export interface Config {
   readonly nativeOpen?: boolean
   /** Positive integral milliseconds of list work before yielding between complete rows. */
   readonly listWorkSliceMs?: number
+  /** Reject commands until the deployment policy is mounted. */
+  readonly policyRequired?: boolean
 }
 
 /** Deployment policy after schema defaults have been applied. */
@@ -147,6 +175,7 @@ export class SessionController extends TypertRemoteService {
     nativeOpen: z.boolean(),
     listWorkSliceMs: z.natural().min(1).default(16),
     configurationDirectory: z.string(),
+    policyRequired: z.boolean().default(false),
   })
 
   private readonly agents: ApiSessionAgentController
@@ -161,6 +190,13 @@ export class SessionController extends TypertRemoteService {
   private readonly revealPath: (path: string, signal: AbortSignal) => Promise<void>
   private readonly canOpenPath: () => boolean
   private readonly promotions = new Set<Promise<void>>()
+  private readonly policyRequired: boolean
+
+  private policy(): SessionCommandPolicy | undefined {
+    const policy = this.ctx.get('sessionCommandPolicy')
+    if (this.policyRequired && policy === undefined) throw new Error('Session command policy is not ready')
+    return policy
+  }
 
   /**
    * @param ctx - Host context containing the Session capability assembly.
@@ -171,12 +207,17 @@ export class SessionController extends TypertRemoteService {
     super(ctx, 'sessionController', { namespace: 'session' })
     ctx.typert.resources.register('session', { field: 'sessionId' })
     const resolved = SessionController.Config(config)
+    this.policyRequired = resolved.policyRequired ?? false
     installModelSelectionProjection(ctx)
     this.configurations = config.configurationDirectory === undefined ? undefined
       : new SessionConfigurations(ctx, config.configurationDirectory, (session, preset) => {
-        const permissions = ctx.get('permissionPresets')
-        if (permissions === undefined) throw new Error('Permission configuration is unavailable')
-        permissions.set(session, preset)
+        const policy = this.policy()
+        if (policy?.configurePermission) policy.configurePermission(session, preset)
+        else {
+          const permissions = ctx.get('permissionPresets')
+          if (permissions === undefined) throw new Error('Permission configuration is unavailable')
+          permissions.set(session, preset)
+        }
       })
     if (this.configurations) ctx.inject(['webServer'], (webCtx) => {
       webCtx.on('webserver/index-inject', (table) => {
@@ -406,7 +447,9 @@ export class SessionController extends TypertRemoteService {
   }
 
   /** @param request - model choices. @returns normalized staged selection without activation. */
-  private async stageModel(configurations: SessionConfigurations, request: SessionSelectModelRequest): Promise<SessionSelectModelValue> {
+  private async stageModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue> {
+    const configurations = this.configurations
+    if (!configurations) return this.commands.selectModel(request, false)
     return configurations.run(request.sessionId, async () => {
       const current = await this.configuration(request.sessionId)
       const resolved = await this.ctx.llm.resolveCallConfig({ provider: request.provider, model: request.model,
@@ -473,7 +516,9 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('create')
   create(request: SessionCreateRequest): Promise<SessionCreateValue> {
-    return this.createDraft(request)
+    const policy = this.policy()
+    const next = (value: SessionCreateRequest): Promise<SessionCreateValue> => this.createDraft(value)
+    return policy?.create === undefined ? next(request) : policy.create(request, next, value => this.stageModel(value))
   }
 
   /**
@@ -483,7 +528,10 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('selectModel')
   selectModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue> {
-    return this.configurations ? this.stageModel(this.configurations, request) : this.commands.selectModel(request)
+    const policy = this.policy()
+    const next = (value: SessionSelectModelRequest, persistDefault = true): Promise<SessionSelectModelValue> =>
+      this.configurations ? this.stageModel(value) : this.commands.selectModel(value, persistDefault)
+    return policy?.selectModel === undefined ? next(request) : policy.selectModel(request, next)
   }
 
   /**
@@ -509,8 +557,10 @@ export class SessionController extends TypertRemoteService {
    * @returns provider-grouped models, the deployment default, and isolated provider failures.
    */
   @Remote('modelCatalog')
-  modelCatalog(): Promise<ModelCatalog> {
-    return buildModelCatalog(this.ctx)
+  async modelCatalog(): Promise<ModelCatalog> {
+    const policy = this.policy()
+    const catalog = await buildModelCatalog(this.ctx)
+    return policy?.modelCatalog === undefined ? catalog : policy.modelCatalog(catalog)
   }
 
   /**
@@ -635,28 +685,33 @@ export class SessionController extends TypertRemoteService {
   @Remote('prompt')
   async prompt(request: SessionPromptRequest, signal: AbortSignal): Promise<SessionPromptValue> {
     signal.throwIfAborted()
-    if (!hasPromptContent(request.content)) {
-      throw new RemoteError('gateway/bad-request', 'prompt content must include non-whitespace text or an attachment', {})
+    const policy = this.policy()
+    const next = (value: SessionPromptRequest): Promise<SessionPromptValue> => {
+      signal.throwIfAborted()
+      if (!hasPromptContent(value.content)) {
+        throw new RemoteError('gateway/bad-request', 'prompt content must include non-whitespace text or an attachment', {})
+      }
+      const clientTimeZone = value.clientTimeZone === undefined
+        ? undefined
+        : canonicalClientTimeZone(value.clientTimeZone)
+      if (value.clientTimeZone !== undefined && clientTimeZone === undefined) {
+        throw new RemoteError(
+          'session/invalid-time-zone',
+          'clientTimeZone must be UTC or a valid IANA Area/Location name',
+          { value: value.clientTimeZone },
+        )
+      }
+      // The caller is recorded only when it is not the owner, so owner messages keep their exact source.
+      const principal = principalOf(this.ctx.invocation)
+      const source: MessageSource = {
+        kind: 'user',
+        rpcId: value.requestId,
+        ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
+        ...(principal === undefined ? {} : { principal }),
+      }
+      return this.commands.prompt(value, source)
     }
-    const clientTimeZone = request.clientTimeZone === undefined
-      ? undefined
-      : canonicalClientTimeZone(request.clientTimeZone)
-    if (request.clientTimeZone !== undefined && clientTimeZone === undefined) {
-      throw new RemoteError(
-        'session/invalid-time-zone',
-        'clientTimeZone must be UTC or a valid IANA Area/Location name',
-        { value: request.clientTimeZone },
-      )
-    }
-    // The caller is recorded only when it is not the owner, so owner messages keep their exact source.
-    const principal = principalOf(this.ctx.invocation)
-    const source: MessageSource = {
-      kind: 'user',
-      rpcId: request.requestId,
-      ...(clientTimeZone === undefined ? {} : { clientTimeZone }),
-      ...(principal === undefined ? {} : { principal }),
-    }
-    return this.commands.prompt(request, source)
+    return policy?.prompt === undefined ? next(request) : policy.prompt(request, signal, next)
   }
 
   /**
