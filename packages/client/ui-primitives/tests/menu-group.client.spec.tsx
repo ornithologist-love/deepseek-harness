@@ -132,6 +132,14 @@ describe('MenuGroup', () => {
     expect(group.children).toHaveLength(2)
     expect(group.getAttribute('aria-labelledby')).toBe(within(group).getByText('Empty provider').id)
   })
+
+  it('places a decorative icon before the label without changing the group name', () => {
+    render(<MenuGroup label="Provider" icon={<span aria-hidden="true" data-testid="icon" />} />)
+    const group = screen.getByRole('group', { name: 'Provider' })
+    const heading = group.querySelector('[data-menu-group-heading]')!
+    expect(heading.textContent).toBe('Provider')
+    expect(within(group).getByTestId('icon').nextSibling?.textContent).toBe('Provider')
+  })
 })
 
 describe('observeStickyMenuGroups', () => {
