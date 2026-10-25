@@ -103,6 +103,8 @@ async function bench() {
   })
   const values = new Map<SessionId, PermissionSelection>()
   const commands: string[] = []
+  const staged: { sessionId: SessionId; preset: string }[] = []
+  let stagedResult: { ok: boolean } = { ok: true }
   let commandResult: { ok: boolean; matched?: boolean } = { ok: true, matched: true }
   const session = (id: SessionId) => ({
     projections: {
@@ -118,14 +120,28 @@ async function bench() {
         : { ok: false as const, error: { code: 'gateway/internal', message: 'boom' } })
     },
   })
+  let deferredActivation = false
   ctx.provide('sessions', {
+    get deferredActivation() { return deferredActivation },
     binding: (id: SessionId) => (values.has(id) ? { sessionId: id, session: session(id) } : undefined),
+  })
+  Object.assign(remote, {
+    session: {
+      selectPermission: (request: { sessionId: SessionId; preset: string }) => {
+        staged.push(request)
+        return Promise.resolve(stagedResult.ok
+          ? { ok: true as const, value: { accepted: true as const } }
+          : { ok: false as const, error: { code: 'gateway/internal', message: 'deferred refusal' } })
+      },
+    },
   })
   const fiber = ctx.plugin({ inject: [...inject], apply })
   await fiber.await()
   await vi.waitFor(() => { expect(catalogCalls).toBe(1) })
   return {
-    ctx, fiber, locale, values, commands, remote, dismissed,
+    ctx, fiber, locale, values, commands, remote, dismissed, staged,
+    setDeferredActivation: (value: boolean) => { deferredActivation = value },
+    setStagedResult: (value: { ok: boolean }) => { stagedResult = value },
     catalogCalls: () => catalogCalls,
     setCatalog: (value: PermissionCatalog) => {
       catalog = value
@@ -325,6 +341,25 @@ describe('ui-permission browser plugin', () => {
     // An unmaterialized session throws before any submit.
     await expect(b.popup().onSelect({ id: 'read-only', label: 'read-only' }, { sessionId: sid('ghost') }))
       .rejects.toThrow(/not materialized/)
+  })
+
+  it('a deferred Host saves the pick through selectPermission instead of running /permission', async () => {
+    const b = await bench()
+    b.values.set(sid('s1'), { currentValue: 'workspace-write' })
+    const select = (b.permissionSelect()!.inject as unknown as (sessionId: SessionId) => PermissionSelectInjected)(sid('s1'))
+
+    // Eager Hosts run the Agent command; the deferred branch must not start one.
+    await expect(select.select('read-only')).resolves.toBe(true)
+    expect(b.commands).toEqual(['/permission read-only'])
+    expect(b.staged).toEqual([])
+
+    b.setDeferredActivation(true)
+    await expect(select.select('auto')).resolves.toBe(true)
+    expect(b.staged).toEqual([{ sessionId: sid('s1'), preset: 'auto' }])
+    expect(b.commands).toEqual(['/permission read-only'])
+
+    b.setStagedResult({ ok: false })
+    await expect(select.select('auto')).rejects.toThrow('permission switch failed: gateway/internal: deferred refusal')
   })
 
   it('disposal removes the decoration (HMR safety)', async () => {

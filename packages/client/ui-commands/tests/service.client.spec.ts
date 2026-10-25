@@ -47,6 +47,8 @@ interface BenchOptions {
   addressed?: SessionId
   initialOpen?: SessionFixture['initialOpen']
   snapshot?: SessionFixture['snapshot']
+  /** Programmed answer for the deferred Host's Session catalog; defaults to `S1_CMDS`. */
+  catalogSessionCommands?: (sessionId: SessionId) => Promise<CommandDescriptor[]>
 }
 
 /**
@@ -133,6 +135,15 @@ async function bench(opts: BenchOptions = {}) {
   mint('s2')
   if (opts.addressed !== undefined) mint(opts.addressed)
   const remote = Object.assign(new TestRemote(ctx), { commands: commandsRemote })
+  const catalogCalls: SessionId[] = []
+  Object.assign(remote, {
+    session: {
+      commandCatalog: async (sessionId: SessionId) => {
+        catalogCalls.push(sessionId)
+        return await carried(async () => await (opts.catalogSessionCommands ?? (() => Promise.resolve(S1_CMDS)))(sessionId))
+      },
+    },
+  })
   ctx.provide('remote.commands', commandsRemote)
   const executions: Array<{ sessionId: SessionId; name: string; result: CommandResult }> = []
   ctx.on('command/executed', (sessionId, name, result) => {
@@ -163,7 +174,7 @@ async function bench(opts: BenchOptions = {}) {
   }
   return {
     ctx, fiber, command, source, mint, warm, listCalls, executeCalls, executions, registered, notices, focuses, remote,
-    removeSessions, removeConversation, sessions,
+    removeSessions, removeConversation, sessions, catalogCalls,
   }
 }
 
@@ -228,6 +239,25 @@ describe('registration', () => {
 })
 
 describe('candidates', () => {
+  it('reads a deferred Host catalog through session.commandCatalog instead of the live commands Remote', async () => {
+    const b = await bench()
+    // `TestSessions.deferredActivation` is false; swap in the Host fact the runtime reads.
+    Object.defineProperty(b.sessions, 'deferredActivation', { get: () => true })
+
+    const candidates = await b.source.candidates(proj('s1'), req(''))
+
+    expect(candidates.map(candidate => candidate.name).sort()).toEqual(S1_CMDS.map(command => command.name).sort())
+    expect(b.catalogCalls).toEqual([sid('s1')])
+    expect(b.listCalls).toEqual([])
+  })
+
+  it('reports a failed deferred catalog read with the catalog method name', async () => {
+    const b = await bench({ catalogSessionCommands: () => Promise.reject(new Error('catalog unavailable')) })
+    Object.defineProperty(b.sessions, 'deferredActivation', { get: () => true })
+
+    await expect(b.source.candidates(proj('s1'), req(''))).rejects.toThrow('command catalog failed')
+  })
+
   it('waits for initial history and retains the Session until the catalog RPC settles', async () => {
     const opened = Promise.withResolvers<undefined>()
     const response = Promise.withResolvers<{ commands: CommandDescriptor[] }>()

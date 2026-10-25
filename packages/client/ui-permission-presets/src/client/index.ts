@@ -32,6 +32,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 // Type-only: pulls the ctx.remote merge and the forwarded-event key face
 // (the settings invalidation rides the allowlist) into this program.
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
 import type { CommandUiContract, SelectOption } from '@deepseek-ai/dsh-client-ui-commands/client'
 import type { ClientSessionContext } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
@@ -123,6 +124,12 @@ export function apply(ctx: ClientContext): void {
   const submit = async (sessionId: SessionId, preset: string): Promise<boolean> => {
     const live = sessions.binding(sessionId)?.session
     if (live === undefined) throw new Error('this session is not materialized yet')
+    // A deferred draft has no Agent to run `/permission`; the choice is saved and applied at activation.
+    if (sessions.deferredActivation) {
+      const saved = await ctx.remote.session.selectPermission({ sessionId, preset })
+      if (!saved.ok) throw new Error(`permission switch failed: ${saved.error.code}: ${saved.error.message}`)
+      return true
+    }
     const result = await live.command(`/permission ${preset}`)
     if (!result.ok) {
       throw new Error(`permission switch failed: ${result.error.code}: ${result.error.message}`)

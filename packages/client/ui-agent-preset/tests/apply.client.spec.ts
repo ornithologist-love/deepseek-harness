@@ -1278,6 +1278,58 @@ describe('AgentPresetSeatController reconciliation', () => {
     expect(select).toHaveBeenCalledExactlyOnceWith(SessionId('first'), 'minimal')
   })
 
+  it('saves the preset on a deferred draft through session.configure instead of recomposing', async () => {
+    const configure = vi.fn((request: { sessionId: SessionId; agentPreset?: string }) => Promise.resolve({
+      ok: true as const, value: { sessionId: request.sessionId, agentPreset: request.agentPreset },
+    }))
+    const select = vi.fn()
+    const controller = new AgentPresetSeatController({
+      ...developerTools(),
+      remote: { agentPresets: { select }, session: { configure } },
+    } as never,
+    () => ({ id: SessionId('blank'), blank: true, projectionValues: { agentPreset: 'standard' } }),
+    { id: undefined, introduce: false }, true)
+
+    expect(await controller.select('minimal')).toBeUndefined()
+
+    expect(configure).toHaveBeenCalledExactlyOnceWith({ sessionId: SessionId('blank'), agentPreset: 'minimal' })
+    expect(select).not.toHaveBeenCalled()
+    expect(controller.store.getSnapshot()).toMatchObject({ current: 'minimal', busy: false, error: null })
+  })
+
+  it('reports a deferred configure refusal without naming the preset twice', async () => {
+    const configure = vi.fn(() => Promise.resolve({
+      ok: false as const,
+      error: new RemoteError('gateway/internal', 'Session execution has already started', {}),
+    }))
+    const controller = new AgentPresetSeatController({
+      ...developerTools(),
+      remote: { agentPresets: { select: vi.fn() }, session: { configure } },
+    } as never,
+    () => ({ id: SessionId('blank'), blank: true, projectionValues: { agentPreset: 'standard' } }),
+    { id: undefined, introduce: false }, true)
+
+    expect(await controller.select('minimal')).toBe('Session execution has already started')
+    expect(controller.store.getSnapshot()).toMatchObject({
+      current: 'standard', error: { preset: { id: 'minimal' }, reason: 'Session execution has already started' },
+    })
+  })
+
+  it('falls back to the staged preset when a deferred configure answer omits it', async () => {
+    const configure = vi.fn((request: { sessionId: SessionId }) => Promise.resolve({
+      ok: true as const, value: { sessionId: request.sessionId },
+    }))
+    const controller = new AgentPresetSeatController({
+      ...developerTools(),
+      remote: { agentPresets: { select: vi.fn() }, session: { configure } },
+    } as never,
+    () => ({ id: SessionId('blank'), blank: true, projectionValues: { agentPreset: 'standard' } }),
+    { id: undefined, introduce: false }, true)
+
+    expect(await controller.select('minimal')).toBeUndefined()
+    expect(controller.store.getSnapshot()).toMatchObject({ current: 'minimal', busy: false, error: null })
+  })
+
   it('does not capture a non-blank Session', () => {
     const controller = new AgentPresetSeatController({ ...developerTools() } as never, () => ({
       id: SessionId('started'), blank: false,
