@@ -1195,3 +1195,68 @@ it('reports nothing for a submission whose Session facts were not captured', () 
   reportMessageSubmission(ctx, { timestamp: 1, mode: 'queue', source: 'click' })
   expect(track).not.toHaveBeenCalled()
 })
+
+describe('InputHub before-send work', () => {
+  it('sends a composer prompt only after registered work settles, in registration order', async () => {
+    const b = await bench()
+    const order: string[] = []
+    let release!: () => void
+    const first = vi.fn((_id: SessionId, _signal: AbortSignal) => new Promise<void>((resolve) => {
+      release = () => { order.push('first'); resolve() }
+    }))
+    b.hub.registerBeforeSend(first)
+    b.hub.registerBeforeSend(() => { order.push('second') })
+    b.shell.setDraft('hello')
+    b.shell.submit()
+    await b.runtime.flush()
+    expect(first).toHaveBeenCalledWith('s1', expect.any(AbortSignal))
+    expect(b.prompt).not.toHaveBeenCalled()
+    release()
+    await vi.waitFor(() => { expect(b.prompt).toHaveBeenCalledOnce() })
+    expect(order).toEqual(['first', 'second'])
+    await b.runtime.dispose()
+  })
+
+  it('restores the draft and reports the rejection when work fails', async () => {
+    const b = await bench()
+    b.hub.registerBeforeSend(() => Promise.reject(new Error('template not saved')))
+    b.shell.setDraft('keep me')
+    b.shell.submit()
+    await vi.waitFor(() => {
+      expect(b.shell.notices.getSnapshot()).toEqual(
+        expect.objectContaining({ level: 'error', text: 'template not saved' }),
+      )
+    })
+    expect(b.shell.snapshot.draft).toBe('keep me')
+    expect(b.prompt).not.toHaveBeenCalled()
+    await b.runtime.dispose()
+  })
+
+  it('cancels the send when the submission aborts during the work', async () => {
+    const b = await bench()
+    let seen: AbortSignal | undefined
+    b.hub.registerBeforeSend(async (_id, signal) => {
+      seen = signal
+      b.reference.release()
+      await b.runtime.flush()
+    })
+    b.shell.setDraft('stale')
+    b.shell.submit()
+    await vi.waitFor(() => { expect(seen?.aborted).toBe(true) })
+    await b.runtime.flush()
+    expect(b.prompt).not.toHaveBeenCalled()
+    await b.runtime.dispose()
+  })
+
+  it('skips disposed work', async () => {
+    const b = await bench()
+    const work = vi.fn()
+    const dispose = b.hub.registerBeforeSend(work)
+    dispose()
+    b.shell.setDraft('plain')
+    b.shell.submit()
+    await vi.waitFor(() => { expect(b.prompt).toHaveBeenCalledOnce() })
+    expect(work).not.toHaveBeenCalled()
+    await b.runtime.dispose()
+  })
+})

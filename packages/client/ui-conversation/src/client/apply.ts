@@ -50,6 +50,7 @@ import { TRAJECTORY_VIEW_ID, resolveActiveView } from './view-selection.ts'
 import { createViewPins } from './view-pins.ts'
 import { en, ja, es, fr, de, ru, pt, NS, zh, type ConversationKey } from './locales.ts'
 import { CONVERSATION_SETTINGS_NAMESPACE, type ConversationSettings } from '../submission-settings.ts'
+import { CONVERSATION_OPTIONS_GLOBAL, PresentationOptions } from '../presentation-options.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -156,6 +157,8 @@ function concreteConversation(ctx: Context): ConversationController {
  * @param ctx - Client root context.
  */
 export function apply(ctx: Context, config: Config = Config({})): void {
+  const page = globalThis as Partial<Record<typeof CONVERSATION_OPTIONS_GLOBAL, unknown>>
+  const presentation = PresentationOptions(page[CONVERSATION_OPTIONS_GLOBAL] ?? {})
   const sessions = ctx.sessions
   const slots = ctx.slots
   // Schemastery's field default is materialized before Cordis calls apply.
@@ -353,6 +356,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       'conversation.hero.frame': { kind: 'hoc', scope: 'root' },
       'conversation.hero.brand.mark': { kind: 'single', scope: 'root' },
       'conversation.hero.workspace': { kind: 'single', scope: 'root' },
+      'conversation.hero.workspace.icon': { kind: 'single', scope: 'root' },
       'conversation.hero.agentPreset': { kind: 'single', scope: 'session-maybe' },
       'conversation.hero.options': { kind: 'list', scope: 'session' },
     },
@@ -361,6 +365,8 @@ export function apply(ctx: Context, config: Config = Config({})): void {
       widthControls: { scope: 'root' },
     },
     inject: (sessionId: SessionId | undefined): ConversationInjected => ({
+      showHeroText: presentation.showHeroText,
+      unboundWorkspaceLabel: presentation.unboundWorkspaceLabel,
       hooks: {
         composerBlock: sessionId === undefined ? ABSENT_BLOCK : composerBlocks.storeFor(sessionId),
       },
@@ -467,6 +473,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
     locale: NS,
     children: {
       'conversation.input.attachments': { kind: 'single', scope: 'session-maybe' },
+      'conversation.input.controls': { kind: 'single', scope: 'session-maybe' },
       'conversation.input.overlay': { kind: 'list', scope: 'session' },
       'conversation.input.permission': { kind: 'single', scope: 'session' },
       'conversation.input.left': { kind: 'list', scope: 'session' },
@@ -488,6 +495,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           toggleCommandMenu: undefined,
           stop: undefined,
           retry: undefined,
+          compact: undefined,
           hooks: {
             stopShortcut,
             busyEnter: submissionPolicy.busyEnter,
@@ -569,6 +577,12 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           },
         stop: () => { stop(sessionId) },
         retry: (failureSeq) => { inputHub.retry(sessionId, failureSeq) },
+        compact: () => {
+          // The host executor logs the command lifecycle; its outcome renders as a flow node.
+          sessions.binding(sessionId)?.session.command('/compact').catch((_error: unknown) => {
+            // Transport failure leaves no command node; the user can retry from the panel.
+          })
+        },
         hooks: {
           stopShortcut,
           busyEnter: submissionPolicy.busyEnter,

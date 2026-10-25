@@ -73,6 +73,22 @@ function assertCoverage(text: string, nodes: readonly UserTextNode[]): void {
   expect(JSON.parse(JSON.stringify(nodes))).toEqual(nodes)
 }
 
+describe('UserTextRegistry queued-message edits', () => {
+  it('uses the first rule in priority order that projects the text, and none after disposal', () => {
+    const { registry } = setup()
+    const edit = (label: string) => ({ text: label, restore: (text: string) => `${text}:${label}` })
+    expect(registry.prepareEdit('x')).toBeUndefined()
+    registry.register(rule('test.z', 0, 'z'))
+    const late = registry.register({ ...rule('test.a', 2, 'a'), prepareEdit: () => edit('late') })
+    const early = registry.register({ ...rule('test.A', 1, 'A'), prepareEdit: text => text === 'skip' ? undefined : edit('early') })
+    expect(registry.prepareEdit('x')?.restore('y')).toBe('y:early')
+    expect(registry.prepareEdit('skip')?.text).toBe('late')
+    early()
+    late()
+    expect(registry.prepareEdit('x')).toBeUndefined()
+  })
+})
+
 describe('UserTextRegistry candidate rules', () => {
   it('queries every matcher for empty and nonempty original text', () => {
     const { registry } = setup()

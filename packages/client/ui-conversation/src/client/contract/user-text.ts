@@ -51,6 +51,25 @@ export interface UserTextRule<out Id extends string = string> {
    * Text candidates preserve the exact source substring and may supply `data.display`.
    */
   match(this: void, text: string, from: number, context: UserTextTransformContext): (UserTextNode & { readonly id: Id }) | UserTextNode<'text'> | undefined
+  /**
+   * Project stored message text for queued-message editing, so the user edits only the part this rule shows as text.
+   * The first rule in priority order that returns an edit owns the edit.
+   * @param text - complete stored message text.
+   * @returns the edit, or undefined to leave the text to later rules and plain editing.
+   */
+  prepareEdit?(this: void, text: string): UserTextEdit | undefined
+}
+
+/** Editable projection of a stored message and its inverse. */
+export interface UserTextEdit {
+  /** Text the user edits. */
+  readonly text: string
+  /**
+   * Rebuild the stored message text from the edited text.
+   * @param text - edited text.
+   * @returns text sent as the edited message.
+   */
+  restore(this: void, text: string): string
 }
 
 /**
