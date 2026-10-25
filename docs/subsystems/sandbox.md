@@ -54,6 +54,12 @@ interface SandboxExecutionPolicy {
   /** Absolute root directory `workspace-write` may write under. */
   workspaceRoot: string
   /**
+   * Every member directory of a multi-folder workspace, primary first. When
+   * present, `workspace-write` may write under each member; omission keeps the
+   * single-root policy formed by {@link workspaceRoot}.
+   */
+  workspaceRoots?: readonly string[]
+  /**
    * Opaque identity of the calling session (the branded `dsh-session`
    * SessionId). Backends key per-session state off it (e.g. windows-acl gives
    * each live session/workspace pair a random private temp directory and SID,
