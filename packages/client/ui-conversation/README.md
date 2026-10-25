@@ -168,6 +168,8 @@ The selector must be a pure function of the owner currency. Its non-null return 
 
 `conversation.input.activity` hosts one control between the model selector and Send. Its `onActiveChange` callback expands that control across the toolbar and hides ordinary accessory controls and the context meter while preserving the editor and submit action. Closing the activity restores those controls with context details closed. The empty hero dock remains collapsed when it has no content. The occupant releases expansion on unmount and owns any activity-specific feedback.
 
+A `conversation.input.controls` occupant arranges the composer tool row. It receives the command button, the hidden file input, the permission, plan, left, right, model and activity seats, and the stop and submit buttons, each already rendered and `null` when the bar does not show it, plus `expanded` while an activity claims the row. The occupant decides placement, overflow and compaction; an empty slot keeps the default two-group row.
+
 <a id="model-experience"></a>
 ## Model Experience
 
@@ -183,6 +185,7 @@ None; Conversation assembly and browser input state do not alter provider-side p
 
 - **Only registered targets can render** — the shell deliberately has no implicit fallback target beyond the registered `chat` preference.
 - **Factory occurrences inherit their render-position Session** — `conversation.content` does not accept an independently addressed Session; that requires a separate Session-provider capability.
+- **`conversation.input.controls` passes rendered controls as owner props** — this is an exception to the rule against ReactNode-valued owner props, kept because the controls carry the bar's local state and an arranging occupant needs the elements themselves; it is retired once each control is its own slot entry with layout metadata.
 
 
 <a id="dev-note"></a>

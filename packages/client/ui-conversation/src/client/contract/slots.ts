@@ -280,6 +280,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.input.right': { kind: 'list'; scope: 'session' }
     /** Compact action after the model selector; it can expand across the toolbar while retaining the editor and submit action. */
     'conversation.input.activity': { kind: 'single'; scope: 'session'; owner: InputActivityOwnerProps }
+    /** Layout of the composer tool row; empty keeps the default two-group row. */
+    'conversation.input.controls': { kind: 'single'; scope: 'session-maybe'; owner: InputControlsOwnerProps }
     /** Resident composer body, including the no-Session inert state. */
     'conversation.composer.bar': { kind: 'single'; scope: 'session-maybe'; owner: ComposerBarOwnerProps }
     /** Optional draft-attachment rail and drop target. */
@@ -501,11 +503,38 @@ export interface InputActivityOwnerProps extends InputControlOwnerProps {
   onActiveChange: (active: boolean) => void
 }
 
+/**
+ * The composer tool-row controls, already rendered by the composer bar, for an
+ * occupant that arranges them. A control the bar does not show is `null`.
+ */
+export interface InputControlsOwnerProps {
+  /** Command-menu button. */
+  commands: ReactNode
+  /** Hidden draft file input that the command menu's file entry opens. */
+  fileInput: ReactNode
+  /** `conversation.input.permission` occupant. */
+  permission: ReactNode
+  /** `conversation.input.plan` occupant. */
+  plan: ReactNode
+  /** `conversation.input.left` entries. */
+  left: ReactNode
+  /** `conversation.input.right` entries. */
+  right: ReactNode
+  /** `conversation.input.model` occupant. */
+  model: ReactNode
+  /** `conversation.input.activity` occupant in its width-tracking wrapper. */
+  activity: ReactNode
+  /** Stop and submit buttons. */
+  submit: ReactNode
+  /** Whether the activity occupant claims the row; the default row then hides the other controls. */
+  expanded: boolean
+}
+
 /** Full props of the resident composer bar. */
 export type ComposerBarProps =
   PropsRuntime<'conversation.composer.bar'>
   & PropsRenderSlots<
-    | 'conversation.input.attachments' | 'conversation.input.overlay'
+    | 'conversation.input.attachments' | 'conversation.input.overlay' | 'conversation.input.controls'
     | 'conversation.input.permission'
     | 'conversation.input.left' | 'conversation.input.plan'
     | 'conversation.input.right' | 'conversation.input.model' | 'conversation.input.activity'

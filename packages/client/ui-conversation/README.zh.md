@@ -168,6 +168,8 @@ selector 必须是 owner currency 的纯函数。非 null 返回值作为 `match
 
 `conversation.input.activity` 在模型选择器与发送按钮之间承载一个控件。其 `onActiveChange` 回调将控件展开至整条工具栏并隐藏普通辅助控件和上下文用量按钮，同时保留编辑器与提交按钮。关闭活动后恢复这些控件，上下文详情保持关闭。首页输入框下方没有内容时，该区域保持收起。占用者在卸载时释放展开状态，并拥有活动专属反馈。
 
+`conversation.input.controls` 的占用者负责排布输入框工具行。它收到指令按钮、隐藏的文件输入、权限、计划、左侧、右侧、模型与活动各席位，以及停止和发送按钮，均已由输入栏渲染，输入栏不显示的项为 `null`；活动占据整行时 `expanded` 为真。摆放、溢出与紧凑化由占用者决定；插槽为空时保留默认的两组布局。
+
 <a id="model-experience"></a>
 ## 模型体验
 
@@ -183,6 +185,7 @@ selector 必须是 owner currency 的纯函数。非 null 返回值作为 `match
 
 - **只有已注册 target 可以渲染**——除已注册的 `chat` 偏好外，shell 刻意不提供隐式 fallback target。
 - **Factory occurrence 继承渲染位置的 Session**——`conversation.content` 不接受独立寻址的 Session；该能力需要单独的 Session provider。
+- **`conversation.input.controls` 以 owner props 传递已渲染的控件**——这是“owner props 不放 ReactNode”规则的例外，原因是这些控件携带输入栏的局部状态，排布型占用者需要元素本身；待每个控件都成为带布局元数据的独立插槽条目后取消。
 
 
 <a id="dev-note"></a>

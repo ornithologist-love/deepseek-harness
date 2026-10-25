@@ -29,7 +29,7 @@ import type { SubmitOutcome } from '../src/client/contract/input.ts'
 import { SessionInputShell } from '../src/client/input/facade.ts'
 import { $replaceDetectSpanWithText, $selectDetectSpan } from '../src/client/input/editor/span-map.ts'
 import type {
-  ComposerAttachment, ComposerAttachmentsOwnerProps, DraftFileUploads, InputActivityOwnerProps,
+  ComposerAttachment, ComposerAttachmentsOwnerProps, DraftFileUploads, InputActivityOwnerProps, InputControlsOwnerProps,
 } from '../src/client/contract/slots.ts'
 import type { DraftAttachmentId } from '../src/client/contract/input.ts'
 import { InputBar } from '../src/client/skeleton/InputBar.tsx'
@@ -100,6 +100,7 @@ interface BenchOptions {
   leftItems?: React.ReactNode
   rightItems?: React.ReactNode
   activityEntry?: (owner: InputActivityOwnerProps) => React.ReactNode
+  controls?: (owner: InputControlsOwnerProps) => React.ReactNode
   contextPressure?: ContextPressureProjection
   footer?: React.ReactNode
   attachments?: readonly ComposerAttachment[]
@@ -163,7 +164,7 @@ function bench(over?: BenchOptions) {
   const busyEnter = createSnapshotStore<'queue' | 'steer'>(over?.busyEnter ?? 'queue')
   const stopShortcut = createSnapshotStore<readonly string[]>(['Esc', 'Esc'])
   const slotCalls: { key: string; owner: unknown }[] = []
-  const renderSlot = ((key: string, owner: object) => {
+  const renderSlot = ((key: string, owner: object, options?: { fallback?: React.ReactNode }) => {
     slotCalls.push({ key, owner })
     if (key === 'conversation.input.overlay') return over?.overlay ?? null
     if (key === 'conversation.input.left') return over?.leftItems ?? null
@@ -173,6 +174,9 @@ function bench(over?: BenchOptions) {
     if (key === 'conversation.input.permission') return over?.permissionEntry ?? null
     if (key === 'conversation.input.model') return over?.modelEntry ?? null
     if (key === 'conversation.input.activity') return over?.activityEntry?.(owner as InputActivityOwnerProps) ?? null
+    if (key === 'conversation.input.controls') {
+      return over?.controls === undefined ? options?.fallback : over.controls(owner as InputControlsOwnerProps)
+    }
     return null
   }) as never
   const props: InputBarProps = {
@@ -1809,9 +1813,9 @@ describe('command launcher chrome and control seats', () => {
     // Every seat dispatched, nothing rendered (render passes may repeat; the
     // seat set is the contract).
     expect([...new Set(slotCalls.map(c => c.key))]).toEqual([
-      'conversation.input.overlay', 'conversation.input.attachments',
       'conversation.input.permission', 'conversation.input.plan', 'conversation.input.left',
       'conversation.input.right', 'conversation.input.model', 'conversation.input.activity',
+      'conversation.input.overlay', 'conversation.input.attachments', 'conversation.input.controls',
       'conversation.composer.dock',
     ])
     expect(view.queryByLabelText('Plan mode')).toBeNull()
@@ -1864,6 +1868,23 @@ describe('command launcher chrome and control seats', () => {
     const liveControls = live.slotCalls.filter(call => controlKeys.has(call.key))
     expect(liveControls.every(c => !(c.owner as { locked: boolean }).locked)).toBe(true)
     expect(attachmentOwner(live.slotCalls).canAcceptDrop).toBe(true)
+  })
+
+  it('hands the rendered controls to a controls occupant in place of the default row', () => {
+    let seen: InputControlsOwnerProps | undefined
+    const { view } = bench({
+      modelEntry: <i data-testid="model-entry" />,
+      controls: (owner) => {
+        seen = owner
+        return <div data-testid="custom-row">{owner.model}{owner.commands}{owner.submit}</div>
+      },
+    })
+    const row = view.getByTestId('custom-row')
+    expect(row.querySelector('[data-testid="model-entry"]')).toBeTruthy()
+    expect(row.contains(view.getByLabelText('添加文件或调用指令'))).toBe(true)
+    expect(seen?.expanded).toBe(false)
+    expect(seen?.permission).toBeNull()
+    expect(view.container.querySelector('input[type="file"]')).toBeNull()
   })
 
   it('disabled locks the command launcher while running does not', () => {

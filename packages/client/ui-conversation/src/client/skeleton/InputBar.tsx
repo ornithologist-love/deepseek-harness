@@ -371,6 +371,104 @@ export const InputBar = memo(function InputBar({
         ? t('placeholder.steerQueue')
         : planActive ? t('placeholder.plan') : t('placeholder.default'))
 
+  const commandsControl = (
+    <Tooltip label={t('input.commands')} side="top" delayMs={500}>
+      <button
+        type="button"
+        className={css.add}
+        aria-label={t('input.commands')}
+        aria-haspopup="listbox"
+        aria-expanded={commandMenuOpen}
+        disabled={locked || toggleCommandMenu === undefined}
+        onMouseDown={keepFocus}
+        onClick={onToggleCommandMenu}
+      >
+        <IconPlusOutlineMedium size={14} />
+      </button>
+    </Tooltip>
+  )
+  const draftFileInput = (
+    <input
+      ref={fileInputRef}
+      type="file"
+      multiple
+      disabled={subagent !== null}
+      hidden
+      onChange={onPickFiles}
+    />
+  )
+  const permissionControl = sessionId === undefined ? null : renderSlot('conversation.input.permission', { locked })
+  const planControl = sessionId === undefined ? null : renderSlot('conversation.input.plan', { locked })
+  const leftControls = input === undefined || sessionId === undefined ? null : renderSlot('conversation.input.left', {})
+  const rightControls = input === undefined || sessionId === undefined ? null : renderSlot('conversation.input.right', {})
+  const modelControl = sessionId === undefined ? null : renderSlot('conversation.input.model', { locked: modelSeatLocked })
+  const activityControl = input === undefined || sessionId === undefined ? null : (
+    <div className={activity ? css.activityExpanded : css.activity}>
+      {renderSlot('conversation.input.activity', { locked, onActiveChange: setActivity })}
+    </div>
+  )
+  const submitControls = (
+    <>
+      {interruptible && (
+        <Tooltip label={t('input.stop')} shortcutKeys={stopKeys} side="top" delayMs={500} disabled={stop === undefined}>
+          <button
+            type="button"
+            className={css.primary}
+            aria-label={t('input.stop')}
+            disabled={stop === undefined}
+            onMouseDown={keepFocus}
+            onClick={stop}
+          >
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+              <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />
+            </svg>
+          </button>
+        </Tooltip>
+      )}
+      <Tooltip label={primaryStops ? t('input.stop') : primaryLabel} shortcutKeys={primaryStops ? stopKeys : undefined} side="top" delayMs={500} disabled={primaryDisabled}>
+        <button
+          type="button"
+          className={css.primary}
+          aria-label={primaryLabel}
+          disabled={primaryDisabled}
+          onMouseDown={keepFocus}
+          onClick={onPrimary}
+        >
+          {primaryStops ? (
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+              <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+              <path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z" fill="currentColor" />
+            </svg>
+          )}
+        </button>
+      </Tooltip>
+    </>
+  )
+  const defaultControls = (
+    <>
+      <div className={css.tools} hidden={activity}>
+        {commandsControl}
+        {draftFileInput}
+        <div className={css.modes}>
+          {permissionControl}
+          {planControl}
+        </div>
+        {leftControls}
+      </div>
+      <div className={clsx(css.trailing, activity && css.trailingActive)}>
+        <div className={css.standardControls} hidden={activity}>
+          {rightControls}
+          {modelControl}
+        </div>
+        {activityControl}
+        {submitControls}
+      </div>
+    </>
+  )
+
   return (
     <div className={clsx(css.root, variant === 'hero' && css.hero)}>
       {toast !== null && (
@@ -437,84 +535,11 @@ export const InputBar = memo(function InputBar({
           showPlaceholder={draft === '' && attachments.length === 0 && !claimActive}
         />
         <div ref={rowRef} className={css.row}>
-          <div className={css.tools} hidden={activity}>
-            <Tooltip label={t('input.commands')} side="top" delayMs={500}>
-              <button
-                type="button"
-                className={css.add}
-                aria-label={t('input.commands')}
-                aria-haspopup="listbox"
-                aria-expanded={commandMenuOpen}
-                disabled={locked || toggleCommandMenu === undefined}
-                onMouseDown={keepFocus}
-                onClick={onToggleCommandMenu}
-              >
-                <IconPlusOutlineMedium size={14} />
-              </button>
-            </Tooltip>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              disabled={subagent !== null}
-              hidden
-              onChange={onPickFiles}
-            />
-            <div className={css.modes}>
-              {sessionId === undefined ? null : renderSlot('conversation.input.permission', { locked })}
-              {sessionId === undefined ? null : renderSlot('conversation.input.plan', { locked })}
-            </div>
-            {input === undefined || sessionId === undefined
-              ? null
-              : renderSlot('conversation.input.left', {})}
-          </div>
-          <div className={clsx(css.trailing, activity && css.trailingActive)}>
-            <div className={css.standardControls} hidden={activity}>
-              {input === undefined || sessionId === undefined
-                ? null
-                : renderSlot('conversation.input.right', {})}
-              {sessionId === undefined ? null : renderSlot('conversation.input.model', { locked: modelSeatLocked })}
-            </div>
-            {input === undefined || sessionId === undefined ? null : <div className={activity ? css.activityExpanded : css.activity}>
-              {renderSlot('conversation.input.activity', { locked, onActiveChange: setActivity })}
-            </div>}
-            {interruptible && (
-              <Tooltip label={t('input.stop')} shortcutKeys={stopKeys} side="top" delayMs={500} disabled={stop === undefined}>
-                <button
-                  type="button"
-                  className={css.primary}
-                  aria-label={t('input.stop')}
-                  disabled={stop === undefined}
-                  onMouseDown={keepFocus}
-                  onClick={stop}
-                >
-                  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
-                    <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />
-                  </svg>
-                </button>
-              </Tooltip>
-            )}
-            <Tooltip label={primaryStops ? t('input.stop') : primaryLabel} shortcutKeys={primaryStops ? stopKeys : undefined} side="top" delayMs={500} disabled={primaryDisabled}>
-              <button
-                type="button"
-                className={css.primary}
-                aria-label={primaryLabel}
-                disabled={primaryDisabled}
-                onMouseDown={keepFocus}
-                onClick={onPrimary}
-              >
-                {primaryStops ? (
-                  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
-                    <rect x="3" y="3" width="10" height="10" rx="3" fill="currentColor" />
-                  </svg>
-                ) : (
-                  <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
-                    <path d="M8.3125 0.980183C8.66767 1.0531 8.97902 1.20418 9.2627 1.43233C9.48724 1.61297 9.73029 1.85793 9.97949 2.10714L14.707 6.83468L13.293 8.24874L9 3.95577V15.0417H7V3.95577L2.70703 8.24874L1.29297 6.83468L6.02051 2.10714C6.26971 1.85793 6.51277 1.61297 6.7373 1.43233C6.97662 1.23986 7.28445 1.04402 7.6875 0.980183C7.8973 0.947006 8.1031 0.95516 8.3125 0.980183Z" fill="currentColor" />
-                  </svg>
-                )}
-              </button>
-            </Tooltip>
-          </div>
+          {renderSlot('conversation.input.controls', {
+            commands: commandsControl, fileInput: draftFileInput, permission: permissionControl, plan: planControl,
+            left: leftControls, right: rightControls, model: modelControl, activity: activityControl,
+            submit: submitControls, expanded: activity,
+          }, { fallback: defaultControls })}
         </div>
       </div>
       <div className={css.dock} data-composer-dock>

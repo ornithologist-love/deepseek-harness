@@ -307,11 +307,11 @@ function mount(
           useMenuLauncher={bindSnapshotSelector(createSnapshotStore<string | null>(null))}
           stop={stop}
           t={t}
-          renderSlot={((key: string, seatOwner: object) => {
+          renderSlot={((key: string, seatOwner: object, seatOpts?: { fallback?: ReactNode }) => {
             // The bar's own seats: recorded so a case can assert what share
             // each tool-row control received.
             seatOwners.push({ key, owner: seatOwner })
-            return null
+            return seatOpts?.fallback ?? null
           }) as InputBarProps['renderSlot']}
           {...bar}
         />
