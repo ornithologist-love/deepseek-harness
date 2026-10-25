@@ -11,7 +11,7 @@ import {
 import type { InboxState } from '@deepseek-ai/dsh-agent/types'
 import type { QueueAction } from '@deepseek-ai/dsh-api-session-controller/types'
 import type { MessageId } from '@deepseek-ai/dsh-llm/brand'
-import type { UserTextFacts } from '../index.ts'
+import type { UserTextEdit, UserTextFacts } from '../index.ts'
 import { NS } from '../locales.ts'
 import css from './QueueDock.module.css'
 
@@ -32,6 +32,8 @@ export interface QueueDockInjected {
   notify: (level: 'info' | 'error', text: string) => void
   /** Resolve one durable queued image into a session-scoped browser URL. */
   loadImage: (attachment: ImageAttachmentRef) => Promise<string>
+  /** Project stored text for editing through the registered user-text rules. */
+  prepareEdit: (text: string) => UserTextEdit | undefined
 }
 
 /**
@@ -102,7 +104,9 @@ export type QueueDockProps = PropsRuntime<'conversation.input.dock'> & QueueDock
  * collapsible count header; an empty queue renders nothing. Local queued submissions
  * show sending status and disabled actions until their Host queue rows arrive.
  */
-export function QueueDock({ useSession, useProjection, updateQueue, notify, loadImage, renderFactorySlot, t }: QueueDockProps) {
+export function QueueDock({
+  useSession, useProjection, updateQueue, notify, loadImage, prepareEdit, renderFactorySlot, t,
+}: QueueDockProps) {
   const inbox = useProjection('inbox') as unknown as InboxState | undefined
   const pendingSubmissions = useSession(s => s.pendingSubmissions)
   const queue = useMemo(() => {
@@ -123,7 +127,7 @@ export function QueueDock({ useSession, useProjection, updateQueue, notify, load
   const rowCount = queue.length + pendingQueue.length
   const running = useSession(s => s.running)
   const queueMutable = useSession(s => s.subagent === null || s.subagent.address.mode === 'continuable')
-  const [editing, setEditing] = useState<{ id: MessageId; text: string } | null>(null)
+  const [editing, setEditing] = useState<{ id: MessageId; text: string; restore?: UserTextEdit['restore'] } | null>(null)
   const [busy, setBusy] = useState<MessageId | null>(null)
   const [collapsed, setCollapsed] = useState(true)
   const listId = useId()
@@ -160,7 +164,7 @@ export function QueueDock({ useSession, useProjection, updateQueue, notify, load
     if (editing === null || editing.text.trim() === '') return
     if (await applyAction(
       editing.id,
-      { kind: 'edit', content: [{ type: 'text', text: editing.text }] },
+      { kind: 'edit', content: [{ type: 'text', text: editing.restore?.(editing.text) ?? editing.text }] },
       t('queue.editFailed'),
     )) setEditing(null)
   }
@@ -200,7 +204,7 @@ export function QueueDock({ useSession, useProjection, updateQueue, notify, load
                     <InlineEditor
                       value={editing.text}
                       label={t('queue.edit')}
-                      onChange={(text) => { setEditing({ id: row.id, text }) }}
+                      onChange={(text) => { setEditing({ ...editing, text }) }}
                       onSave={() => { void saveEdit() }}
                       onCancel={() => { setEditing(null) }}
                     />
@@ -273,7 +277,9 @@ export function QueueDock({ useSession, useProjection, updateQueue, notify, load
                             title={text === null ? t('queue.edit.unsupported') : undefined}
                             disabled={busy !== null || text === null}
                             onClick={() => {
-                              if (text !== null) setEditing({ id: row.id, text: text })
+                              if (text === null) return
+                              const edit = prepareEdit(text)
+                              setEditing(edit === undefined ? { id: row.id, text } : { id: row.id, text: edit.text, restore: edit.restore })
                             }}
                           >
                             <IconEditOutlineRegular size={14} />
@@ -405,6 +411,7 @@ export const queueDockEntry = {
           updateQueue: (itemId, action) => conversation.updateQueue(itemId, action),
           notify: (level, text) => { conversation.input.for(actx).notify(level, text) },
           loadImage: attachment => ctx.uiConversation.imageUrl(sessionId, attachment),
+          prepareEdit: text => ctx.uiConversation.userText.prepareEdit(text),
         }
       },
     }, QueueDock))

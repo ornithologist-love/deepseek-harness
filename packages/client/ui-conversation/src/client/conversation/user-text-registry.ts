@@ -1,5 +1,5 @@
 /** Effect-owned user-text rules and their revision; document caches belong only to evaluator callers. */
-import type { UserTextEvaluator, UserTextRule } from '../contract/user-text.ts'
+import type { UserTextEdit, UserTextEvaluator, UserTextRule } from '../contract/user-text.ts'
 import { ConversationDefinitionRegistry } from './definition-registry.ts'
 import { UserTextDocument } from './user-text-document.ts'
 
@@ -32,6 +32,19 @@ export class UserTextRegistry extends ConversationDefinitionRegistry<UserTextRul
   createEvaluator(): UserTextEvaluator {
     const document = new UserTextDocument()
     return input => document.evaluate(input, this.rules)
+  }
+
+  /**
+   * Project stored text for queued-message editing through the first rule, in priority order, that returns an edit.
+   * @param text - complete stored message text.
+   * @returns that rule's edit, or undefined for plain editing.
+   */
+  prepareEdit(text: string): UserTextEdit | undefined {
+    for (const rule of this.rules) {
+      const edit = rule.prepareEdit?.(text)
+      if (edit !== undefined) return edit
+    }
+    return undefined
   }
 
   /**
