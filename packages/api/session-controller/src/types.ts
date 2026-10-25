@@ -190,6 +190,8 @@ export interface SessionSummary {
   readonly origin?: 'subagent'
   readonly cwd?: string
   readonly projections?: SessionProjectionHints
+  /** Saved composer choices of a deferred Session; a higher revision replaces the previous values. */
+  readonly configuration?: { readonly revision: number; readonly values: SessionProjectionValues }
 }
 
 /** One session-content search result. */

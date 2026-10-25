@@ -239,6 +239,8 @@ export class ClientSessions implements ISessions {
    * reports the same number.
    */
   readonly searchResultLimit = SESSION_SEARCH_RESULT_LIMIT
+  /** Published by the Host Session Controller in the index page when `configurationDirectory` is set. */
+  readonly deferredActivation = Reflect.get(globalThis, '__DSH_DEFERRED_AGENT__') === true
   /** Catalog metadata and local reference-source projection. */
   readonly list: SnapshotStore<SessionListState>
   /** The object-layer instance cluster and frame dispatch entry. */

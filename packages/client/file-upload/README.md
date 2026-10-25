@@ -46,6 +46,8 @@ The Client plugin provides `ctx.fileUpload`. Its `upload()` method receives the 
 
 The Host plugin provides `ctx.fileUploads`. It owns the authenticated streaming route, encoded Remote fallback, command receipt resolver, and staged-receipt lifecycle; encoded admission, attachment-error recognition, and byte storage stay behind `ctx.attachments`. Host callers supply an Agent with its runtime-owned context; receipt tables use that Agent's exact Session object as their key. The Session Controller registers the resolver that can resume a cold ordinary Agent and consumes receipts during prompt admission. Prompt delivery holds each receipt binding in a disposable transaction: disposal restores the previous binding until successful delivery commits it, and queue or history observation then retires the committed receipt.
 
+A Host that defers Agent activation registers one `registerSessionValidator(validate)` instead of resolving an Agent for uploads. The validator runs before and after storage; accepted receipts wait under the Session id and move to the first Agent that resolves or binds them. On such a Host the Client sends exact bytes through the HTTP route too, because no Agent exists to receive the encoded Remote.
+
 | File | Role |
 |---|---|
 | [`src/index.ts`](src/index.ts) | Host streaming route, attachment-service admission, and Session-owned receipt lifecycle |

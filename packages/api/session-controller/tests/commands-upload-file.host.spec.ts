@@ -176,6 +176,95 @@ describe('Session file uploads', () => {
     ])
   })
 
+  it('stages uploads for a validated Session before its Agent exists, then hands them to the Agent', async () => {
+    const { controller, uploads, followup } = await uploadHarness()
+    const resolver = vi.fn(() => Promise.reject(new Error('fixture did not expect Agent resolution')))
+    uploads.registerAgentResolver(resolver)
+    const validate = vi.fn(() => Promise.resolve())
+    const dispose = uploads.registerSessionValidator(validate)
+    expect(() => uploads.registerSessionValidator(validate)).toThrow('already registered')
+    const receipt = await uploads.uploadStream({
+      sessionId: SESSION,
+      data: (async function* (): AsyncIterable<Uint8Array> { yield Uint8Array.of(1, 2) })(),
+      name: 'draft.bin',
+    })
+    expect(validate).toHaveBeenCalledTimes(2)
+    expect(resolver).not.toHaveBeenCalled()
+    dispose()
+    await controller.prompt(promptRequest([{ type: 'file', receiptId: receipt.receiptId }]), USER_SOURCE)
+    expect((followup.mock.calls[0]?.[0] as UserMessage).content).toEqual([
+      { type: 'file', attachment: receipt.file },
+    ])
+  })
+
+  it('refuses an upload whose Session fails validation', async () => {
+    const { uploads, saveFileStream } = await uploadHarness()
+    uploads.registerSessionValidator(() => Promise.reject(new Error('Session does not exist')))
+    await expect(uploads.uploadStream({
+      sessionId: SESSION,
+      data: (async function* (): AsyncIterable<Uint8Array> { yield Uint8Array.of(1) })(),
+    })).rejects.toThrow('Session does not exist')
+    expect(saveFileStream).not.toHaveBeenCalled()
+  })
+
+  it('validates again after storage and forwards signal and name for a validated upload', async () => {
+    const { uploads, saveFileStream } = await uploadHarness()
+    const validate = vi.fn(() => Promise.resolve())
+    uploads.registerSessionValidator(validate)
+    const abort = new AbortController()
+    await expect(uploads.uploadStream({
+      sessionId: SESSION,
+      data: (async function* (): AsyncIterable<Uint8Array> { yield Uint8Array.of(1) })(),
+      signal: abort.signal,
+      name: 'named.bin',
+    })).resolves.toMatchObject({ file: { name: 'named.bin' } })
+    expect(validate).toHaveBeenCalledTimes(2)
+    expect(saveFileStream).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      signal: abort.signal, name: 'named.bin',
+    }))
+
+    // Without a signal or a name the storage request omits both fields.
+    await uploads.uploadStream({
+      sessionId: SESSION,
+      data: (async function* (): AsyncIterable<Uint8Array> { yield Uint8Array.of(2) })(),
+    })
+    expect(saveFileStream).toHaveBeenLastCalledWith(expect.not.objectContaining({ signal: undefined }))
+    expect(saveFileStream.mock.calls[1]?.[0]).not.toHaveProperty('name')
+  })
+
+  it('withdraws the Session validator when its registration is disposed', async () => {
+    const { uploads, disposeAgent } = await uploadHarness()
+    await disposeAgent()
+    const validate = vi.fn(() => Promise.resolve())
+    uploads.registerSessionValidator(validate)()
+
+    // Without a validator the route falls back to resolving an Agent, which is cold here.
+    await expect(uploads.uploadStream({
+      sessionId: SESSION,
+      data: (async function* (): AsyncIterable<Uint8Array> { yield Uint8Array.of(1) })(),
+    })).rejects.toMatchObject({ code: 'session/not-found' })
+    expect(validate).not.toHaveBeenCalled()
+  })
+
+  it('round-trips the Session validator registration through disposal', async () => {
+    const { uploads } = await uploadHarness()
+    const validate = vi.fn(() => Promise.resolve())
+    const dispose = uploads.registerSessionValidator(validate)
+
+    expect(() => uploads.registerSessionValidator(validate)).toThrow('file-upload: Session validator already registered')
+    // Disposal frees the slot; a repeated disposal leaves it unchanged.
+    dispose()
+    dispose()
+    const replacement = vi.fn(() => Promise.resolve())
+    uploads.registerSessionValidator(replacement)
+    await expect(uploads.uploadStream({
+      sessionId: SESSION,
+      data: (async function* (): AsyncIterable<Uint8Array> { yield Uint8Array.of(1) })(),
+    })).resolves.toMatchObject({ file: { bytes: 1 } })
+    expect(replacement).toHaveBeenCalledTimes(2)
+    expect(validate).not.toHaveBeenCalled()
+  })
+
   it('stages a bounded byte stream and forwards cancellation to storage', async () => {
     const { controller, uploads, followup, saveFileStream } = await uploadHarness()
     const abort = new AbortController()

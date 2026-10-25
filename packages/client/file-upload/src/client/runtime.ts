@@ -195,12 +195,13 @@ export class FileUploadRuntime extends Service implements FileUploadService {
     signal?: AbortSignal,
     onProgress?: (progress: { readonly loaded: number; readonly total?: number }) => void,
   ): Promise<RemoteResult<FileUploadValue>> {
-    if (!(data instanceof Uint8Array)) {
+    // Deferred hosts have no Agent to receive the Remote upload, so bytes take the HTTP route.
+    if (!(data instanceof Uint8Array) || Reflect.get(globalThis, '__DSH_DEFERRED_AGENT__') === true) {
       const query = new URLSearchParams({ sessionId })
       if (name !== undefined) query.set('name', name)
       const response = await this.post({
         path: `${FILE_UPLOAD_ROUTE}?${query.toString()}`,
-        body: data,
+        body: data instanceof Uint8Array ? new Blob([Uint8Array.from(data)]) : data,
         headers: { 'content-type': 'application/octet-stream' },
         ...(signal === undefined ? {} : { signal }),
         ...(onProgress === undefined ? {} : { onProgress }),

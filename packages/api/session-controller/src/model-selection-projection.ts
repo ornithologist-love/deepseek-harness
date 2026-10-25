@@ -36,6 +36,9 @@ function applyModelSelectionProjection(
   state: ModelSelectionProjectionState,
   event: SessionEvent,
 ): ModelSelectionProjectionState {
+  if (event.type === 'agent-preset/selected') {
+    return { lastUsed: null, pending: null }
+  }
   if (event.type === 'model/selection') {
     return sameSelection(state.pending, event.data)
       ? state
@@ -64,7 +67,7 @@ const modelSelectionProjection = {
     viewSchema: modelSelectionProjectionSchema,
     view: state => ({ lastUsed: state.lastUsed, next: state.pending ?? state.lastUsed }),
   },
-  stateVersion: 2,
+  stateVersion: 3,
 } satisfies ProjectionDefinition<'modelSelection', ModelSelectionProjectionState>
 
 function sameSelection(left: ModelSelection | null, right: ModelSelection | null): boolean {

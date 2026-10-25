@@ -49,7 +49,8 @@ export class SessionHistoryController {
    */
   constructor(
     private readonly ctx: Context,
-    private readonly promote: (observation: SessionObservation) => void,
+    private readonly promote?: (observation: SessionObservation) => void,
+    private readonly observe?: (sessionId: SessionId) => Promise<SessionObservation>,
   ) {
     ctx.on('agent/assistant-stream', ({ agent, frame }) => {
       let stream = this.assistantStreams.get(agent.session.id)
@@ -201,7 +202,7 @@ export class SessionHistoryController {
           : projectionBlock(source.projections),
         ...assistantStream === undefined ? {} : { assistantStream },
       }
-      if (address.kind === 'session' && source.source === 'prepared') {
+      if (this.promote && address.kind === 'session' && source.source === 'prepared') {
         const promotion = source.retain()
         try {
           this.promote(promotion)
@@ -247,7 +248,7 @@ export class SessionHistoryController {
   ): Promise<SessionObservation> {
     const sessionId = addressId(address)
     try {
-      const observation = await this.ctx.sessionQuery.observeSession(sessionId, {
+      const observation = this.observe ? await this.observe(sessionId) : await this.ctx.sessionQuery.observeSession(sessionId, {
         signal,
         projectionMode: withProjections || address.kind === 'subagent' ? 'all' : 'none',
       })

@@ -74,6 +74,8 @@ Client 的首次 `follow`、重连首屏与 `loadOlder()` 至少请求 50 条以
 
 本控制器通过 `ctx.plugin` 组合 `ArchivedSessionGate`：在 Agent 注册表、Session store 与 Workspace 注册表就绪后加载，随控制器一起释放。它的 `agent/pre-step` 监听器会拒绝为已归档会话或其子代理子孙——从 Session header 的血缘字段读出，从不包括 fork——提出的步骤，因此迟到的唤醒投递会让该回合以 `blocked` 收口而不发出模型请求；取消归档即为整条血缘解除门禁。已归档会话仍在跑的工作由各自的 owner 通过 Workspace 注册表的归档准入（[接缝](../../workspace/workspace/README.zh.md)）报告与停止：运行中的回合由 [Agent 注册表](../../core/agent/README.zh.md)负责，所属任务由[任务注册表接缝](../../jobs/jobs/README.zh.md)负责，子代理子孙由 [Subagent](../../subagent/subagent/README.zh.md) runtime 负责，提醒由 [Schedule](../../schedule/schedule/README.zh.md) 插件负责；本控制器自己不报告任何内容。
 
+设置 `configurationDirectory` 后，控制器延迟 Agent 激活。`create` 在该目录中把草稿保存为一个 JSON 文件，不启动 Agent；`selectModel`、`configure({ sessionId, agentPreset?, workspaceId?, cwd? })` 和 `selectPermission({ sessionId, preset })` 把输入框选择保存在草稿上。草稿以只读 prepared 切面出现在 `session.list`、Workspace 会话头、`projections` 和 `page` 中，其摘要携带带版本号的 `configuration`，Client 投影存储把它叠加在持久值之上。第一个需要 Agent 的操作（prompt、上传解析或 Typert Agent 查找）从草稿创建 Agent，应用保存的模型与权限选择，并把记录标为已执行；为已执行 Session 保存的选择在下一次命令解析其 Agent 时应用。此模式下 Typert Agent 与 Session 查找只返回在线 Agent，`commandCatalog(sessionId)` 列出在线 Agent 的命令，否则返回空列表；文件上传在激活前经 `fileUploads.registerSessionValidator` 接收；首页发布 `__DSH_DEFERRED_AGENT__`，使 `sessions.deferredActivation` 把 Client 输入框控件导向这些 Remote。重启会重新加载草稿；Session 日志已存在的记录视为已执行。
+
 <a id="client-references"></a>
 ## Client 引用
 
@@ -97,6 +99,7 @@ GUI 模型选择要求确切提供方／模型对出现在可用目录中；不�
 
 | 字段 | 默认值 | 含义 |
 |---|---:|---|
+| `configurationDirectory` | 未设置 | 延迟激活草稿所在目录；未设置时保持立即激活 Agent |
 | `nativeOpen` | 平台探测 | 是否能把 Session 工作区路径交给原生桌面打开器 |
 | `listWorkSliceMs` | `16` | 列表工作时间片，单位为毫秒，取正整数；在完整条目之间检查 |
 

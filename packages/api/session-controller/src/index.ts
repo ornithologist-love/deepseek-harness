@@ -3,7 +3,12 @@
 import { hostname } from 'node:os'
 import { resolve } from 'node:path'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { CommandDescriptor } from '@deepseek-ai/dsh-commands/types'
+import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-fs'
+import type {} from '@deepseek-ai/dsh-permission-presets'
+import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-workspace'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { errorChain, ReasoningEffortId, type MessageSource } from '@deepseek-ai/dsh-llm'
@@ -27,6 +32,7 @@ import { SessionControlController } from './control.ts'
 import { SessionHistoryController } from './history.ts'
 import { SessionFileReferences } from './file-references.ts'
 import { ApiSessionList } from './list.ts'
+import { SessionConfigurations, type SessionConfiguration } from './configuration.ts'
 import { buildModelCatalog, hasProviderApiKey } from './catalog.ts'
 import { installModelSelectionProjection } from './model-selection-projection.ts'
 import { SessionSkillCatalog } from './skill-catalog.ts'
@@ -73,6 +79,9 @@ export { ApiSessionNotFound } from './agent.ts'
 export { SessionFileReferences } from './file-references.ts'
 export { SessionSkillCatalog } from './skill-catalog.ts'
 
+/** Index global telling clients that composer choices are saved without activating an Agent. */
+const DEFERRED_ACTIVATION_KEY = '__DSH_DEFERRED_AGENT__'
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     /** Host Session business API and Remote namespace owner. */
@@ -92,6 +101,8 @@ function addressedSession(request: { readonly address: SessionAddress }): Sessio
 
 /** Session Controller deployment policy. */
 export interface Config {
+  /** Save composer drafts separately and activate Agents only for execution. */
+  readonly configurationDirectory?: string
   /** Override platform desktop-opener detection. */
   readonly nativeOpen?: boolean
   /** Positive integral milliseconds of list work before yielding between complete rows. */
@@ -135,9 +146,11 @@ export class SessionController extends TypertRemoteService {
   static Config: z<Config, ResolvedConfig> = z.object({
     nativeOpen: z.boolean(),
     listWorkSliceMs: z.natural().min(1).default(16),
+    configurationDirectory: z.string(),
   })
 
   private readonly agents: ApiSessionAgentController
+  private readonly configurations: SessionConfigurations | undefined
   private readonly commands: SessionCommandController
   private readonly controlState: SessionControlController
   private readonly history: SessionHistoryController
@@ -159,8 +172,23 @@ export class SessionController extends TypertRemoteService {
     ctx.typert.resources.register('session', { field: 'sessionId' })
     const resolved = SessionController.Config(config)
     installModelSelectionProjection(ctx)
-    this.agents = new ApiSessionAgentController(ctx)
+    this.configurations = config.configurationDirectory === undefined ? undefined
+      : new SessionConfigurations(ctx, config.configurationDirectory, (session, preset) => {
+        const permissions = ctx.get('permissionPresets')
+        if (permissions === undefined) throw new Error('Permission configuration is unavailable')
+        permissions.set(session, preset)
+      })
+    if (this.configurations) ctx.inject(['webServer'], (webCtx) => {
+      webCtx.on('webserver/index-inject', (table) => {
+        table.push({ kind: 'global', name: DEFERRED_ACTIVATION_KEY, value: true })
+      })
+    })
+    this.agents = new ApiSessionAgentController(ctx, this.configurations)
     this.commands = new SessionCommandController(ctx, this.agents, process.cwd())
+    if (this.configurations) ctx.effect(() => ctx.fileUploads.registerSessionValidator(async (sessionId) => {
+      using observation = await this.observe(sessionId)
+      if (observation.header.origin === 'subagent') throw new Error('Subagent conversations do not accept uploads')
+    }), 'session-controller: composer upload validation')
     ctx.effect(() => ctx.fileUploads.registerAgentResolver(async (sessionId) => {
       const result = await this.agents.resolveAgent(sessionId)
       if ('error' in result) throw result.error
@@ -172,7 +200,9 @@ export class SessionController extends TypertRemoteService {
     ctx.effect(() => async () => {
       await Promise.allSettled([...this.promotions])
     }, 'session-controller.promotions')
-    this.history = new SessionHistoryController(ctx, (observation) => { this.promote(observation) })
+    this.history = new SessionHistoryController(ctx,
+      this.configurations ? undefined : (observation) => { this.promote(observation) },
+      this.configurations ? sessionId => this.observe(sessionId) : undefined)
     this.listState = new ApiSessionList(ctx, resolved.listWorkSliceMs)
     this.fileApplications = internals.fileApplications ?? nativeFileApplications
     this.openFileApplication = internals.openFileApplication ?? openNativeFileApplication
@@ -250,7 +280,7 @@ export class SessionController extends TypertRemoteService {
    * @param signal - optional caller cancellation for persistence reads.
    * @returns the current attached state or persisted header and event prefix.
    */
-  inspect(
+  async inspect(
     sessionId: SessionId,
     signal?: AbortSignal,
   ): Promise<SessionInspection> {
@@ -263,7 +293,145 @@ export class SessionController extends TypertRemoteService {
         events: attached.snapshotEvents(),
       })
     }
+    const draft = this.configurations === undefined ? undefined : await this.configurations.observe(sessionId)
+    if (draft) {
+      using owned = draft
+      return { meta: owned.header, inheritedEventCount: owned.inheritedEventCount, events: owned.events }
+    }
     return inspectApiSession(this.ctx, sessionId, signal)
+  }
+
+  /** @param sessionId - Session identity. @param signal - read cancellation. @returns a read-only draft or history cut. */
+  async observe(sessionId: SessionId, signal?: AbortSignal): Promise<SessionObservation> {
+    signal?.throwIfAborted()
+    const draft = this.configurations === undefined ? undefined : await this.configurations.observe(sessionId)
+    if (draft !== undefined) return draft
+    const options = signal === undefined ? {} : { signal }
+    return await this.ctx.sessionQuery.observeSession(sessionId, options)
+  }
+
+  /** @param sessionId - Session identity. @returns saved composer choices and historical metadata, without an Agent. */
+  async configuration(sessionId: SessionId): Promise<SessionConfiguration & { blank: boolean }> {
+    using observation = await this.observe(sessionId)
+    const saved = await this.configurations?.read(sessionId)
+    if (observation.header.cwd === undefined) throw new Error('Session has no workspace')
+    const model = saved?.model ?? observation.projections?.values.modelSelection?.next ?? undefined
+    return { sessionId, cwd: observation.header.cwd, createdAt: observation.header.createdAt,
+      agentPreset: observation.projections?.values.agentPreset ?? observation.header.agentPreset,
+      draft: saved?.draft ?? false, blank: !observation.events.some(event => event.type === 'turn/start'),
+      ...(saved?.permissionPreset ? { permissionPreset: saved.permissionPreset } : {}),
+      ...(model ? { model } : {}) }
+  }
+
+  /**
+   * Discover live-only commands without activating a draft or historical Agent.
+   * @param sessionId - retained Session identity, validated through the cold reader.
+   * @returns scoped descriptors for a live Agent; otherwise only client contributions apply.
+   */
+  @Remote('commandCatalog')
+  async commandCatalog(sessionId: SessionId): Promise<readonly CommandDescriptor[]> {
+    using _observation = await this.observe(sessionId)
+    const agent = this.ctx.agents.get(sessionId)
+    const commands = this.ctx.get('commands')
+    return agent === undefined || commands === undefined ? [] : commands.list(agent)
+  }
+
+  /** @param request - draft identity and next choices; an executed Session starts a separate draft. @returns its identity. */
+  @Remote('configure')
+  async configure(request: SessionCreateRequest): Promise<SessionCreateValue> {
+    const configurations = this.configurations
+    if (configurations === undefined) throw new Error('Deferred Session configuration is not enabled')
+    const id = request.sessionId
+    if (id !== undefined) {
+      const current = await configurations.read(id)
+      if (current?.draft) return configurations.run(id, async () => {
+        const latest = await configurations.read(id)
+        if (!latest?.draft || this.ctx.agents.get(id)) throw new Error('Session execution has already started')
+        const workspace = request.workspaceId === undefined ? undefined : this.ctx.workspaceRegistry.get(request.workspaceId)
+        if (request.workspaceId !== undefined && !workspace) throw new Error('Workspace does not exist')
+        const preset = request.agentPreset ?? latest.agentPreset
+        if (preset) await this.ctx.get('agentPresets')?.resolve(preset)
+        const member = workspace === undefined ? undefined : this.ctx.workspaceRegistry.directoriesOf(workspace.id)[0]
+        await configurations.save({ ...latest, cwd: member ?? request.cwd ?? latest.cwd, agentPreset: preset })
+        if (workspace) for (const other of this.ctx.workspaceRegistry.list()) {
+          if (other.id !== workspace.id) await other.detachSession(id)
+        }
+        if (workspace) await workspace.attachSession(id)
+        return { sessionId: id, ...(preset ? { agentPreset: preset } : {}) }
+      })
+    }
+    const previous = id === undefined ? undefined : await this.configuration(id)
+    const cwd = request.cwd ?? previous?.cwd
+    const preset = request.agentPreset ?? previous?.agentPreset
+    return this.createDraft({ ...(request.workspaceId === undefined ? {} : { workspaceId: request.workspaceId }),
+      ...(cwd === undefined ? {} : { cwd }), ...(preset === undefined ? {} : { agentPreset: preset }) })
+  }
+
+  private async createDraft(request: SessionCreateRequest): Promise<SessionCreateValue> {
+    const configurations = this.configurations
+    if (!configurations) return this.commands.create(request)
+    if (request.workspaceId !== undefined && request.cwd !== undefined) throw new Error('Choose workspaceId or cwd')
+    const workspace = request.workspaceId === undefined ? undefined : this.ctx.workspaceRegistry.get(request.workspaceId)
+    if (request.workspaceId !== undefined && !workspace) throw new Error('Workspace does not exist')
+    const member = workspace === undefined ? undefined : this.ctx.workspaceRegistry.directoriesOf(workspace.id)[0]
+    const cwd = member ?? request.cwd ?? process.cwd()
+    if (request.sessionId !== undefined) {
+      let current: Awaited<ReturnType<SessionController['configuration']>> | undefined
+      try { current = await this.configuration(request.sessionId) }
+      catch (error: unknown) {
+        if (!(error instanceof SessionQueryError) || error.code !== 'SESSION_QUERY_SESSION_NOT_FOUND') throw error
+      }
+      if (current !== undefined) {
+        if (current.cwd !== cwd) throw new Error('Session belongs to another workspace')
+        const reusable = current.blank && !this.ctx.workspaceRegistry.archivedSessionIds.includes(request.sessionId)
+          && (workspace === undefined || workspace.sessionIds.includes(request.sessionId))
+        if (reusable && current.draft) return this.configure(request)
+        // Reusing an executing Agent is the upstream command controller's responsibility.
+        // Deferred choices create a separate draft when the old log has already started.
+        if (reusable && request.agentPreset === undefined) {
+          return { sessionId: current.sessionId, ...(current.agentPreset ? { agentPreset: current.agentPreset } : {}) }
+        }
+      }
+    }
+    const { SessionId } = await import('@deepseek-ai/dsh-session')
+    const { randomUUID } = await import('node:crypto')
+    const id = SessionId('session-' + randomUUID())
+    const presets = this.ctx.get('agentPresets')
+    const preset = presets ? (await presets.resolve(request.agentPreset)).id : request.agentPreset
+    await configurations.run(id, async () => {
+      await configurations.save({ sessionId: id, cwd, ...(preset ? { agentPreset: preset } : {}), createdAt: Date.now(), draft: true })
+      if (workspace) await workspace.attachSession(id)
+    })
+    return { sessionId: id, ...(preset ? { agentPreset: preset } : {}) }
+  }
+
+  /** @param request - model choices. @returns normalized staged selection without activation. */
+  private async stageModel(configurations: SessionConfigurations, request: SessionSelectModelRequest): Promise<SessionSelectModelValue> {
+    return configurations.run(request.sessionId, async () => {
+      const current = await this.configuration(request.sessionId)
+      const resolved = await this.ctx.llm.resolveCallConfig({ provider: request.provider, model: request.model,
+        ...(request.reasoningEffort ? { reasoningEffort: ReasoningEffortId(request.reasoningEffort) } : {}) })
+      const selected = { provider: resolved.provider, model: resolved.model,
+        ...(resolved.reasoningEffort ? { reasoningEffort: resolved.reasoningEffort } : {}) }
+      const { blank: _blank, ...record } = current
+      await configurations.save({ ...record, model: selected })
+      return { selected }
+    })
+  }
+
+  /** @param request - pending permission preset. @returns after saving choices, without activating an Agent. */
+  @Remote('selectPermission')
+  async selectPermission(request: { readonly sessionId: SessionId; readonly preset: string }): Promise<{ accepted: true }> {
+    const configurations = this.configurations
+    if (configurations === undefined) throw new Error('Deferred Session configuration is not enabled')
+    return configurations.run(request.sessionId, async () => {
+      const { blank: _blank, ...record } = await this.configuration(request.sessionId)
+      // Validate on an unpublished copy, never mutate the executing Session.
+      const temporary = this.ctx.sessions.prepare(undefined, { meta: { cwd: record.cwd } })
+      configurations.applyPermission(temporary, request.preset)
+      await configurations.save({ ...record, permissionPreset: request.preset })
+      return { accepted: true }
+    })
   }
 
   /**
@@ -274,8 +442,14 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('list')
   async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue> {
-    const items = await this.listState.list(signal)
-    return { items: items.filter(item => this.ctx.remoteAccess.allows({ kind: 'session', id: item.sessionId })) }
+    const configurations = this.configurations
+    const [persisted, drafts] = await Promise.all([this.listState.list(signal), configurations?.list() ?? []])
+    const ids = new Set(persisted.map(item => item.sessionId))
+    const decorated = configurations === undefined ? persisted
+      : await Promise.all(persisted.map(item => configurations.decorate(item)))
+    const items = [...decorated, ...drafts.filter(item => !ids.has(item.sessionId))]
+      .filter(item => this.ctx.remoteAccess.allows({ kind: 'session', id: item.sessionId }))
+    return { items: items.sort((left, right) => right.updatedAt - left.updatedAt) }
   }
 
   /**
@@ -299,17 +473,17 @@ export class SessionController extends TypertRemoteService {
    */
   @Remote('create')
   create(request: SessionCreateRequest): Promise<SessionCreateValue> {
-    return this.commands.create(request)
+    return this.createDraft(request)
   }
 
   /**
-   * Select one Session-local model after explicitly resuming the Session; save the default in the background.
+   * Stage model choices in deferred mode; otherwise update the live Session and its default.
    * @param request - Session identity and requested model selection.
    * @returns the normalized selection installed for the Session, without waiting for default persistence.
    */
   @Remote('selectModel')
   selectModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue> {
-    return this.commands.selectModel(request)
+    return this.configurations ? this.stageModel(this.configurations, request) : this.commands.selectModel(request)
   }
 
   /**
@@ -551,6 +725,13 @@ export class SessionController extends TypertRemoteService {
       throw new RemoteError('gateway/bad-request', 'sessionId must not be empty', {})
     }
     try {
+      signal.throwIfAborted()
+      // Only deferred hosts pay for the draft lookup; others keep the synchronous live read.
+      const draft = this.configurations === undefined ? undefined : await this.configurations.observe(sessionId)
+      if (draft !== undefined) {
+        using observation = draft
+        return { kind: 'sequenced', asOfSeq: observation.cursor, values: { ...observation.projections?.values } as SessionProjectionValues }
+      }
       signal.throwIfAborted()
       const live = this.liveProjections(sessionId)
       if (live !== undefined) return live
