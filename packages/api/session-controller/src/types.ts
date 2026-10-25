@@ -141,6 +141,11 @@ export interface ModelCatalogModel {
   readonly reasoning?: ModelReasoning
   /** Whether the catalog recommends this model; the model menu can then list only recommended models. */
   readonly recommended?: boolean
+  /**
+   * Display facts a deployment attaches to this model (for example through the
+   * session command policy's catalog hook); selection and validation ignore them.
+   */
+  readonly metadata?: Readonly<Record<string, JsonValue>>
 }
 
 /** One provider and its successfully loaded model catalog. */

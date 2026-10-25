@@ -405,6 +405,14 @@ describe('Web session model selection', () => {
     await ctx.fiber.dispose()
   })
 
+  it('attaches no display metadata of its own to a catalog model', async () => {
+    const { ctx } = await harness()
+    const catalog = await buildModelCatalog(ctx, { provider: 'deepseek-official', model: 'deepseek-chat' })
+
+    expect(catalog.groups.flatMap(group => group.models.map(model => model.metadata)))
+      .toEqual([undefined, undefined])
+  })
+
   it('groups successful providers and leaves an unlisted current selection out of the catalog', async () => {
     const { ctx, sessionId } = await harness({
       provider: 'deepseek-official',
