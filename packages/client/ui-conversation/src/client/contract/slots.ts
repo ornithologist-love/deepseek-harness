@@ -283,6 +283,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     'conversation.composer': { kind: 'chain'; scope: 'session'; owner: ComposerChainProps }
     /** Workspace picker shown by the blank-session Hero. */
     'conversation.hero.workspace': { kind: 'single'; scope: 'root'; owner: EmptyWorkspaceOwnerProps }
+    /** Icon leading the blank-session Workspace chip; empty keeps the folder icon. */
+    'conversation.hero.workspace.icon': { kind: 'single'; scope: 'root'; owner: HeroWorkspaceIconOwnerProps }
     /** Brand mark shown before the blank-session headline. */
     'conversation.hero.brand.mark': { kind: 'single'; scope: 'root'; owner: HeroBrandMarkOwnerProps }
     /** Agent-preset control staged for a New Session. */
@@ -320,6 +322,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * docked composer contains them.
      */
     'conversation.input.activity': { kind: 'single'; scope: 'session'; owner: InputActivityOwnerProps }
+    /** Layout of the composer tool row; empty keeps the default two-group row. */
+    'conversation.input.controls': { kind: 'single'; scope: 'session-maybe'; owner: InputControlsOwnerProps }
     /**
      * Resident composer body, including the no-Session inert state; fixed overlays must portal to
      * the document body because the docked composer contains them.
@@ -365,6 +369,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
         'conversation.input.dock': { kind: 'list'; scope: 'session' }
         'conversation.hero.brand.mark': { kind: 'single'; scope: 'root' }
         'conversation.hero.workspace': { kind: 'single'; scope: 'root' }
+        'conversation.hero.workspace.icon': { kind: 'single'; scope: 'root' }
         'conversation.hero.agentPreset': { kind: 'single'; scope: 'session-maybe' }
         'conversation.hero.options': { kind: 'list'; scope: 'session' }
       }
@@ -458,6 +463,10 @@ export type ConvViewProps = PropsRuntime<'conversation.view'>
 
 /** Business callbacks injected into the resident Conversation shell. */
 export interface ConversationInjected {
+  /** Show the built-in hero headline and preview badge. */
+  showHeroText: boolean
+  /** Workspace chip label for a Session outside every registered Workspace; absent shows the placeholder. */
+  unboundWorkspaceLabel?: string | undefined
   /** Connect and open a blank Session in the selected Workspace. */
   selectWorkspace: (workspaceId: WorkspaceId) => Promise<void>
   /** Session-addressed composer block source, or the stable absent source. */
@@ -565,6 +574,8 @@ export interface ComposerBarInjected {
   retryFileUpload: ((id: DraftAttachmentId) => void) | undefined
   toggleCommandMenu: ((selection: EditSelection) => void) | undefined
   stop: (() => void) | undefined
+  /** Run the human `/compact` command for this Session; absent without a session. */
+  compact: (() => void) | undefined
   hooks: {
     /** Readable sequence while the fixed Stop command is registered. */
     stopShortcut: ObservableSnapshot<readonly string[]>
@@ -593,11 +604,43 @@ export interface InputActivityOwnerProps extends InputControlOwnerProps {
   onActiveChange: (active: boolean) => void
 }
 
+/**
+ * The composer tool-row controls, already rendered by the composer bar, for an
+ * occupant that arranges them. A control the bar does not show is `null`.
+ */
+export interface InputControlsOwnerProps {
+  /** Command-menu button. */
+  commands: ReactNode
+  /** Hidden draft file input that the command menu's file entry opens. */
+  fileInput: ReactNode
+  /** `conversation.input.permission` occupant. */
+  permission: ReactNode
+  /** `conversation.input.plan` occupant. */
+  plan: ReactNode
+  /** `conversation.input.left` entries. */
+  left: ReactNode
+  /** `conversation.input.right` entries. */
+  right: ReactNode
+  /** `conversation.input.model` occupant. */
+  model: ReactNode
+  /** `conversation.input.activity` occupant in its width-tracking wrapper. */
+  activity: ReactNode
+  /**
+   * Context-occupancy meter. The bar shows it under the card unless an
+   * occupant mounts this node, which moves the meter into the control row.
+   */
+  meter: ReactNode
+  /** Stop and submit buttons. */
+  submit: ReactNode
+  /** Whether the activity occupant claims the row; the default row then hides the other controls. */
+  expanded: boolean
+}
+
 /** Full props of the resident composer bar. */
 export type ComposerBarProps =
   PropsRuntime<'conversation.composer.bar'>
   & PropsRenderSlots<
-    | 'conversation.input.attachments' | 'conversation.input.overlay'
+    | 'conversation.input.attachments' | 'conversation.input.overlay' | 'conversation.input.controls'
     | 'conversation.input.permission'
     | 'conversation.input.left' | 'conversation.input.plan'
     | 'conversation.input.right' | 'conversation.input.model' | 'conversation.input.activity'
@@ -689,6 +732,14 @@ export type ComposerAttachmentsProps =
   PropsRuntime<'conversation.input.attachments'> & PropsLocale<'conversation'>
 
 /** Owner share common to blank-session Workspace pickers. */
+/** Workspace the blank-session chip names, offered to its icon. */
+export interface HeroWorkspaceIconOwnerProps {
+  /** Selected or pending Workspace; absent when the chip shows no registered Workspace. */
+  selectedId?: WorkspaceId | undefined
+  /** Whether the chip shows a label rather than the Choose workspace placeholder. */
+  hasLabel: boolean
+}
+
 export interface EmptyWorkspaceOwnerProps {
   open: boolean
   anchorRef?: RefObject<HTMLElement>

@@ -11,6 +11,7 @@ import type { SessionBinding } from '@deepseek-ai/dsh-api-session-controller/cli
 import type { InboxState } from '@deepseek-ai/dsh-agent/types'
 import type { ObservableSnapshot, SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ArbitrateKey, ArbitrateOutcome, DraftQuote, Occurrence, ReferenceInsert, TokenSpan } from './draft-editor.ts'
 import type { InputSubmitMode, MessageSubmission } from './composer-submission.ts'
 
@@ -230,7 +231,19 @@ export interface SessionInputResolver {
    * @throws when binding is not the currently retained Session generation.
    */
   requestDraftInitialization(binding: SessionBinding, options: DraftInitializationOptions): DraftInitializationResult
+  /**
+   * Register work the composer's default send awaits before it sends a prompt
+   * with text or attachments. Callbacks run one at a time in registration
+   * order; a rejection, or an abort of the submission signal, cancels the send,
+   * and the composer restores the draft and shows the rejection message.
+   * @param callback - work for the addressed Session under the submission's signal.
+   * @returns disposer that removes the callback.
+   */
+  registerBeforeSend(callback: BeforeSend): () => void
 }
+
+/** Work awaited before a composer prompt is sent; rejection cancels the send. */
+export type BeforeSend = (sessionId: SessionId, signal: AbortSignal) => void | Promise<void>
 
 /** Initial text for a target Session; attachments remain under their existing owner. */
 export interface DraftInitializationOptions {

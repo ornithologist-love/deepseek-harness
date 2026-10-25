@@ -18,7 +18,7 @@ import type { ModelSelectionProjection } from '@deepseek-ai/dsh-agent/types'
 import type { ObservableSnapshot } from '@deepseek-ai/dsh-client-store'
 import type {
   DraftAttachmentId, DraftAttachmentSerializationResult, DraftInitializationOptions, DraftInitializationResult, InputTriggerController,
-  SessionInputResolver, SessionInput, SubmitOutcome,
+  SessionInputResolver, SessionInput, SubmitOutcome, BeforeSend,
 } from '../contract/input.ts'
 import type { ComposerKeyboard } from '../contract/draft-editor.ts'
 import type { ComposerBlocks } from '../contract/composer-blocks.ts'
@@ -57,6 +57,7 @@ interface ConversationAttachmentFace {
 /** Session-addressed input facade registry (SessionInputResolver face + composer-layer extras). */
 export class InputHub implements SessionInputResolver {
   private readonly shells = new WeakMap<SessionBinding, SessionInputShell>()
+  private readonly beforeSend = new Set<{ readonly callback: BeforeSend }>()
 
   /**
    * @param ctx - client root context (services resolved lazily per call — boot order stays free).
@@ -87,6 +88,12 @@ export class InputHub implements SessionInputResolver {
       throw new Error('conversation.input.requestDraftInitialization requires a retained Session binding')
     }
     return this.shellFor(binding).requestDraftInitialization(options)
+  }
+
+  registerBeforeSend(callback: BeforeSend): () => void {
+    const entry = { callback }
+    this.beforeSend.add(entry)
+    return () => { this.beforeSend.delete(entry) }
   }
 
   /**
@@ -238,12 +245,12 @@ export class InputHub implements SessionInputResolver {
   }
 
   /**
-   * Default sink: prompt while the composer holds the sent draft. The session
-   * is always a real host entity (materialized when its workspace was picked),
-   * so there is exactly one path; a refused or failed prompt is an ordinary
-   * prompt failure (banner via promptError, draft kept in the composer).
+   * Default sink: registered before-send work, then prompt while the composer holds the sent draft.
+   * The session is always a real host entity (materialized when its workspace was picked), so there is
+   * exactly one path; a refused or failed prompt is an ordinary prompt failure (banner via
+   * promptError, draft kept in the composer).
    */
-  private sink(
+  private async sink(
     session: SessionFace,
     text: string,
     attachmentIds: readonly DraftAttachmentId[],
@@ -251,7 +258,11 @@ export class InputHub implements SessionInputResolver {
     signal: AbortSignal,
     accept: () => void,
   ): Promise<SubmitOutcome> {
-    if (text === '' && attachmentIds.length === 0) return Promise.resolve({ kind: 'success' })
+    if (text === '' && attachmentIds.length === 0) return { kind: 'success' }
+    for (const { callback } of [...this.beforeSend]) {
+      await callback(session.sessionId, signal)
+      signal.throwIfAborted()
+    }
     return this.conversation().sendSession(session, text, attachmentIds, mode, signal, accept)
   }
 

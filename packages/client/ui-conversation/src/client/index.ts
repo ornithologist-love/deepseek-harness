@@ -21,7 +21,7 @@ export interface UserTextFacts {
 }
 
 export type {
-  UserTextDocumentInput, UserTextEvaluator, UserTextId, UserTextNode, UserTextRule, UserTextTransformContext,
+  UserTextDocumentInput, UserTextEdit, UserTextEvaluator, UserTextId, UserTextNode, UserTextRule, UserTextTransformContext,
 } from './contract/user-text.ts'
 export type { UserTextRegistry } from './conversation/user-text-registry.ts'
 export { apply, Config, inject } from './apply.ts'
@@ -98,7 +98,7 @@ export type {
   UseConversationViews,
 } from './contract/slots.ts'
 export type {
-  BeginCommandRequest, CommandClaim, ConsumeTokenRequest, DraftAttachmentId, DraftInitializationOptions,
+  BeforeSend, BeginCommandRequest, CommandClaim, ConsumeTokenRequest, DraftAttachmentId, DraftInitializationOptions,
   DraftInitializationResult, InputActions,
   InputState, InsertReferenceRequest, InsertTextRequest, PickOutcome, SessionInput,
   SessionInputResolver, SubmitAttachment, SubmitOutcome,

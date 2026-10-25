@@ -140,6 +140,10 @@ function mount(
     nestedSubagent?: boolean
     /** A composer block another plugin raised for this session. */
     composerBlock?: { reason: string }
+    /** Occupant of the Workspace chip icon slot; absent renders the slot fallback. */
+    workspaceIcon?: ReactNode
+    /** Deployment presentation the Conversation registration injects. */
+    presentation?: { showHeroText?: boolean; unboundWorkspaceLabel?: string }
     /** Mutable view ledger used by registration-order regressions. */
     viewTabs?: ViewTab[]
     /** Persisted ids of unpinned View tabs. */
@@ -212,6 +216,10 @@ function mount(
     if (key === 'conversation.session.header.views.actions') {
       actionsOwner = owner as ConversationViewActionsOwnerProps
       return <button type="button" role="menuitem" onClick={actionsOwner.onDismiss}>Header view action</button>
+    }
+    if (key === 'conversation.hero.workspace.icon') {
+      seatOwners.push({ key, owner })
+      return options.workspaceIcon ?? opts?.fallback ?? null
     }
     if (key === 'conversation.session.header.lineage') {
       lineageOwners.push(owner as ConversationHeaderLineageOwnerProps)
@@ -316,11 +324,11 @@ function mount(
           useMenuLauncher={bindSnapshotSelector(createSnapshotStore<string | null>(null))}
           stop={stop}
           t={t}
-          renderSlot={((key: string, seatOwner: object) => {
+          renderSlot={((key: string, seatOwner: object, seatOpts?: { fallback?: ReactNode }) => {
             // The bar's own seats: recorded so a case can assert what share
             // each tool-row control received.
             seatOwners.push({ key, owner: seatOwner })
-            return null
+            return seatOpts?.fallback ?? null
           }) as InputBarProps['renderSlot']}
           {...bar}
         />
@@ -368,6 +376,8 @@ function mount(
       renderSlotChain,
       renderFactorySlot,
       selectWorkspace: retargetWorkspace,
+      showHeroText: options.presentation?.showHeroText ?? true,
+      unboundWorkspaceLabel: options.presentation?.unboundWorkspaceLabel,
       t,
     }
     const useFactorySlot = ((name: string, fallback: (props: never) => ReactNode) => (
@@ -413,7 +423,7 @@ function mount(
 describe('Hero chrome', () => {
   it('renders the English preview badge through the hero locale seat', () => {
     const renderSlot = vi.fn<HeroShellProps['renderSlot']>(() => null)
-    const view = render(<HeroShell t={makeTranslate(en, commonEn)} renderSlot={renderSlot} />)
+    const view = render(<HeroShell t={makeTranslate(en, commonEn)} renderSlot={renderSlot} showHeroText />)
     expect(view.getByText('Into the Unknown')).toBeTruthy()
     expect(view.getByText('Preview')).toBeTruthy()
     expect(renderSlot).toHaveBeenCalledOnce()
@@ -878,6 +888,33 @@ describe('ConversationRoot resident composer', () => {
     expect(selectWorkspace).toHaveBeenCalledWith(wid('second'))
     expect(b.view.queryByText('Selected Folder')).toBeNull()
     expect(b.view.getByText('one')).toBeTruthy()
+  })
+
+  it('hides the hero headline and badge when the deployment turns hero text off, keeping the brand mark', () => {
+    const b = mount(sessionSnapshotOf({ blank: true }), undefined, undefined, { presentation: { showHeroText: false } })
+    expect(b.view.queryByText('探索未至之境')).toBeNull()
+    expect(b.slotCalls).toContain('conversation.hero.brand.mark')
+  })
+
+  it('labels a Session outside every registered Workspace with the deployment label once the list is ready', () => {
+    const unbound = mount(sessionSnapshotOf({ blank: true }), [], undefined, { presentation: { unboundWorkspaceLabel: 'Scratch' } })
+    expect(unbound.view.getByText('Scratch')).toBeTruthy()
+    cleanup()
+    const placeholder = mount(sessionSnapshotOf({ blank: true }), [])
+    expect(placeholder.view.queryByText('Scratch')).toBeNull()
+  })
+
+  it('offers the chip Workspace to its icon slot and keeps the folder icons without an occupant', () => {
+    const named = mount(sessionSnapshotOf({ blank: true }))
+    expect(named.seatOwners).toContainEqual({ key: 'conversation.hero.workspace.icon', owner: { selectedId: wid('one'), hasLabel: true } })
+    const chip = named.view.getByRole('button', { name: '选择工作区' })
+    expect(chip.querySelectorAll('svg')).toHaveLength(2)
+    cleanup()
+    const placeholder = mount(sessionSnapshotOf({ blank: true }), [])
+    expect(placeholder.seatOwners).toContainEqual({ key: 'conversation.hero.workspace.icon', owner: { selectedId: undefined, hasLabel: false } })
+    cleanup()
+    const custom = mount(sessionSnapshotOf({ blank: true }), undefined, undefined, { workspaceIcon: <img alt="Workspace image" /> })
+    expect(within(custom.view.getByRole('button', { name: '选择工作区' })).getByRole('img', { name: 'Workspace image' })).toBeTruthy()
   })
 
   it('blank session keeps the interactive picker chip (workspace switchable until the first message)', () => {

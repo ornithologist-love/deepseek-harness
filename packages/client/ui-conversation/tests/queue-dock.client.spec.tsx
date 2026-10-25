@@ -131,6 +131,7 @@ function kitFor(snapshot: SessionSnapshot, injected: Partial<QueueDockInjected> 
     updateQueue: vi.fn(() => Promise.resolve()),
     notify: vi.fn(),
     loadImage: vi.fn(() => Promise.resolve('blob:unused')),
+    prepareEdit: () => undefined,
     ...injected,
   }
 }
@@ -473,6 +474,25 @@ describe('QueueDock', () => {
     expect(view.getByRole('listitem').textContent).toBe(`before ${'🙂'.repeat(201)} after`)
     fireEvent.click(view.getByLabelText('编辑排队消息'))
     expect((view.getByRole('textbox') as HTMLTextAreaElement).value).toBe(text)
+  })
+
+  it('edits the projected text of a queued message and saves its restored form', async () => {
+    const snap = snapshotWith([row('i-tail', 'visible[hidden]')])
+    const source = liveSession(snap)
+    const updateQueue = vi.fn(() => Promise.resolve())
+    const prepareEdit = vi.fn((text: string) => ({ text: text.replace('[hidden]', ''), restore: (edited: string) => `${edited}[hidden]` }))
+    const { getByLabelText } = render(
+      <QueueDock {...kitFor(snap, { updateQueue, prepareEdit })} useSession={source.useSession} useProjection={source.useProjection} />,
+    )
+    fireEvent.click(getByLabelText('编辑排队消息'))
+    const editor = getByLabelText('编辑排队消息') as HTMLTextAreaElement
+    expect(prepareEdit).toHaveBeenCalledWith('visible[hidden]')
+    expect(editor.value).toBe('visible')
+    fireEvent.change(editor, { target: { value: 'changed' } })
+    fireEvent.keyDown(editor, { key: 'Enter' })
+    await waitFor(() => {
+      expect(updateQueue).toHaveBeenCalledWith(iid('i-tail'), { kind: 'edit', content: [{ type: 'text', text: 'changed[hidden]' }] })
+    })
   })
 
   it('keeps line breaks while re-editing a multiline queued message', async () => {

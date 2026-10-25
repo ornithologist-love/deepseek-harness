@@ -23,7 +23,7 @@ export function ConversationContent(props: ConversationContentProps) {
   const {
     sessionId, phase, hero, useSession, useSessions, useSessionStatus,
     useWorkspaces, useInput, useComposerBlock, renderSlot, renderSlotChain,
-    selectWorkspace, t, useFactorySlot,
+    selectWorkspace, t, useFactorySlot, showHeroText, unboundWorkspaceLabel,
   } = props
   const session = useSession(snapshot => snapshot)
   const Views = useFactorySlot('views', ConversationSessionView)
@@ -93,16 +93,17 @@ export function ConversationContent(props: ConversationContentProps) {
   //   4. list still loading → cwd folder name bridges so the title does not
   //      flash on refresh (empty cwd → placeholder);
   //   5. list ready but no owning workspace (deleted from the sidebar) →
-  //      placeholder, never the deleted folder's name via cwd.
+  //      the deployment's unbound label or the placeholder, never the
+  //      deleted folder's name via cwd.
   // A title still automatic reads in the reader's language, matching the
   // sidebar row the same Workspace has there.
   const storedChipTitle = pendingWorkspace?.title
     ?? (sessionId === undefined
       ? undefined
       : sessionWorkspace?.title
-        ?? (workspaces.phase === 'ready' || cwd === undefined || cwd === ''
-          ? undefined
-          : workspaceLabel(cwd)))
+        ?? (workspaces.phase === 'ready'
+          ? unboundWorkspaceLabel
+          : cwd === undefined || cwd === '' ? undefined : workspaceLabel(cwd)))
   const chipTitle = storedChipTitle === undefined
     ? undefined
     : workspaceDisplayTitle(storedChipTitle, t('workspace.defaultName'))
@@ -112,6 +113,8 @@ export function ConversationContent(props: ConversationContentProps) {
       <WorkspaceChip
         buttonRef={pickerAnchor}
         label={chipTitle}
+        selectedId={pendingWorkspaceId ?? sessionWorkspace?.workspaceId}
+        renderSlot={renderSlot}
         menuOpen={pickerOpen}
         onClick={() => { setPickerOpen(open => !open) }}
         t={t}
@@ -163,7 +166,7 @@ export function ConversationContent(props: ConversationContentProps) {
 
   const composerBar = (
     <div className={clsx(css.composerStack, hero && css.composerHero)}>
-      {hero && <HeroShell t={t} renderSlot={renderSlot} />}
+      {hero && <HeroShell t={t} renderSlot={renderSlot} showHeroText={showHeroText} />}
       {hero && heroWorkspaceRow}
       {zone !== undefined && renderSlot('conversation.input.dock', zone)}
       {inputBar}

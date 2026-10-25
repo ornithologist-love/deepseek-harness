@@ -72,6 +72,9 @@ export const zh = {
   'context.system': '系统提示词',
   'context.tools': '工具定义',
   'context.messages': '对话消息',
+  'context.compact.hint': '较早对话会自动压缩为摘要，也可手动释放空间',
+  'context.compact.action': '立即压缩',
+  'context.compact.busy': '智能体空闲时才能压缩',
   'settings.enter.title': '繁忙时的发送行为',
   'settings.enter.description': '智能体运行时 Enter 键和发送按钮的行为；Cmd/Ctrl+Enter 使用另一行为',
   'settings.enter.queue': '排队发送',
@@ -462,6 +465,9 @@ export const en = {
   'context.system': 'System prompt',
   'context.tools': 'Tool definitions',
   'context.messages': 'Messages',
+  'context.compact.hint': 'Older turns compact automatically; free space now if needed',
+  'context.compact.action': 'Compact now',
+  'context.compact.busy': 'Compaction runs only while the agent is idle',
   'settings.enter.title': 'Send behavior while busy',
   'settings.enter.description': 'What Enter and the Send button do while the agent is running; Cmd/Ctrl+Enter uses the other behavior',
   'settings.enter.queue': 'Queue',
@@ -1171,6 +1177,9 @@ export const ja = {
   'terminal.expandRest': '… 残り{n}行',
   'terminal.sendInput': '(入力を送信)',
   'terminal.session': 'ターミナル {sessionId}',
+  'context.compact.hint': '古いターンは自動的に要約されます。必要なら今すぐ空き容量を確保できます',
+  'context.compact.action': '今すぐ圧縮',
+  'context.compact.busy': '圧縮はエージェントが待機中のときのみ実行できます',
 } satisfies Record<keyof typeof en, string>
 
 /** Spanish dictionary, checked against the English keys. */
@@ -1560,6 +1569,9 @@ export const es = {
   'detail.schedule.active': 'Habilitado',
   'detail.schedule.paused': 'Pausada',
   'detail.schedule.ended': 'Finalizada',
+  'context.compact.hint': 'Los turnos antiguos se compactan automáticamente; libera espacio ahora si lo necesitas',
+  'context.compact.action': 'Compactar ahora',
+  'context.compact.busy': 'La compactación solo se ejecuta mientras el agente está inactivo',
 } satisfies Record<keyof typeof en, string>
 
 /** French dictionary, checked against the English keys. */
@@ -1949,6 +1961,9 @@ export const fr = {
   'detail.schedule.active': 'Activé',
   'detail.schedule.paused': 'Suspendue',
   'detail.schedule.ended': 'Terminée',
+  'context.compact.hint': 'Les anciens tours sont compactés automatiquement ; libérez de l\'espace maintenant si besoin',
+  'context.compact.action': 'Compacter maintenant',
+  'context.compact.busy': 'La compaction ne s\'exécute que lorsque l\'agent est inactif',
 } satisfies Record<keyof typeof en, string>
 
 /** German dictionary, checked against the English keys. */
@@ -2338,6 +2353,9 @@ export const de = {
   'detail.schedule.active': 'Aktiviert',
   'detail.schedule.paused': 'Pausiert',
   'detail.schedule.ended': 'Beendet',
+  'context.compact.hint': 'Ältere Runden werden automatisch komprimiert; bei Bedarf jetzt Platz freigeben',
+  'context.compact.action': 'Jetzt komprimieren',
+  'context.compact.busy': 'Komprimierung läuft nur, wenn der Agent inaktiv ist',
 } satisfies Record<keyof typeof en, string>
 
 /** Russian dictionary, checked against the English keys. */
@@ -2727,6 +2745,9 @@ export const ru = {
   'detail.schedule.active': 'Включено',
   'detail.schedule.paused': 'Приостановлена',
   'detail.schedule.ended': 'Завершена',
+  'context.compact.hint': 'Старые ходы сжимаются автоматически; при необходимости освободите место сейчас',
+  'context.compact.action': 'Сжать сейчас',
+  'context.compact.busy': 'Сжатие выполняется только когда агент простаивает',
 } satisfies Record<keyof typeof en, string>
 
 /** Portuguese dictionary, checked against the English keys. */
@@ -3116,4 +3137,7 @@ export const pt = {
   'detail.schedule.active': 'Habilitado',
   'detail.schedule.paused': 'Pausada',
   'detail.schedule.ended': 'Concluída',
+  'context.compact.hint': 'Turnos antigos são compactados automaticamente; libere espaço agora se precisar',
+  'context.compact.action': 'Compactar agora',
+  'context.compact.busy': 'A compactação só é executada enquanto o agente está ocioso',
 } satisfies Record<keyof typeof en, string>
