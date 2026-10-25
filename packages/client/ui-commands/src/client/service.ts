@@ -75,7 +75,7 @@ interface LiveState {
 
 /** Command surface: session-keyed directory + '/' source + contribution registry + per-session popups. */
 export class CommandUiRuntime extends Service implements CommandUiContract {
-  static inject = ['inputTriggers', 'sessions', 'remote', 'remote.commands']
+  static inject = ['inputTriggers', 'sessions', 'remote', 'remote.commands', 'remote.session']
 
   private readonly directory: CommandDirectory
   private readonly live: LiveState = {

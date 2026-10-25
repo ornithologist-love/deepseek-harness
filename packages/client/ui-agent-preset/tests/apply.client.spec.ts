@@ -171,6 +171,7 @@ async function bench(options: {
   }
   ctx.provide('remote.agentPresets', agentPresets as never)
   Object.assign(remote, { agentPresets })
+  remote.provideNamespaces({ session: {} })
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()
   if (options.describeGate === undefined) {
     await vi.waitFor(() => {
@@ -378,7 +379,7 @@ describe('ui-agent-preset apply', () => {
 
   it('declares the services it uses', () => {
     expect(inject).toEqual([
-      'slots', 'sessions', 'locale', 'remote', 'remote.agentPresets', 'remote.settings', 'configForms',
+      'slots', 'sessions', 'locale', 'remote', 'remote.agentPresets', 'remote.session', 'remote.settings', 'configForms',
     ])
   })
 

@@ -156,7 +156,7 @@ async function bench(options: { options?: Record<string, unknown> } = {}) {
       subscribe: () => () => {},
     },
   })
-  Object.assign(remote, {
+  remote.provideNamespaces({
     session: {
       selectPermission: (request: { sessionId: SessionId; preset: string }) => {
         staged.push(request)

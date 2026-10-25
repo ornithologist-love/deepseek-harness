@@ -68,7 +68,7 @@ export type { Config } from '../agent-preset-options.ts'
 
 /** Required services (cordis fiber inject). */
 export const inject = [
-  'slots', 'sessions', 'locale', 'remote', 'remote.agentPresets', 'remote.settings', 'configForms',
+  'slots', 'sessions', 'locale', 'remote', 'remote.agentPresets', 'remote.session', 'remote.settings', 'configForms',
 ]
 
 /**

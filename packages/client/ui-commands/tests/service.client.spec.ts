@@ -136,7 +136,7 @@ async function bench(opts: BenchOptions = {}) {
   if (opts.addressed !== undefined) mint(opts.addressed)
   const remote = Object.assign(new TestRemote(ctx), { commands: commandsRemote })
   const catalogCalls: SessionId[] = []
-  Object.assign(remote, {
+  remote.provideNamespaces({
     session: {
       commandCatalog: async (sessionId: SessionId) => {
         catalogCalls.push(sessionId)

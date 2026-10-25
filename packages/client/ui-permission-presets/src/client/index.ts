@@ -69,7 +69,7 @@ export type { PermissionAcknowledgement } from './acknowledgement.ts'
 /** Required services (cordis fiber inject). */
 export const inject = [
   'commandUi', 'connection', 'sessions', 'slots', 'locale', 'remote',
-  'remote.permissionPresets', 'remote.settings',
+  'remote.permissionPresets', 'remote.session', 'remote.settings',
   'configForms', 'settingsSchema',
 ]
 
