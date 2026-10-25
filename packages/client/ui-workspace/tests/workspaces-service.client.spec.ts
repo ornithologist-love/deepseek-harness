@@ -19,7 +19,8 @@ import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import type { DraftInitializationOptions, SessionInputResolver } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { RowToast } from '../src/client/contract/slots.ts'
-import { DirectoryBrowseError, UiWorkspaceService } from '../src/client/navigation.ts'
+import { DirectoryBrowseError, UiWorkspaceService, type WorkspaceStartup } from '../src/client/navigation.ts'
+import { DEFAULT_WORKSPACE_PRESENTATION, type WorkspacePresentationSnapshot } from '../src/client/presentation.ts'
 import { en, zh } from '../src/client/locales.ts'
 import { createWorkspaceViewStore, FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
@@ -276,6 +277,8 @@ interface BenchOptions {
   readonly workspaces?: WorkspaceSnapshot
   readonly sessions?: SessionListState
   readonly configureSessions?: (sessions: FakeSessions) => void
+  readonly presentation?: WorkspacePresentationSnapshot
+  readonly startup?: WorkspaceStartup
 }
 
 function bench(options: BenchOptions = {}) {
@@ -309,6 +312,8 @@ function bench(options: BenchOptions = {}) {
     sessions,
     view.actions,
     notify,
+    () => options.presentation ?? DEFAULT_WORKSPACE_PRESENTATION,
+    options.startup ?? { restoreOnStartup: true },
   )
   return { ctx, directoryPicker, sessions, uiWorkspace, workspaces, layout, selectPanel, view, notify, requestDraftInitialization }
 }
@@ -1508,6 +1513,97 @@ describe('UiWorkspaceService', () => {
     })
     await expect(b.uiWorkspace.createDirectory('/home/u', 'new')).rejects.toMatchObject({
       rpcError: { code: 'directory-picker/exists' },
+    })
+  })
+})
+
+describe('UiWorkspaceService deployment presentation and startup', () => {
+  /** One macrotask drains every pending microtask. */
+  const settled = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 0) })
+  const fresh = { ...DEFAULT_WORKSPACE_PRESENTATION, newSession: 'fresh' as const }
+
+  it('creates one Session for concurrent fresh New Session requests and opens it', async () => {
+    const created = Promise.withResolvers<SessionId>()
+    const b = bench({
+      presentation: fresh,
+      startup: { restoreOnStartup: false },
+      workspaces: workspaceState([workspace('a', [sid('blank')])]),
+      sessions: sessionState([summary('blank', { blank: true, cwd: '/w/a' })]),
+      configureSessions: (sessions) => { sessions.create.mockReturnValueOnce(created.promise) },
+    })
+    b.uiWorkspace.startSession(wid('a'))
+    b.uiWorkspace.startSession(wid('a'))
+    created.resolve(sid('created-a'))
+    await vi.waitFor(() => {
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('created-a'), { source: 'mainView' })
+    })
+    expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({ workspaceId: wid('a') })
+    b.uiWorkspace.startSession()
+    await vi.waitFor(() => { expect(b.sessions.create).toHaveBeenLastCalledWith({}) })
+    await vi.waitFor(() => { expect(b.uiWorkspace.selection.getSnapshot()).toEqual({ sessionId: sid('created-none') }) })
+  })
+
+  it('reports a refused fresh creation and stays silent once a later navigation superseded it', async () => {
+    const b = bench({ presentation: fresh, startup: { restoreOnStartup: false } })
+    b.sessions.create.mockRejectedValueOnce(new Error('denied'))
+    b.uiWorkspace.startSession(wid('a'))
+    await vi.waitFor(() => {
+      expect(b.notify).toHaveBeenCalledExactlyOnceWith({ kind: 'createFailed', message: 'denied' })
+    })
+    const refused = Promise.withResolvers<SessionId>()
+    const accepted = Promise.withResolvers<SessionId>()
+    b.sessions.create.mockReturnValueOnce(refused.promise).mockReturnValueOnce(accepted.promise)
+    b.uiWorkspace.startSession(wid('a'))
+    b.uiWorkspace.startSession(wid('b'))
+    b.uiWorkspace.openSession(sid('chosen'))
+    refused.reject(new Error('late'))
+    accepted.resolve(sid('late-b'))
+    await settled()
+    expect(b.notify).toHaveBeenCalledOnce()
+    expect(b.sessions.retain).not.toHaveBeenCalledWith(sid('late-b'), expect.anything())
+  })
+
+  it('keeps draft-preparing New Session requests on the Workspace flow under fresh', async () => {
+    const b = bench({
+      presentation: fresh,
+      startup: { restoreOnStartup: false },
+      workspaces: workspaceState([workspace('a')]),
+      sessions: sessionState(),
+    })
+    b.uiWorkspace.startSession(wid('a'), { prompt: 'hello' })
+    await vi.waitFor(() => { expect(b.requestDraftInitialization).toHaveBeenCalledOnce() })
+  })
+
+  it('creates a Session at startup when fresh and nothing is restored', async () => {
+    const b = bench({ presentation: fresh, workspaces: workspaceState(), sessions: sessionState() })
+    await vi.waitFor(() => {
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('created-none'), { source: 'mainView' })
+    })
+    expect(b.sessions.create).toHaveBeenCalledExactlyOnceWith({})
+  })
+
+  it('skips startup restoration, and its startup selection, when restoration is off', async () => {
+    persistSelection({ sessionId: sid('saved') })
+    const b = bench({
+      startup: { restoreOnStartup: false, selection: { sessionId: sid('chosen') } },
+      workspaces: workspaceState([workspace('a', [sid('saved'), sid('chosen')])]),
+      sessions: sessionState([summary('saved'), summary('chosen')]),
+    })
+    await settled()
+    expect(b.sessions.retain).not.toHaveBeenCalled()
+    expect(b.sessions.create).not.toHaveBeenCalled()
+    expect(b.uiWorkspace.selection.getSnapshot()).toEqual({ sessionId: sid('saved') })
+  })
+
+  it('opens the startup selection in place of the saved one', async () => {
+    persistSelection({ sessionId: sid('saved') })
+    const b = bench({
+      startup: { restoreOnStartup: true, selection: { sessionId: sid('chosen') } },
+      workspaces: workspaceState([workspace('a', [sid('saved'), sid('chosen')])]),
+      sessions: sessionState([summary('saved'), summary('chosen')]),
+    })
+    await vi.waitFor(() => {
+      expect(b.sessions.retain).toHaveBeenCalledExactlyOnceWith(sid('chosen'), { source: 'mainView' })
     })
   })
 })

@@ -52,6 +52,7 @@ import type { SessionActivity, WorkspaceId, WorkspaceView } from '@deepseek-ai/d
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
 import type { WorkspaceShortcutState } from '../shortcuts.ts'
+import type { WorkspacePresentationSnapshot } from '../presentation.ts'
 import type { StartSessionOptions } from '../navigation.ts'
 import type {} from './toast.ts'
 import type { createWorkspaceViewStore } from '../stores.ts'
@@ -226,6 +227,8 @@ export type WorkspaceBrowserInjected = {
      * saw. Select the field the surface needs (`info => info.home`).
      */
     hostInfo: HostObservable<RemoteHostFacts>
+    /** Deployment presentation: icons, pinning, the ungrouped heading and row visibility. */
+    workspacePresentation: HostObservable<WorkspacePresentationSnapshot>
     workspaceShortcuts: HostObservable<WorkspaceShortcutState>
     shortcuts: HostObservable<readonly ShortcutCatalogEntry[]>
   }
@@ -484,7 +487,11 @@ export type WorkspaceBrowserProps =
  * callback; this callback creates only the real Host Workspace. A type alias
  * supplies the implicit index signature required by the registry.
  */
-export type WorkspacePickerInjected = DirectoryPickingInjected & {
+export type WorkspacePickerInjected = {
+  hooks: DirectoryPickingInjected['hooks'] & {
+    /** Deployment presentation; the picker reads its Workspace icons. */
+    workspacePresentation: HostObservable<WorkspacePresentationSnapshot>
+  }
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
 }

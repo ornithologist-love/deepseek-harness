@@ -45,6 +45,8 @@ import {
 } from './contract/slots.ts'
 import { createWorkspaceShortcutControls, installWorkspaceShortcuts } from './shortcuts.ts'
 import { UiWorkspaceService } from './navigation.ts'
+import { WorkspacePresentationService } from './presentation.ts'
+import { Config, parseSessionNavigation, SESSION_NAVIGATION_GLOBAL, WORKSPACE_OPTIONS_GLOBAL } from '../workspace-options.ts'
 import { createWorkspaceViewStore } from './stores.ts'
 import { WorkspaceBrowser } from './rows/WorkspaceBrowser.tsx'
 import { ArchiveSessionMenuItem, ArchiveSessionRowButton, SessionArchiveConfirmDialog } from './session-actions/ArchiveSession.tsx'
@@ -58,7 +60,10 @@ import { SessionIdMenuItem } from './session-actions/SessionId.tsx'
 import { WorkspacePicker } from './WorkspacePicker.tsx'
 import { en, zh, type WorkspaceKey } from './locales.ts'
 
-export type { StartSessionOptions, UiWorkspace } from './navigation.ts'
+export type { MainSelection, StartSessionOptions, UiWorkspace } from './navigation.ts'
+export type {
+  WorkspacePresentation, WorkspacePresentationIcon, WorkspacePresentationSnapshot,
+} from './presentation.ts'
 export type {
   DirectoryFlowOwnerProps, DirectoryFlowSlotName, DirectoryPickingHooks, DirectoryPickingInjected,
   MenuOpenState, RowToast, SessionRenameTarget, SessionRowOwnerProps, UseMenuOpenState, WorkspaceBrowserInjected,
@@ -110,6 +115,11 @@ export const inject = [
  * @param ctx - client root context.
  */
 export function apply(ctx: Context): void {
+  const page = globalThis as Partial<Record<typeof WORKSPACE_OPTIONS_GLOBAL | typeof SESSION_NAVIGATION_GLOBAL, unknown>>
+  const options = page[WORKSPACE_OPTIONS_GLOBAL]
+  const { restoreOnStartup } = Config(options === undefined ? {} : options)
+  const selection = parseSessionNavigation(page[SESSION_NAVIGATION_GLOBAL])
+  const presentation = new WorkspacePresentationService(ctx)
   const sessions = ctx.get('sessions') as ISessions
   const workspaces = ctx.get('workspaces') as IWorkspaces
   // One viewing-store instance, created here as ui-layout does for its layout
@@ -122,7 +132,8 @@ export function apply(ctx: Context): void {
   let toastSeq = 0
   const notify = (toast: RowToast): void => { rowToast.set({ ...toast, seq: ++toastSeq }) }
   const uiWorkspace = new UiWorkspaceService(
-    ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify,
+    ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify, presentation.getSnapshot,
+    selection === undefined ? { restoreOnStartup } : { restoreOnStartup, selection },
   )
   ctx.slots.provideRoot({
     hooks: { workspaces: workspaces.list },
@@ -281,11 +292,14 @@ export function apply(ctx: Context): void {
     requestAddWorkspace: shortcutControls.add,
     closeAddWorkspace: shortcutControls.closeAdd,
     setDirectoryBusy: shortcutControls.directoryBusy,
-    hooks: { directoryFlow: browserFlowSource, hostInfo, workspaceShortcuts: shortcutControls.state, shortcuts: ctx.shortcuts.catalog },
+    hooks: {
+      directoryFlow: browserFlowSource, hostInfo, workspacePresentation: presentation,
+      workspaceShortcuts: shortcutControls.state, shortcuts: ctx.shortcuts.catalog,
+    },
   })
   const pickerInjected = (): WorkspacePickerInjected => ({
     createWorkspace: input => workspaces.create(input),
-    hooks: { directoryFlow: pickerFlowSource },
+    hooks: { directoryFlow: pickerFlowSource, workspacePresentation: presentation },
   })
   // Each registration declares its owned children in the same call; slot
   // injection follows both the owner and declaration HMR lifetimes.

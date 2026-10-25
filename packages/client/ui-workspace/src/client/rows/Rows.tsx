@@ -25,6 +25,7 @@ import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { MenuOpenState, WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
+import type { WorkspacePresentationIcon } from '../presentation.ts'
 import css from './Rows.module.css'
 
 /** The standard locale seat, prop-passed from the browser root. */
@@ -207,6 +208,8 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
  * hover reveals the chevron and create button, and dwelling on a real
  * Workspace shows its hover card (the ungrouped bucket has none).
  * `containsCurrent` arrives on the node (derivation fact, no renderer scan).
+ * @param props.recent - render the ungrouped bucket as the non-collapsible "Recent" heading.
+ * @param props.icon - deployment image replacing the folder icon.
  * @param props.group - derived group node.
  * @param props.containsCurrentDescendant - highlight an ancestor even when its subtree is collapsed.
  * @param props.onToggle - expand/collapse the group.
@@ -216,14 +219,19 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
  * @param props.t - the browser root's locale seat.
  * @returns the row element.
  */
-export function ProjectRowItem({ group, containsCurrentDescendant = false, onToggle, onCreate, actions, drag, home, newShortcut, t }: {
+export function ProjectRowItem({
+  recent = false, icon, group, containsCurrentDescendant = false, onToggle, onCreate, actions, drag, home, newShortcut, t,
+}: {
+  recent?: boolean
+  icon?: WorkspacePresentationIcon | undefined
   group: GroupNode
   newShortcut?: ShortcutCatalogEntry | undefined
   containsCurrentDescendant?: boolean
   onToggle: () => void
   onCreate: () => void
   /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown). */
-  actions?: { rename: () => void; delete: () => void } | undefined
+  /** `edit`, when present, replaces Rename with Edit. */
+  actions?: { edit?: (() => void) | undefined; rename: () => void; delete: () => void } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
@@ -232,13 +240,16 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
 }) {
   const row = group
   // The ungrouped bucket has no workspace title: its label is dictionary copy.
-  const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
+  const label = row.workspaceId === undefined ? t(recent ? 'group.recent' : 'group.ungrouped') : row.label
   const active = containsCurrentDescendant || (group.expanded && group.containsCurrent)
   const [menuOpen, setMenuOpen] = useState(false)
   const workspaceMenuItems = [
-    { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
+    actions?.edit === undefined
+      ? { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> }
+      : { id: 'edit', label: t('edit.workspace'), icon: <IconEditOutlineRegular /> },
     { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutlineRegular />, danger: true },
   ]
+  if (recent) return <div className={css.recentHeading} role="heading" aria-level={2}>{label}</div>
   const ownRow = (
     <div
       className={clsx(css.projectRow, menuOpen && css.menuOpen)}
@@ -257,7 +268,9 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
       onDragEnd={drag?.end}
     >
       <span className={clsx(css.slot, css.folder, active && css.folderActive)}>
-        {row.expanded ? <IconFolderOpenRegular /> : <IconFolderCloseRegular />}
+        {icon !== undefined
+          ? <img className={css.rowIcon} src={icon.src} alt={icon.alt} title={icon.title} aria-label={icon.ariaLabel} />
+          : row.expanded ? <IconFolderOpenRegular /> : <IconFolderCloseRegular />}
       </span>
       <span className={clsx(css.slot, css.chevron)}>
         <IconTriangleRightFillRegular className={clsx(css.arrow, row.expanded && css.arrowOpen)} />
@@ -275,9 +288,10 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
               setMenuOpen(false)
               // Unknown ids leave before the dispatch: a future menu row must
               // not inherit the destructive branch as an else fallback.
-              /* v8 ignore next -- Menu can emit only the rename and delete rows supplied above. */
-              if (id !== 'rename' && id !== 'delete') return
-              if (id === 'rename') actions.rename()
+              /* v8 ignore next -- Menu can emit only the edit, rename and delete rows supplied above. */
+              if (id !== 'edit' && id !== 'rename' && id !== 'delete') return
+              if (id === 'edit') actions.edit?.()
+              else if (id === 'rename') actions.rename()
               else actions.delete()
             }}
             portal
@@ -539,13 +553,15 @@ export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t }: 
  * its leading decoration, and its hover-card section.
  * @param props.onReveal - scroll this row into view after search navigation, then acknowledge it.
  * @param props.drag - optional row-drag target wiring; blank rows cannot start a drag.
+ * @param props.flat - drop the leading cell of an idle row; live status still shows.
  * @param props.t - the browser root's locale seat.
  * @returns the session row.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRenameRequest, renderSlot, onReveal, drag, t,
+  node, currentId, now, onOpen, onRenameRequest, renderSlot, onReveal, drag, flat = false, t,
 }: {
   node: SessionNode
+  flat?: boolean
   currentId: string | undefined
   now: number
   onOpen: (id: SessionNode['id']) => void
@@ -629,14 +645,16 @@ export function SessionNodeItem({
           and is cleared by opening the session. Archived rows keep the slot
           blank — the grayed row carries the archived look — and their live
           status stays on the hover card only. */}
-      <span className={css.slot}>
-        {!row.archived && !row.blank && (showStatus
-          ? <SessionStatusDots statuses={statuses} />
-          : renderSlot('sidebar.session.row.leading', { sessionId: node.id }))}
-      </span>
+      {(!flat || showStatus) && (
+        <span className={css.slot}>
+          {!row.archived && !row.blank && (showStatus
+            ? <SessionStatusDots statuses={statuses} />
+            : renderSlot('sidebar.session.row.leading', { sessionId: node.id }))}
+        </span>
+      )}
       <span
         ref={titleRef}
-        className={css.title}
+        className={clsx(css.title, flat && !showStatus && css.flatTitle)}
         onDoubleClick={row.blank
           ? undefined
           : (e) => { e.stopPropagation(); onRenameRequest(node.id, row.title) }}

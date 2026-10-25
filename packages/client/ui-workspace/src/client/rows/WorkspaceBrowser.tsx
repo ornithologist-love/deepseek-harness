@@ -31,6 +31,7 @@ import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+import type { WorkspacePresentationSnapshot } from '../presentation.ts'
 import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
   deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
@@ -260,6 +261,8 @@ type SessionTreeProps = Pick<
   | 'sidebar.session.row.leading'
   | 'sidebar.session.row.hover'
 > & {
+  /** Deployment presentation: icons, the ungrouped heading and the Edit action. */
+  presentation: WorkspacePresentationSnapshot
   shortcuts: readonly import('@deepseek-ai/dsh-client-shortcuts/client').ShortcutCatalogEntry[]
   /** Always-mounted Session list snapshot. */
   list: SessionListState
@@ -313,9 +316,28 @@ function EmptySessions({ rowState, onLeaveArchivedOnly, t }: Pick<SessionTreePro
   )
 }
 
+/**
+ * Apply the presentation's row visibility to the Session list.
+ * @param list - Session list snapshot.
+ * @param presentation - excluded and classified Session ids.
+ * @returns the list itself when nothing is hidden, otherwise a filtered copy.
+ */
+function visibleSessions(list: SessionListState, presentation: WorkspacePresentationSnapshot): SessionListState {
+  const { excludedSessionIds, classifiedSessionIds } = presentation
+  if ((excludedSessionIds === undefined || excludedSessionIds.length === 0) && classifiedSessionIds === undefined) return list
+  const excluded = new Set(excludedSessionIds)
+  const classified = classifiedSessionIds === undefined ? undefined : new Set(classifiedSessionIds)
+  const visible = (id: string): boolean => !excluded.has(id) && (classified === undefined || classified.has(id))
+  return {
+    ...list,
+    ids: list.ids.filter(visible),
+    byId: Object.fromEntries(Object.entries(list.byId).filter(([id]) => visible(id))),
+  }
+}
+
 /** The scrolling session tree; unmounting drops the sessions subscription and the session watermarks. */
 function SessionTree({
-  list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
+  presentation, list, useSessionStatus, startSession, open, workspaces, ungroupedSessionIds,
   rowState, onLeaveArchivedOnly,
   workspaceReady, animationResetKey, usePanelInfo,
   onRenameRequest, onDeleteRequest, onSessionRenameRequest,
@@ -367,11 +389,14 @@ function SessionTree({
     }
     return keys
   }, [currentGroup, parents])
+  const recent = presentation.ungrouped === 'recent'
+  const { editWorkspace } = presentation
   const expandedGroups = useMemo(() => {
     const ancestorKeys = new Set<string | undefined>(parents.values())
     return [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY]
-      .filter(key => groupExpansion[key] ?? ancestorKeys.has(key))
-  }, [groupExpansion, parents, workspaces])
+      // The Recent heading cannot be collapsed, so its bucket stays expanded.
+      .filter(key => (key === UNGROUPED_KEY && recent) || (groupExpansion[key] ?? ancestorKeys.has(key)))
+  }, [groupExpansion, parents, workspaces, recent])
   const groups = useMemo(
     () => deriveGroups(list, workspaces, rowState, statuses, {
       expandedGroups,
@@ -555,6 +580,8 @@ function SessionTree({
           }}
       >
         <ProjectRowItem
+          recent={recent && group.workspaceId === undefined}
+          icon={presentation.items.find(item => item.workspaceId === group.workspaceId)?.icon}
           newShortcut={shortcuts.find(row => row.id === 'session.new')}
           group={group}
           containsCurrentDescendant={currentAncestors.has(group.key)}
@@ -574,6 +601,10 @@ function SessionTree({
           actions={group.workspaceId === undefined
             ? undefined
             : {
+              edit: editWorkspace === undefined ? undefined : () => {
+              /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
+                if (group.workspaceId !== undefined) editWorkspace(group.workspaceId)
+              },
               rename: () => {
               /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
                 if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
@@ -623,6 +654,7 @@ function SessionTree({
           return (
             <SessionNodeItem
               key={node.id}
+              flat={recent && group.workspaceId === undefined}
               node={node}
               currentId={current}
               now={now}
@@ -917,6 +949,7 @@ export function WorkspaceBrowser({
   useHostInfo,
   useShortcuts,
   useWorkspaceShortcuts,
+  useWorkspacePresentation,
   requestSearch,
   requestAddWorkspace,
   closeAddWorkspace,
@@ -930,8 +963,18 @@ export function WorkspaceBrowser({
   const addShortcut = shortcuts.find(row => row.id === 'workspace.add')
   const shortcutState = useWorkspaceShortcuts(state => state)
   // Ordering remains live while the rail or search replaces the list body.
-  const list = useSessions(state => state)
-  const storedWorkspaces = useWorkspaces(state => state.items)
+  const presentation = useWorkspacePresentation(state => state)
+  const allSessions = useSessions(state => state)
+  const list = useMemo(() => visibleSessions(allSessions, presentation), [allSessions, presentation])
+  const registeredWorkspaces = useWorkspaces(state => state.items)
+  const storedWorkspaces = useMemo(() => {
+    const pinned = new Set(presentation.items.filter(item => item.pinned === true).map(item => item.workspaceId))
+    if (pinned.size === 0) return registeredWorkspaces
+    return [
+      ...registeredWorkspaces.filter(item => pinned.has(item.workspaceId)),
+      ...registeredWorkspaces.filter(item => !pinned.has(item.workspaceId)),
+    ]
+  }, [registeredWorkspaces, presentation.items])
   // The resolved name, not `t`, is the memo dependency: the bound seat keeps
   // its identity across a language switch.
   const defaultWorkspaceName = t('workspace.defaultName')
@@ -1366,6 +1409,7 @@ export function WorkspaceBrowser({
           open={wsPickerOpen}
           anchorRef={wsPlusRef}
           useWorkspaces={useWorkspaces}
+          presentationItems={presentation.items}
           createWorkspace={createWorkspace}
           useDirectoryFlow={useDirectoryFlow}
           renderDirectoryFlow={owner => renderSlot('sidebar.workspaces.directoryFlow', owner)}
@@ -1439,6 +1483,7 @@ export function WorkspaceBrowser({
             )
             : (
               <SessionTree
+                presentation={presentation}
                 usePanelInfo={usePanelInfo}
                 list={list}
                 shortcuts={shortcuts}

@@ -19,6 +19,7 @@ import type {
 import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
+import type { WorkspacePresentationSnapshot } from './presentation.ts'
 import css from './WorkspacePicker.module.css'
 
 const ADD_WORKSPACE = '::add-workspace'
@@ -33,6 +34,8 @@ export interface WorkspacePickFlowProps {
   anchorRef?: RefObject<HTMLElement | null> | undefined
   /** Selector hook over the workspace list (framework standard hook). */
   useWorkspaces: <S>(selector: (state: WorkspaceSnapshot) => S) => S
+  /** Deployment presentation entries; a Workspace with an icon shows it in place of the folder. */
+  presentationItems: WorkspacePresentationSnapshot['items']
   /** Adopt a picked host directory as a real Workspace. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
   /** Bound occupancy selector hook for this surface's directory-flow hole (empty leaves the surface with no add action). */
@@ -63,6 +66,7 @@ export function WorkspacePickFlow({
   open,
   anchorRef,
   useWorkspaces,
+  presentationItems,
   createWorkspace,
   useDirectoryFlow,
   renderDirectoryFlow,
@@ -110,12 +114,17 @@ export function WorkspacePickFlow({
   // (divider + always visible); otherwise it IS the menu.
   const pinAdd = !addOnly && workspaces.length > 0
   const items: MenuEntry[] = pinAdd
-    ? workspaces.map(workspace => ({
-      id: workspace.workspaceId,
-      label: workspaceDisplayTitle(workspace.title, t('workspace.defaultName')),
-      icon: <IconFolderCloseRegular size={16} />,
-      disabled: flowBusy,
-    }))
+    ? workspaces.map((workspace) => {
+      const icon = presentationItems.find(item => item.workspaceId === workspace.workspaceId)?.icon
+      return {
+        id: workspace.workspaceId,
+        label: workspaceDisplayTitle(workspace.title, t('workspace.defaultName')),
+        icon: icon === undefined
+          ? <IconFolderCloseRegular size={16} />
+          : <img className={css.optionIcon} src={icon.src} alt={icon.alt} title={icon.title} aria-label={icon.ariaLabel} />,
+        disabled: flowBusy,
+      }
+    })
     : addEntries
   // Nothing listed and nothing to add with (a composition that mounts this
   // package without any directory-picker): an empty popover would claim a
@@ -231,6 +240,7 @@ export function WorkspacePicker({
   open,
   anchorRef,
   useWorkspaces,
+  useWorkspacePresentation,
   selectedId,
   onPick,
   onClose,
@@ -239,12 +249,14 @@ export function WorkspacePicker({
   renderSlot,
   t,
 }: WorkspacePickerProps) {
+  const presentationItems = useWorkspacePresentation(state => state.items)
   return (
     <WorkspacePickFlow
       t={t}
       open={open}
       anchorRef={anchorRef}
       useWorkspaces={useWorkspaces}
+      presentationItems={presentationItems}
       createWorkspace={createWorkspace}
       useDirectoryFlow={useDirectoryFlow}
       renderDirectoryFlow={owner => renderSlot('conversation.hero.workspace.directoryFlow', owner)}

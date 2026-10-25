@@ -171,6 +171,31 @@
   line-height: 20px;
 }
 
+/* A flat row without status keeps its title flush with the Recent heading. */
+.flatTitle.flatTitle {
+  margin-left: 0;
+}
+
+/* Deployment image in place of a Workspace row's folder icon. */
+.rowIcon {
+  display: block;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  object-fit: contain;
+  opacity: 0.88;
+}
+
+/* The ungrouped bucket's non-collapsible "Recent" heading. */
+.recentHeading {
+  margin: 14px 0 4px;
+  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .renameInput {
   min-width: 0;
   font-size: 14px;

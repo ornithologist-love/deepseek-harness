@@ -1236,3 +1236,57 @@ it.each([['未命名', t], ['Untitled', tEn]])('labels unnamed search results as
   fireEvent.click(screen.getByText(label))
   expect(onOpen).toHaveBeenCalledWith(result.id)
 })
+
+describe('Workspace presentation on rows', () => {
+  const group: GroupNode = {
+    key: 'project', workspaceId: wid('project'), cwd: '/projects/project', createdAt: 0, label: 'Project',
+    sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+  }
+
+  it('titles the ungrouped bucket as a Recent heading without row controls', () => {
+    const ungrouped: GroupNode = { ...group, key: 'ungrouped', workspaceId: undefined, label: '' }
+    render(<ProjectRowItem recent group={ungrouped} onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
+    expect(screen.getByRole('heading', { level: 2, name: '最近' })).toBeTruthy()
+    expect(screen.queryByRole('treeitem')).toBeNull()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
+  it('shows the deployment icon in place of the folder', () => {
+    render(<ProjectRowItem
+      group={group} onToggle={vi.fn()} onCreate={vi.fn()} t={t}
+      icon={{ src: 'data:image/png;base64,', alt: 'Project icon', title: 'Hover', ariaLabel: 'Project image' }}
+    />)
+    const image = screen.getByRole('img', { name: 'Project image' })
+    expect(image.getAttribute('alt')).toBe('Project icon')
+    expect(image.getAttribute('title')).toBe('Hover')
+  })
+
+  it('offers Edit instead of Rename when the deployment edits Workspaces', () => {
+    const onEdit = vi.fn()
+    const onRename = vi.fn()
+    render(<ProjectRowItem
+      group={group} onToggle={vi.fn()} onCreate={vi.fn()} t={t}
+      actions={{ edit: onEdit, rename: onRename, delete: vi.fn() }}
+    />)
+    fireEvent.click(screen.getByRole('button', { name: '工作区“Project”的操作' }))
+    expect(screen.queryByRole('menuitem', { name: '重命名' })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: '编辑' }))
+    expect(onEdit).toHaveBeenCalledOnce()
+    expect(onRename).not.toHaveBeenCalled()
+  })
+
+  it('flattens idle Session rows and keeps the status slot while a flat row is active', () => {
+    const idle: SessionNode = {
+      id: sid('session'), title: 'Session', blank: false, running: false,
+      runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false,
+    }
+    const renderSlot = vi.fn<RowRenderSlot>(() => null)
+    const view = render(<SessionNodeItem flat node={idle} currentId={undefined} now={0} onOpen={vi.fn()} renderSlot={renderSlot} t={t} />)
+    // An idle flat row starts with its title: no leading cell is reserved.
+    expect(renderSlot).not.toHaveBeenCalledWith('sidebar.session.row.leading', { sessionId: idle.id })
+    expect(screen.getByText('Session').previousElementSibling).toBeNull()
+    view.rerender(<SessionNodeItem flat node={{ ...idle, running: true }} currentId={undefined} now={0}
+      onOpen={vi.fn()} renderSlot={renderSlot} t={t} />)
+    expect(screen.getByText('Session').previousElementSibling?.querySelector('[data-state="ongoing"]')).toBeTruthy()
+  })
+})

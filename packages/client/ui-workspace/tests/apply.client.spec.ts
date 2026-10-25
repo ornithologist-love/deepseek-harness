@@ -30,7 +30,7 @@ import { SessionIdMenuItem } from '../src/client/session-actions/SessionId.tsx'
 import { WorkspacePicker } from '../src/client/WorkspacePicker.tsx'
 import { FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
-import { apply as hostApply } from '../src/index.ts'
+import { DEFAULT_WORKSPACE_PRESENTATION } from '../src/client/presentation.ts'
 
 const sid = (id: string) => id as SessionId
 const summary = (id: string, updatedAt: number): SessionSummary => ({
@@ -213,8 +213,30 @@ function viewInstance(slots: SlotRegistry) {
 const settled = (): Promise<void> => new Promise((resolve) => { setTimeout(resolve, 0) })
 
 describe('ui-workspace apply', () => {
-  it('keeps the host Loader entry inert', () => {
-    expect(hostApply).not.toThrow()
+  it('starts from the page startup options and shares one presentation with the browser and picker', async () => {
+    vi.stubGlobal('__DSH_WORKSPACE_OPTIONS__', { restoreOnStartup: false })
+    vi.stubGlobal('__DSH_SESSION_NAVIGATION__', { sessionId: 'chosen' })
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    const b = await bench()
+    declare(b.slots, 'sidebar.workspaces', 'conversation.hero.workspace')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    await settled()
+    expect(b.initializeDefault).not.toHaveBeenCalled()
+    expect(b.retain).not.toHaveBeenCalled()
+    const browser = faceOf(b.slots.entries('sidebar.workspaces')[0]!) as WorkspaceBrowserInjected
+    const picker = faceOf(b.slots.entries('conversation.hero.workspace')[0]!) as WorkspacePickerInjected
+    const snapshot = { ...DEFAULT_WORKSPACE_PRESENTATION, ungrouped: 'recent' as const }
+    b.ctx.workspacePresentation.register(createSnapshotStore(snapshot))
+    expect(browser.hooks.workspacePresentation.getSnapshot()).toBe(snapshot)
+    expect(picker.hooks.workspacePresentation.getSnapshot()).toBe(snapshot)
+  })
+
+  it('adopts the page startup selection when restoration is on', async () => {
+    vi.stubGlobal('__DSH_SESSION_NAVIGATION__', { sessionId: 'chosen' })
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    const b = await bench()
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    expect(b.ctx.uiWorkspace.selection.getSnapshot()).toEqual({ sessionId: 'chosen' })
   })
 
   it('declares the services it drives', () => {
