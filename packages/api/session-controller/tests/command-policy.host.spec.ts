@@ -171,12 +171,40 @@ function agentOf(ctx: Context, session: Session): Agent {
   const admitted: UserMessage[] = []
   return {
     id: session.id,
+    options: {},
     session,
     status: 'idle',
     ctx,
-    inbox: { nextTurn: admitted, nextStep: [] },
+    inbox: {
+      nextTurn: admitted,
+      nextStep: [],
+      clear: () => {
+        admitted.splice(0)
+      },
+      append: (_target, message) => { admitted.push(message) },
+      prepend: (_target, message) => { admitted.unshift(message) },
+      replace: (messageId, message) => {
+        const index = admitted.findIndex(pending => pending.id === messageId)
+        if (index < 0) return false
+        admitted.splice(index, 1, message)
+        return true
+      },
+      remove: (messageId) => {
+        const index = admitted.findIndex(pending => pending.id === messageId)
+        if (index < 0) return false
+        admitted.splice(index, 1)
+        return true
+      },
+      splice: (_target, start, deleteCount, inserted) => admitted.splice(start, deleteCount, ...inserted),
+    },
+    send: () => {},
     followup: (message: UserMessage) => { admitted.push(message) },
-  } as unknown as Agent
+    steer: () => {},
+    inject: () => {},
+    cancel: () => {},
+    whenIdle: () => Promise.resolve(),
+    runMaintenance: task => task(new AbortController().signal),
+  } satisfies Agent
 }
 
 describe('Session command policy', () => {

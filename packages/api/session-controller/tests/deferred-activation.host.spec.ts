@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import { unsupportedInbox } from '@deepseek-ai/dsh-agent-loop-testkit'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentFactory } from '@deepseek-ai/dsh-agent'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
@@ -153,8 +154,22 @@ async function bench(
         ...(create.meta === undefined ? {} : { meta: create.meta }),
         ...(create.seed === undefined ? {} : { seed: [...create.seed] }),
       })
-      await create.setup?.(ctx, { id: session.id, session, status: 'idle', ctx } as unknown as Agent)
-      const agent = { id: session.id, session, status: 'idle', ctx } as unknown as Agent
+      const agent = {
+        id: session.id,
+        options: {},
+        session,
+        status: 'idle',
+        ctx,
+        inbox: unsupportedInbox(),
+        send: () => {},
+        followup: () => {},
+        steer: () => {},
+        inject: () => {},
+        cancel: () => {},
+        whenIdle: () => Promise.resolve(),
+        runMaintenance: task => task(new AbortController().signal),
+      } satisfies Agent
+      await create.setup?.(ctx, agent)
       ctx.effect(function* () {
         yield ctx.sessions.enter(session)
         ctx.sessions.announce(session)
