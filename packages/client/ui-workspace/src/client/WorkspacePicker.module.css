@@ -20,6 +20,10 @@
 }
 
 /* Deployment image in place of a picker option's folder icon. */
+.chipFolder {
+  flex: none;
+}
+
 .optionIcon {
   width: 16px;
   height: 16px;

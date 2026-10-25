@@ -14,6 +14,7 @@ import { RemoteError, TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply, inject } from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { WorkspaceBrowserInjected, WorkspacePickerInjected } from '@deepseek-ai/dsh-client-ui-workspace/client'
+import type { WorkspaceChipIconInjected } from '../src/client/contract/slots.ts'
 import {
   type ArchiveSessionInjected, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
   type RenameSessionInjected, type RowToastInjected, type SessionArchiveConfirmInjected, type SessionRenameDialogInjected,
@@ -170,7 +171,7 @@ async function bench() {
   }
 }
 
-type HoleName = 'sidebar.workspaces' | 'conversation.hero.workspace' | 'conversation.empty.workspace' | 'shell.overlay'
+type HoleName = 'sidebar.workspaces' | 'conversation.hero.workspace' | 'conversation.empty.workspace' | 'conversation.hero.workspace.icon' | 'shell.overlay'
 
 const MENU_ITEM = 'sidebar.workspaces.session.menu.item'
 const ROW_ACTION = 'sidebar.workspaces.session.row.action'
@@ -218,17 +219,19 @@ describe('ui-workspace apply', () => {
     vi.stubGlobal('__DSH_SESSION_NAVIGATION__', { sessionId: 'chosen' })
     onTestFinished(() => { vi.unstubAllGlobals() })
     const b = await bench()
-    declare(b.slots, 'sidebar.workspaces', 'conversation.hero.workspace')
+    declare(b.slots, 'sidebar.workspaces', 'conversation.hero.workspace', 'conversation.hero.workspace.icon')
     await b.ctx.plugin({ inject: [...inject], apply }).await()
     await settled()
     expect(b.initializeDefault).not.toHaveBeenCalled()
     expect(b.retain).not.toHaveBeenCalled()
     const browser = faceOf(b.slots.entries('sidebar.workspaces')[0]!) as WorkspaceBrowserInjected
     const picker = faceOf(b.slots.entries('conversation.hero.workspace')[0]!) as WorkspacePickerInjected
+    const chipIcon = faceOf(b.slots.entries('conversation.hero.workspace.icon')[0]!) as WorkspaceChipIconInjected
     const snapshot = { ...DEFAULT_WORKSPACE_PRESENTATION, ungrouped: 'recent' as const }
     b.ctx.workspacePresentation.register(createSnapshotStore(snapshot))
     expect(browser.hooks.workspacePresentation.getSnapshot()).toBe(snapshot)
     expect(picker.hooks.workspacePresentation.getSnapshot()).toBe(snapshot)
+    expect(chipIcon.hooks.workspacePresentation.getSnapshot()).toBe(snapshot)
   })
 
   it('adopts the page startup selection when restoration is on', async () => {

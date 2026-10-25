@@ -496,6 +496,16 @@ export type WorkspacePickerInjected = {
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
 }
 
+/** Chip-icon injected share: the presentation whose Workspace icon replaces the folder. */
+export type WorkspaceChipIconInjected = {
+  hooks: { workspacePresentation: HostObservable<WorkspacePresentationSnapshot> }
+}
+
+/** Full chip-icon props: the owner's Workspace and label state plus the presentation hook. */
+export type WorkspaceChipIconProps =
+  PropsRuntime<'conversation.hero.workspace.icon'>
+  & PropsHooks<WorkspaceChipIconInjected['hooks']>
+
 /**
  * Full picker props: the owner share plus the creation callback and the
  * locale seat. The two picker holes (blank-session hero / New-Session view)

@@ -63,7 +63,7 @@ Session 行内的 Rename 操作打开一个以该行显示标题预填的对话�
 
 ### 部署展示与启动
 
-部署可以向 `workspacePresentation` Client 服务注册一个提供方；释放第一个之前，第二次注册会抛错。提供方给出每个工作区的图标，在侧栏和选择器中替换文件夹图标；置顶的工作区按相对顺序排在其他工作区之前。`ungrouped: 'recent'` 把未分组桶标题改为**最近**，作为不可折叠、始终展开的标题，并去掉空闲会话行的行首格。`newSession: 'fresh'` 让每次新建会话都创建会话，同一工作区的并发请求共用一次创建；启动时没有可恢复的内容也会创建一个。`excludedSessionIds` 在侧栏隐藏会话；`classifiedSessionIds` 存在时，侧栏只列出这些会话。`editWorkspace` 把工作区菜单的重命名换成编辑。展示不改变工作区成员或会话历史；释放提供方后恢复默认展示。
+部署可以向 `workspacePresentation` Client 服务注册一个提供方；释放第一个之前，第二次注册会抛错。提供方给出每个工作区的图标，在侧栏、选择器和 hero 工作区标签中替换文件夹图标（经 ui-conversation 的 `conversation.hero.workspace.icon` 插槽填入）；置顶的工作区按相对顺序排在其他工作区之前。`ungrouped: 'recent'` 把未分组桶标题改为**最近**，作为不可折叠、始终展开的标题，并去掉空闲会话行的行首格。`newSession: 'fresh'` 让每次新建会话都创建会话，同一工作区的并发请求共用一次创建；启动时没有可恢复的内容也会创建一个。`excludedSessionIds` 在侧栏隐藏会话；`classifiedSessionIds` 存在时，侧栏只列出这些会话。`editWorkspace` 把工作区菜单的重命名换成编辑。展示不改变工作区成员或会话历史；释放提供方后恢复默认展示。
 
 Host 半部的 `restoreOnStartup` 选项（默认 `true`）决定页面是否恢复上次的主视图。为 `false` 时，Host 发布 `__DSH_WORKSPACE_OPTIONS__` 页面全局；保持默认时，页面脚本可以自行设置该全局，例如按 URL 设置。提供 `sessionNavigationInput` Host 服务的部署会在每个页面把其 `current()` 结果发布为 `__DSH_SESSION_NAVIGATION__`；恢复开启时，Client 从该会话启动。
 

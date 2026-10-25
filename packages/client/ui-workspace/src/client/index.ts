@@ -41,7 +41,7 @@ import {
   type ArchiveSessionInjected, type ForkSessionInjected, menuOpenStateFactory, type PinSessionInjected,
   type SessionArchiveConfirmInjected, type SessionArchiveConfirmRequest,
   type RenameSessionInjected, type RowToast, type RowToastInjected, type RowToastState, type SessionRenameDialogInjected,
-  type SessionIdInjected, type WorkspaceBrowserInjected, type WorkspacePickerInjected,
+  type SessionIdInjected, type WorkspaceBrowserInjected, type WorkspaceChipIconInjected, type WorkspacePickerInjected,
 } from './contract/slots.ts'
 import { createWorkspaceShortcutControls, installWorkspaceShortcuts } from './shortcuts.ts'
 import { UiWorkspaceService } from './navigation.ts'
@@ -58,6 +58,7 @@ import { RowActionToast } from './session-actions/RowActionToast.tsx'
 import { registerToasts } from './toast/register.ts'
 import { SessionIdMenuItem } from './session-actions/SessionId.tsx'
 import { WorkspacePicker } from './WorkspacePicker.tsx'
+import { WorkspaceChipIcon } from './WorkspaceChipIcon.tsx'
 import { en, zh, type WorkspaceKey } from './locales.ts'
 
 export type { MainSelection, StartSessionOptions, UiWorkspace } from './navigation.ts'
@@ -352,6 +353,10 @@ export function apply(ctx: Context): void {
       children: { 'workspace.toast': { kind: 'keyed', scope: 'root' } },
     }, RowActionToast)
   })
+  ctx.slots.inject('conversation.hero.workspace.icon', () => ctx.slots.register({
+    name: 'conversation.hero.workspace.icon',
+    inject: (): WorkspaceChipIconInjected => ({ hooks: { workspacePresentation: presentation } }),
+  }, WorkspaceChipIcon))
   ctx.slots.inject('conversation.hero.workspace', () => ctx.slots.register(
     {
       name: 'conversation.hero.workspace',
