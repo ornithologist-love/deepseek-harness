@@ -933,6 +933,7 @@ function SearchResults({
  */
 export function WorkspaceBrowser({
   wide,
+  renderFactorySlot,
   usePanelInfo,
   expandSidebar,
   useSessions,
@@ -1415,6 +1416,7 @@ export function WorkspaceBrowser({
           open={wsPickerOpen}
           anchorRef={wsPlusRef}
           useWorkspaces={useWorkspaces}
+          renderFactorySlot={renderFactorySlot}
           presentationItems={presentation.items}
           external={presentation.external}
           createWorkspace={createWorkspace}

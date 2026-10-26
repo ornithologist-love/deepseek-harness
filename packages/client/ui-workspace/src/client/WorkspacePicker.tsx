@@ -17,7 +17,7 @@ import type {
   WorkspaceId, WorkspaceSnapshot, WorkspaceView,
 } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
-import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsRenderFactories, SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
 import type { WorkspacePresentationSnapshot } from './presentation.ts'
 import css from './WorkspacePicker.module.css'
@@ -39,6 +39,8 @@ export interface WorkspacePickFlowProps {
   presentationItems: WorkspacePresentationSnapshot['items']
   /** Host-owned navigation and directory adoption. */
   external?: WorkspacePresentationSnapshot['external']
+  /** Native chooser factories provided by the composition. */
+  renderFactorySlot: PropsRenderFactories['renderFactorySlot']
   /** Adopt a picked host directory as a real Workspace. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
   /** Bound occupancy selector hook for this surface's directory-flow hole (empty leaves the surface with no add action). */
@@ -71,6 +73,7 @@ export function WorkspacePickFlow({
   useWorkspaces,
   presentationItems,
   external,
+  renderFactorySlot,
   createWorkspace,
   useDirectoryFlow,
   renderDirectoryFlow,
@@ -216,7 +219,7 @@ export function WorkspacePickFlow({
       />
       {open && !addIsTheOnlyEntry && !menuIsEmpty && workspaceSnapshot.phase === 'pending' && <div className={css.menuStatus} role="status">{t('picker.loading')}</div>}
       {renderDirectoryFlow(flowOwner)}
-      {hostPickerOpen && external && <RemoteWorkspacePicker catalog={external} t={t}
+      {hostPickerOpen && external && <RemoteWorkspacePicker catalog={external} t={t} renderFactorySlot={renderFactorySlot}
         onClose={() => { setHostPickerOpen(false) }} onLocal={() => { setHostPickerOpen(false); setFlowOpen(true) }} />}
       <Modal
         open={errorOpen}
@@ -255,6 +258,7 @@ export function WorkspacePicker({
   createWorkspace,
   useDirectoryFlow,
   renderSlot,
+  renderFactorySlot,
   t,
 }: WorkspacePickerProps) {
   const presentation = useWorkspacePresentation(state => state)
@@ -264,6 +268,7 @@ export function WorkspacePicker({
       open={open}
       anchorRef={anchorRef}
       useWorkspaces={useWorkspaces}
+      renderFactorySlot={renderFactorySlot}
       presentationItems={presentation.items}
       external={presentation.external}
       createWorkspace={createWorkspace}

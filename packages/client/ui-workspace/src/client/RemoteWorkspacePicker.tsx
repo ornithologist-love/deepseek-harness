@@ -1,10 +1,8 @@
 import { useCallback, useState } from 'react'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
-import { DirectoryBrowser } from '@dsh-upstream/ui-directory-picker-browse/src/client/DirectoryBrowser.tsx'
-import type { Translate } from '@deepseek-ai/dsh-client-locale/client'
+import type { PropsRenderFactories } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ExternalWorkspaceCatalog, ExternalWorkspaceHostId } from './presentation.ts'
 import type { WorkspacePickerProps } from './contract/slots.ts'
-import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './ExternalWorkspacePicker.module.css'
 
 function systemName(platform?: string): string {
@@ -17,7 +15,8 @@ function systemName(platform?: string): string {
 }
 
 /** Choose the owner before browsing. Server paths never enter local Workspace creation. */
-export function RemoteWorkspacePicker({ catalog, onLocal, onClose, t: upstreamT }: {
+export function RemoteWorkspacePicker({ catalog, onLocal, onClose, renderFactorySlot, t: upstreamT }: {
+  renderFactorySlot: PropsRenderFactories['renderFactorySlot']
   catalog: ExternalWorkspaceCatalog
   onLocal: () => void
   onClose: () => void
@@ -31,7 +30,6 @@ export function RemoteWorkspacePicker({ catalog, onLocal, onClose, t: upstreamT 
   const list = catalog.listDirectory, mkdir = catalog.createDirectory
   const listDirectory = useCallback((path?: string, signal?: AbortSignal) => list(hostId!, path, signal), [list, hostId])
   const createDirectory = useCallback((path: string, name: string) => mkdir(hostId!, path, name), [mkdir, hostId])
-  const browserT: Translate = (key, values) => t(('remote.' + key) as Parameters<TranslateNS<'workspace'>>[0], { ...values, host: host?.name ?? '' })
   return <>
     <Modal open={!hostId} onClose={onClose} title={t('remote.chooseHost')} closeLabel={t('close')}>
       <div className={css.hostChoices}>
@@ -48,13 +46,14 @@ export function RemoteWorkspacePicker({ catalog, onLocal, onClose, t: upstreamT 
         </Button>)}
       </div>
     </Modal>
-    {host && <DirectoryBrowser open busy={busy} t={browserT} listDirectory={listDirectory} createDirectory={createDirectory}
-      onClose={() => { if (!busy) onClose() }} onOpen={path => {
+    {host && renderFactorySlot('workspace.directory.browser', { open: true, busy,
+      title: t('remote.browser.title', { host: host.name }), listDirectory, createDirectory,
+      onClose: () => { if (!busy) onClose() }, onOpen: path => {
         setBusy(true); setError('')
         void catalog.addWorkspace(host.id, path).then(onClose).catch((failure: unknown) => {
           setError(failure instanceof Error ? failure.message : String(failure))
         }).finally(() => { setBusy(false) })
-      }} />}
+      } })}
     <Modal open={busy || !!error} onClose={() => { if (!busy) setError('') }} title={t(busy ? 'remote.adding' : 'folderError.title')}
       closeLabel={t('close')} footer={!busy && <Button variant="primary" onClick={() => { setError('') }}>{t('close')}</Button>}>
       <div role={busy ? 'status' : 'alert'}>{busy ? t('remote.addingHint') : error}</div>

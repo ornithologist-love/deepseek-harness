@@ -29,6 +29,8 @@ Mount this plugin alongside `ui-workspace` and the host backend [`dsh-host-direc
 
 ### Navigating and creating
 
+The package also registers the `workspace.directory.browser` Component Factory. Its caller supplies the directory operations and optional title, so a remote Workspace provider can reuse this dialog with the selected Host's paths. The local directory-flow occupants use priority 1; a composed native chooser at priority 0 remains the local default.
+
 Step through folders, edit the path directly, or filter the last pane by prefix; a Host-flagged hidden entry stays hidden until the footer toggle reveals it. **New folder** opens a nested create dialog targeting the selected folder and selects what it creates; **Open** adopts the selected folder, falling back to the listed level. Confirming a directory is the picked path; dismissing the dialog is the cancellation.
 
 -----

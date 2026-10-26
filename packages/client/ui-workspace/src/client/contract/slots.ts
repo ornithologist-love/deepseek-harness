@@ -39,7 +39,7 @@
  * retain every listed Session.
  */
 import type {
-  HostObservable, InjectFace, PropsHooks, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore, SlotHookFactory,
+  HostObservable, InjectFace, PropsHooks, PropsLocale, PropsRenderFactories, PropsRenderSlots, PropsRuntime, PropsStore, SlotHookFactory,
 } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pull the owner SlotMap merges into programs that resolve the
 // runtime shares below.
@@ -470,6 +470,7 @@ export type RowToastProps =
 /** Full browser props: shell owner share + viewing store + injected actions + the locale seat. */
 export type WorkspaceBrowserProps =
   PropsRuntime<'sidebar.workspaces'>
+  & PropsRenderFactories
   & PropsRenderSlots<
     | 'sidebar.workspaces.directoryFlow'
     | 'sidebar.workspaces.session.menu.item'
@@ -513,7 +514,30 @@ export type WorkspaceChipIconProps =
  */
 export type WorkspacePickerProps =
   PropsRuntime<'conversation.hero.workspace'>
+  & PropsRenderFactories
   & PropsRenderSlots<'conversation.hero.workspace.directoryFlow'>
   & Omit<WorkspacePickerInjected, 'hooks'>
   & PropsHooks<WorkspacePickerInjected['hooks']>
   & PropsLocale<'workspace'>
+
+/** Browser directory chooser with operations owned by the requesting Host. */
+export interface DirectoryBrowseOwnerProps {
+  open: boolean
+  busy: boolean
+  title?: string
+  listDirectory: (path?: string, signal?: AbortSignal) => Promise<import('@deepseek-ai/dsh-api-remotes/client').DirectoryListing>
+  createDirectory: (path: string, name: string) => Promise<string>
+  onOpen: (path: string) => void
+  onClose: () => void
+}
+
+declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotFactoryMap {
+    /** Reusable directory browser supplied by the composed browse picker. */
+    'workspace.directory.browser': {
+      scope: 'root'
+      props: DirectoryBrowseOwnerProps
+      inject: { t: import('@deepseek-ai/dsh-client-locale/client').Translate }
+    }
+  }
+}
