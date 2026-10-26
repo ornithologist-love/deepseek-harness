@@ -4205,7 +4205,7 @@ export interface Config {
 ## `@deepseek-ai/dsh-tool-fs-search`
 
 - `inject`: `tools` · `systemPrompt` · `subprocess` · `workingDirectory`
-- `source`: [`packages/fs/tool-fs-search/src/index.ts:74`](../packages/fs/tool-fs-search/src/index.ts)
+- `source`: [`packages/fs/tool-fs-search/src/index.ts:77`](../packages/fs/tool-fs-search/src/index.ts)
 
 ```ts config-catalog
 /** Plugin config; over-cap glob sampling is an explicit deployment choice and the remaining fields have defaults. */
@@ -4231,6 +4231,20 @@ export interface Config {
    * `@deepseek-ai/dsh-tool-call-timeout-policy` through `exec.signal`.
    */
   timeoutMs?: number
+  /**
+   * The project search scope. When set, both tools accept `search_scope` and
+   * default to project files: hidden entries and these directory names are
+   * skipped, ignore files apply unless an explicit pattern or include filter
+   * overrides them, and each result states its root and scope. `null` (the
+   * default) keeps unscoped searches without the argument.
+   */
+  projectScope?: ProjectScope | null
+}
+
+/** Deployment configuration of the project search scope. */
+export interface ProjectScope {
+  /** Directory names excluded at any depth from `project` directory scans, such as build output and caches. */
+  excludedDirectories: string[]
 }
 ```
 <!-- END GENERATED config-catalog:@deepseek-ai/dsh-tool-fs-search -->

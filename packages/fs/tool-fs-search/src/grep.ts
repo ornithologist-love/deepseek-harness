@@ -20,6 +20,8 @@ import type { GrepMatch } from './search-core.ts'
 import { SearchError, previewLine, retainGrepMatches, runRipgrep, toWorkdirRelative, trySaveFormattedResult } from './search-core.ts'
 import { grepSearchMeta, searchViewFromMeta } from './presentation.ts'
 import { acceptedDirectCallValue } from './direct-call.ts'
+import { SEARCH_SCOPE_PARAMETER, scopeFlags, scopeSummary, withScopeSummary } from './scope.ts'
+import type { ProjectScope, SearchScope } from './scope.ts'
 
 /**
  * Default cap on flat matches retained inline by one `grep` call (the
@@ -50,6 +52,8 @@ export interface GrepToolCaps {
   stderrMaxBytes: number
   /** Cooperative tool-call budget (ms) attached as `ToolDefinition.timeoutMs`. */
   timeoutMs: number
+  /** The project search scope, or `null` to search with ripgrep's default ignore handling and no `search_scope` argument. */
+  projectScope: ProjectScope | null
 }
 
 /** Validated `grep` arguments. */
@@ -57,6 +61,8 @@ export interface GrepInput {
   pattern: string
   path?: string
   include?: string
+  /** The requested scope; only accepted when a project scope is configured. */
+  searchScope?: SearchScope
 }
 
 /**
@@ -87,7 +93,7 @@ function validateInclude(include: string): void {
  * @param args - the schema-validated `grep` arguments.
  * @returns the accepted input with an empty `include` omitted.
  */
-export function parseGrepArgs(args: { pattern: string; path?: string; include?: string }): GrepInput {
+export function parseGrepArgs(args: { pattern: string; path?: string; include?: string; search_scope?: SearchScope }): GrepInput {
   if (args.pattern.length === 0) throw new Error('pattern must be a non-empty string')
   if (args.path !== undefined && args.path.trim().length === 0) throw new Error('path must be a non-empty string when given')
   const include = args.include === '' ? undefined : args.include
@@ -96,6 +102,7 @@ export function parseGrepArgs(args: { pattern: string; path?: string; include?: 
     pattern: args.pattern,
     ...args.path !== undefined ? { path: args.path } : {},
     ...include !== undefined ? { include } : {},
+    ...args.search_scope !== undefined ? { searchScope: args.search_scope } : {},
   }
 }
 
@@ -105,14 +112,17 @@ export function parseGrepArgs(args: { pattern: string; path?: string; include?: 
  * {@link GrepInput.include}) is a plain argv element — no shell layer exists,
  * so no quoting applies; the pattern and include ride in `--flag=value` form
  * and the target behind `--`, so a leading-dash value can never be parsed as
- * a flag.
+ * a flag. With a project scope, the requested scope adds its flags
+ * ({@link scopeFlags}).
  *
  * @param input - the validated arguments.
+ * @param projectScope - the deployment's project scope, when configured.
  * @returns the complete ripgrep argument vector (excluding the binary itself).
  */
-export function buildGrepCommand(input: GrepInput): string[] {
+export function buildGrepCommand(input: GrepInput, projectScope?: ProjectScope): string[] {
   const parts = ['--json', `--regexp=${input.pattern}`]
   if (input.include !== undefined) parts.push(`--glob=${input.include}`)
+  if (projectScope !== undefined) parts.push(...scopeFlags(input.searchScope ?? 'project', projectScope))
   if (input.path !== undefined) parts.push('--', input.path)
   return parts
 }
@@ -239,7 +249,7 @@ function formatRetainedGrep(retained: RetainedItems<GrepMatch>, spillRef?: Spill
  * @param args - the raw tool arguments; `pattern`, `path`, and `include` feed the title.
  * @returns the generic card view (`kind: 'search'`) shown while the call runs.
  */
-export function presentGrepCall(args: { pattern: string; path?: string; include?: string }): GenericCallView {
+export function presentGrepCall(args: { pattern: string; path?: string; include?: string; search_scope?: SearchScope }): GenericCallView {
   const where = args.path !== undefined ? ` in ${args.path}` : ''
   const filter = args.include !== undefined && args.include !== '' ? ` (${args.include})` : ''
   return { card: 'generic', title: `Grep ${args.pattern}${where}${filter}`, kind: 'search', rawInput: args.pattern }
@@ -257,7 +267,7 @@ export function presentGrepCall(args: { pattern: string; path?: string; include?
  * @returns the search card view, or `undefined` for the generic fallback.
  */
 export function presentGrepResult(
-  _args: { pattern: string; path?: string; include?: string },
+  _args: { pattern: string; path?: string; include?: string; search_scope?: SearchScope },
   result: ToolResult,
 ): SearchResultView | undefined {
   if (result.isError) return undefined
@@ -283,11 +293,14 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
         + (ctx.tools.get('read', scope) === undefined ? '' : ' Use read on a matched file when you need surrounding context.'),
   })
 
+  const { projectScope } = caps
   const tool = defineTool({
     name: 'grep',
     description: 'Search file contents with a ripgrep regular expression. Returns matching lines with line numbers, grouped by file. '
+      + (projectScope === null ? '' : 'Skips hidden entries, ignored files and generated/cache directories unless search_scope is all; include overrides ignore files. ')
       + `Returns up to ${caps.maxMatches} matches; a larger result reports where the complete match list was saved.`,
     parameters: {
+      ...projectScope === null ? {} : { search_scope: SEARCH_SCOPE_PARAMETER },
       pattern: { type: 'string', required: true, description: 'Regular expression to search for (ripgrep syntax).' },
       path: { type: 'string', description: 'File or directory to search. Defaults to the session workspace; a relative path resolves against it.' },
       include: { type: 'string', description: 'One glob filter for which files to search (e.g. "*.ts", "*.{js,jsx}"). Not a list; negation is not supported.' },
@@ -311,19 +324,22 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
               },
             },
           },
+          scope: { type: 'string' },
         },
       },
-      render: (_args, value) => [{
+      render: (_args, value) => withScopeSummary([{
         type: 'text',
         text: formatRetainedGrep(retainGrepMatches(value.matches, caps.maxMatches, caps.maxLineBytes)),
-      }],
+      }], value.scope),
       presentationMeta: (_args, value) =>
         grepSearchMeta(retainGrepMatches(value.matches, caps.maxMatches, caps.maxLineBytes), caps.maxMetaBytes),
     },
     async execute(args, exec) {
       const input = parseGrepArgs(args)
-      const run = await runRipgrep(ctx, exec, 'grep', buildGrepCommand(input), caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes)
-      if (run.noMatches) return { matches: [] }
+      const command = buildGrepCommand(input, projectScope ?? undefined)
+      const run = await runRipgrep(ctx, exec, 'grep', command, caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes)
+      const scope = projectScope === null ? {} : { scope: await scopeSummary(run.workdir, input.path, input.searchScope ?? 'project', projectScope) }
+      if (run.noMatches) return { matches: [], ...scope }
 
       const all: GrepMatch[] = []
       for (const raw of parseGrepMatches(run.stdout)) {
@@ -334,7 +350,7 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
         }
         all.push(match)
       }
-      return { matches: all }
+      return { matches: all, ...scope }
     },
     presentCall: presentGrepCall,
     presentResult: presentGrepResult,
@@ -343,7 +359,7 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
 
   ctx.on('tools/post-execute', async (exec, result, next) => {
     const decision = await next()
-    const value = acceptedDirectCallValue(ctx, tool, exec, result, decision) as { matches: GrepMatch[] } | undefined
+    const value = acceptedDirectCallValue(ctx, tool, exec, result, decision) as { matches: GrepMatch[]; scope?: string } | undefined
     if (value === undefined) return decision
     const matches = value.matches
     if (matches.length <= caps.maxMatches) return decision
@@ -358,10 +374,10 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
     )
     return {
       kind: 'accept',
-      content: [{
+      content: withScopeSummary([{
         type: 'text',
         text: formatRetainedGrep(retainGrepMatches(matches, caps.maxMatches, caps.maxLineBytes), spillRef),
-      }],
+      }], value.scope),
       ...decision.additionalContexts !== undefined ? { additionalContexts: decision.additionalContexts } : {},
     }
   })

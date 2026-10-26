@@ -291,6 +291,16 @@ describe('registration', () => {
     expect(ctx.tools.get('grep')?.timeoutMs).toBe(30_000)
   })
 
+  it('offers search_scope only when a project scope is configured', async () => {
+    const plain = await setup()
+    for (const schema of plain.ctx.tools.schemas()) expect(JSON.stringify(schema.parameters)).not.toContain('search_scope')
+    const scoped = await setup({ config: { projectScope: { excludedDirectories: ['Intermediate'] } } })
+    for (const schema of scoped.ctx.tools.schemas()) {
+      expect(schema.parameters).toMatchObject({ properties: { search_scope: { type: 'string', enum: ['project', 'all'] } } })
+      expect(schema.description).toContain('generated/cache directories unless search_scope is all')
+    }
+  })
+
   it('describes the modification-time head when over-cap sampling is disabled', async () => {
     const { ctx } = await setup({ config: { sampleOverCapGlobResults: false } })
     const glob = ctx.tools.schemas().find(schema => schema.name === 'glob')
@@ -337,6 +347,16 @@ describe('config validation', () => {
       ...DEFAULT_CONFIG,
       graceMs: MAX_TIMER_DELAY_MS + 1,
     })).rejects.toThrow(`tool-fs-search: graceMs must be no greater than ${MAX_TIMER_DELAY_MS}`)
+  })
+
+  it.each(['', 'Saved/Logs', '*.tmp', '!Saved'])('rejects the project-scope directory name %j at load', async (name) => {
+    const ctx = new Context()
+    provideWorkingDirectoryFixture(ctx)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(FakeSubprocess)
+    await expect(ctx.plugin(ToolFsSearch, { ...DEFAULT_CONFIG, projectScope: { excludedDirectories: [name] } }))
+      .rejects.toThrow('tool-fs-search: projectScope.excludedDirectories entries must be plain directory names')
   })
 })
 
@@ -390,6 +410,21 @@ describe('command construction (plain argv)', () => {
     // of its argument because there is no shell between the vector and rg.
     expect(buildGrepCommand({ pattern: raw })).toEqual(['--json', `--regexp=${raw}`])
     expect(buildGlobCommand({ pattern: raw })[1]).toBe(`--glob=${raw}`)
+  })
+
+  const vcs = ['.git', '.svn', '.hg', '.bzr', '.jj', '.sl'].flatMap(name => [`--glob=!**/${name}`, `--glob=!**/${name}/**`])
+  const projectScope = { excludedDirectories: ['Intermediate'] }
+
+  it('project scope: honors ignore files and skips hidden entries and the configured directories', () => {
+    const scoped = ['--glob=!**/.*', '--glob=!**/.*/**', '--glob=!**/Intermediate', '--glob=!**/Intermediate/**', ...vcs]
+    expect(buildGlobCommand({ pattern: '*.h' }, projectScope)).toEqual(['--files', '--glob=*.h', '--sort=modified', ...scoped])
+    expect(buildGrepCommand({ pattern: 'x', path: 'Source' }, projectScope)).toEqual(['--json', '--regexp=x', ...scoped, '--', 'Source'])
+  })
+
+  it('all scope: searches hidden and ignored files and still skips VCS metadata', () => {
+    expect(buildGlobCommand({ pattern: '*.h', searchScope: 'all' }, projectScope))
+      .toEqual(['--files', '--glob=*.h', '--sort=modified', '--no-ignore', '--hidden', ...vcs])
+    expect(buildGrepCommand({ pattern: 'x', searchScope: 'all' }, projectScope)).toEqual(['--json', '--regexp=x', '--no-ignore', '--hidden', ...vcs])
   })
 })
 

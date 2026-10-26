@@ -15,6 +15,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, SearchResultView, ToolResult } from '@deepseek-ai/dsh-tools'
 import type { SpillRef } from '@deepseek-ai/dsh-spill'
 import { runRipgrep, toWorkdirRelative, trySaveFormattedResult } from './search-core.ts'
+import { GLOB_VCS_EXCLUDES, SEARCH_SCOPE_PARAMETER, excludeDirectory, scopeFlags, scopeSummary, withScopeSummary } from './scope.ts'
+import type { ProjectScope, SearchScope } from './scope.ts'
 import { globSearchMeta, searchViewFromMeta } from './presentation.ts'
 import { acceptedDirectCallValue } from './direct-call.ts'
 
@@ -23,18 +25,6 @@ import { acceptedDirectCallValue } from './direct-call.ts'
  * config), matching Claude Code's default `GlobTool` result limit.
  */
 export const GLOB_MAX_RESULTS = 100
-
-/**
- * Directory names ripgrep must never descend into for a discovery listing: VCS
- * metadata stores. `--no-ignore --hidden` would otherwise surface them in every
- * broad search. Each name is excluded with TWO negated `--glob`s (see
- * {@link buildGlobCommand}): an any-depth directory glob that matches — and
- * prunes — the directory during traversal, and a contents glob that still
- * excludes the internals when the search root itself is at or inside the
- * directory (an explicit `path` of `.git` or `sub/.git`), where the prune glob
- * alone never matches.
- */
-export const GLOB_VCS_EXCLUDES: readonly string[] = ['.git', '.svn', '.hg', '.bzr', '.jj', '.sl']
 
 /** Resolved glob-tool caps — plugin config after defaulting (see `Config` in index.ts). */
 export interface GlobToolCaps {
@@ -52,12 +42,16 @@ export interface GlobToolCaps {
   stderrMaxBytes: number
   /** Cooperative tool-call budget (ms) attached as `ToolDefinition.timeoutMs`. */
   timeoutMs: number
+  /** The project search scope, or `null` to search hidden and ignored files without a `search_scope` argument. */
+  projectScope: ProjectScope | null
 }
 
 /** Validated `glob` arguments. */
 export interface GlobInput {
   pattern: string
   path?: string
+  /** The requested scope; only accepted when a project scope is configured. */
+  searchScope?: SearchScope
 }
 
 /**
@@ -68,10 +62,14 @@ export interface GlobInput {
  * @param args - the schema-validated `glob` arguments.
  * @returns the accepted input, unchanged.
  */
-export function parseGlobArgs(args: { pattern: string; path?: string }): GlobInput {
+export function parseGlobArgs(args: { pattern: string; path?: string; search_scope?: SearchScope }): GlobInput {
   if (args.pattern.trim().length === 0) throw new Error('pattern must be a non-empty string')
   if (args.path !== undefined && args.path.trim().length === 0) throw new Error('path must be a non-empty string when given')
-  return { pattern: args.pattern, ...args.path !== undefined ? { path: args.path } : {} }
+  return {
+    pattern: args.pattern,
+    ...args.path !== undefined ? { path: args.path } : {},
+    ...args.search_scope !== undefined ? { searchScope: args.search_scope } : {},
+  }
 }
 
 /**
@@ -79,18 +77,20 @@ export function parseGlobArgs(args: { pattern: string; path?: string }): GlobInp
  * model-controlled value ({@link GlobInput.pattern}, {@link GlobInput.path})
  * is a plain argv element — no shell layer exists, so no quoting applies; the
  * search root rides behind `--` so a leading-dash path can never be parsed as
- * a flag. `--sort=modified` orders by modification time, `--no-ignore
- * --hidden` searches ignored and hidden files, and
- * {@link GLOB_VCS_EXCLUDES} keeps VCS metadata out. Simple directory prefixes
+ * a flag. `--sort=modified` orders by modification time. Without a project
+ * scope, `--no-ignore --hidden` searches ignored and hidden files and
+ * {@link GLOB_VCS_EXCLUDES} keeps VCS metadata out; with one, the requested
+ * scope selects those flags ({@link scopeFlags}). Simple directory prefixes
  * prune unrelated subtrees through directory-name globs without changing the
  * search root, path separators, or symlink handling. The last matching glob
  * wins. A fixed 8 KiB budget bounds added argv bytes; larger additions retain
  * the original traversal, since even linear growth can exceed command-line limits.
  *
  * @param input - the validated arguments.
+ * @param projectScope - the deployment's project scope, when configured.
  * @returns the complete ripgrep argument vector (excluding the binary itself).
  */
-export function buildGlobCommand(input: GlobInput): string[] {
+export function buildGlobCommand(input: GlobInput, projectScope?: ProjectScope): string[] {
   const directories = input.pattern.split('/').slice(0, -1)
   const pruning: string[] = []
   if (input.path === undefined && directories.length > 0
@@ -106,16 +106,9 @@ export function buildGlobCommand(input: GlobInput): string[] {
     ...pruning,
     `--glob=${input.pattern}`,
     '--sort=modified',
-    '--no-ignore',
-    '--hidden',
-    // Two negated globs per VCS name: the bare form prunes the directory
-    // during traversal; the /** form still excludes the contents when the
-    // search root is AT or INSIDE the directory (where the bare form,
-    // matched against root-prefixed paths, never fires).
-    ...GLOB_VCS_EXCLUDES.flatMap(name => [
-      `--glob=!**/${name}`,
-      `--glob=!**/${name}/**`,
-    ]),
+    ...projectScope === undefined
+      ? ['--no-ignore', '--hidden', ...GLOB_VCS_EXCLUDES.flatMap(excludeDirectory)]
+      : scopeFlags(input.searchScope ?? 'project', projectScope),
   ]
   if (input.path !== undefined) parts.push('--', input.path)
   return parts
@@ -278,7 +271,7 @@ function globCardPage(paths: string[], caps: GlobToolCaps, root: string): { item
  * @param args - the raw tool arguments; `pattern` and `path` feed the title.
  * @returns the generic card view (`kind: 'search'`) shown while the call runs.
  */
-export function presentGlobCall(args: { pattern: string; path?: string }): GenericCallView {
+export function presentGlobCall(args: { pattern: string; path?: string; search_scope?: SearchScope }): GenericCallView {
   const where = args.path !== undefined ? ` in ${args.path}` : ''
   return { card: 'generic', title: `Glob ${args.pattern}${where}`, kind: 'search', rawInput: args.pattern }
 }
@@ -294,7 +287,10 @@ export function presentGlobCall(args: { pattern: string; path?: string }): Gener
  * @param result - the final model-facing tool result carrying the projected metadata.
  * @returns the search card view, or `undefined` for the generic fallback.
  */
-export function presentGlobResult(_args: { pattern: string; path?: string }, result: ToolResult): SearchResultView | undefined {
+export function presentGlobResult(
+  _args: { pattern: string; path?: string; search_scope?: SearchScope },
+  result: ToolResult,
+): SearchResultView | undefined {
   if (result.isError) return undefined
   const view = searchViewFromMeta(result.meta)
   if (view === undefined || view.shape !== 'paths') return undefined
@@ -318,12 +314,17 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
   })
 
   const overCapDescription = caps.sampleOverCapGlobResults ? 'is sampled across top-level entries' : 'keeps the first paths'
+  const { projectScope } = caps
+  const coverage = projectScope === null
+    ? 'including hidden and ignored files'
+    : 'skipping hidden entries and generated/cache directories unless search_scope is all'
   const tool = defineTool({
     name: 'glob',
-    description: 'Find files, not directories, whose paths match a glob pattern, including hidden and ignored files. '
+    description: `Find files, not directories, whose paths match a glob pattern, ${coverage}. `
       + `Returns up to ${caps.maxResults} paths in modification-time order; a larger result ${overCapDescription} `
       + 'and reports where the complete list was saved.',
     parameters: {
+      ...projectScope === null ? {} : { search_scope: SEARCH_SCOPE_PARAMETER },
       pattern: {
         type: 'string',
         required: true,
@@ -340,9 +341,10 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
         properties: {
           root: { type: 'string', required: true },
           paths: { type: 'array', required: true, items: { type: 'string' } },
+          scope: { type: 'string' },
         },
       },
-      render: (_args, value) => [{ type: 'text', text: renderGlobPaths(value.paths, caps, value.root) }],
+      render: (_args, value) => withScopeSummary([{ type: 'text', text: renderGlobPaths(value.paths, caps, value.root) }], value.scope),
       presentationMeta: (_args, value) => {
         const page = globCardPage(value.paths, caps, value.root)
         return globSearchMeta({ items: page.items, truncated: page.truncated, seen: value.paths.length }, caps.maxMetaBytes)
@@ -350,9 +352,11 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
     },
     async execute(args, exec) {
       const input = parseGlobArgs(args)
-      const run = await runRipgrep(ctx, exec, 'glob', buildGlobCommand(input), caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes)
+      const command = buildGlobCommand(input, projectScope ?? undefined)
+      const run = await runRipgrep(ctx, exec, 'glob', command, caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes)
       const root = input.path === undefined ? '.' : toWorkdirRelative(input.path, run.workdir)
-      if (run.noMatches) return { root, paths: [] }
+      const scope = projectScope === null ? {} : { scope: await scopeSummary(run.workdir, input.path, input.searchScope ?? 'project', projectScope) }
+      if (run.noMatches) return { root, paths: [], ...scope }
 
       const all: string[] = []
       for (const line of run.stdout.split('\n')) {
@@ -360,7 +364,7 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
         const displayPath = toWorkdirRelative(line, run.workdir)
         all.push(displayPath)
       }
-      return { root, paths: all }
+      return { root, paths: all, ...scope }
     },
     presentCall: presentGlobCall,
     presentResult: presentGlobResult,
@@ -369,14 +373,15 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
 
   ctx.on('tools/post-execute', async (exec, result, next) => {
     const decision = await next()
-    const value = acceptedDirectCallValue(ctx, tool, exec, result, decision) as { root: string; paths: string[] } | undefined
+    type GlobValue = { root: string; paths: string[]; scope?: string }
+    const value = acceptedDirectCallValue(ctx, tool, exec, result, decision) as GlobValue | undefined
     if (value === undefined) return decision
     const paths = value.paths
     if (paths.length <= caps.maxResults) return decision
     const spillRef = await trySaveFormattedResult(ctx, exec, 'glob-results.txt', paths.join('\n'))
     return {
       kind: 'accept',
-      content: [{ type: 'text', text: renderGlobPaths(paths, caps, value.root, spillRef) }],
+      content: withScopeSummary([{ type: 'text', text: renderGlobPaths(paths, caps, value.root, spillRef) }], value.scope),
       ...decision.additionalContexts !== undefined ? { additionalContexts: decision.additionalContexts } : {},
     }
   })

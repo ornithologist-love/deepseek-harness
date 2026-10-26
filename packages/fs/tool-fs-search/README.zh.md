@@ -67,6 +67,9 @@ kind: "package-reference"
 | `graceMs` | `3000` | subprocess seam 在 `timeoutMs` 之外授予的终止升级宽限期 |
 | `stderrMaxBytes` | `65536` | `rg` stderr 的诊断尾部预算 |
 | `searchMetaMaxBytes` | `65536` | 一次搜索序列化 `presentationMeta` 的字节上限；超出部分丢弃尾部的组/路径 |
+| `projectScope` | `null` | `{ excludedDirectories }` 增加 `search_scope` 参数，并把项目文件设为默认范围；`null` 保持不限范围的搜索 |
+
+配置 `projectScope` 后，两个工具都接受 `search_scope`。默认的 `project` 跳过隐藏条目和任意深度上名为 `excludedDirectories` 中各项的目录；忽略文件生效，但与 ripgrep 一致，显式的 `glob` 模式或 `include` 过滤器会覆盖它们。`all` 搜索隐藏、忽略和被排除的目录。两种范围都跳过 VCS 元数据，`grep` 指定的单个文件不受范围限制，每个结果开头给出绝对搜索根与范围。各项必须是 `Intermediate` 这样的纯目录名；含分隔符或 glob 语法时在加载时失败。
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-tool-fs-search)是每个受支持字段及其 JSDoc 的穷尽式真源。
 
@@ -179,7 +182,7 @@ Use the grep tool — not shell grep or rg — to search file contents. Use read
 
 #### 模型看到的内容
 
-glob 描述声明了配置的超过上限排序方式。生成的 [`glob` 和 `grep` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-fs-search) 使用 `sampleOverCapGlobResults: true`；工具无条件注册。
+glob 描述声明了配置的超过上限排序方式。生成的 [`glob` 和 `grep` schema](../../../docs/tool-catalog.zh.md#deepseek-aidsh-tool-fs-search) 使用 `sampleOverCapGlobResults: true`；工具无条件注册。配置 `projectScope` 后，两个描述都说明默认范围，两个 schema 都增加 `search_scope`。
 
 #### Token 影响
 
@@ -193,7 +196,7 @@ glob 描述声明了配置的超过上限排序方式。生成的 [`glob` 和 `g
 
 #### 模型看到的内容
 
-`glob` 每行返回一个路径；`grep` 在每个路径下分组展示 `Line <line>: <preview>` 匹配。空搜索返回 `No files found` 或 `No matches found`。达到上限的结果以省略计数结尾，并附 spill locator 与后端检索提示，或说明完整结果无法保存。启用 `sampleOverCapGlobResults: true` 时，超过上限的 `glob` 页面按实际搜索根正下方的条目轮转取路径，页脚说明采样依据及其覆盖的顶层条目数；`false` 时页面是按修改时间排序的前部，并保留普通的上限结果页脚。spill 产物始终持有按修改时间排序的完整列表。
+`glob` 每行返回一个路径；`grep` 在每个路径下分组展示 `Line <line>: <preview>` 匹配。空搜索返回 `No files found` 或 `No matches found`。达到上限的结果以省略计数结尾，并附 spill locator 与后端检索提示，或说明完整结果无法保存。启用 `sampleOverCapGlobResults: true` 时，超过上限的 `glob` 页面按实际搜索根正下方的条目轮转取路径，页脚说明采样依据及其覆盖的顶层条目数；`false` 时页面是按修改时间排序的前部，并保留普通的上限结果页脚。spill 产物始终持有按修改时间排序的完整列表。配置 `projectScope` 后，第一行文本说明绝对搜索根与范围。
 
 #### Token 影响
 
