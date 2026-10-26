@@ -33,8 +33,9 @@ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { GLOB_MAX_RESULTS, applyGlobTool } from './glob.ts'
 import { GREP_MAX_LINE_BYTES, GREP_MAX_MATCHES, applyGrepTool } from './grep.ts'
 import { RAW_OUTPUT_MAX_BYTES, SEARCH_GRACE_MS, SEARCH_META_MAX_BYTES, SEARCH_STDERR_MAX_BYTES, SEARCH_TIMEOUT_MS } from './search-core.ts'
+import type { ProjectScope } from './scope.ts'
 
-export { GLOB_MAX_RESULTS, GLOB_VCS_EXCLUDES, applyGlobTool, buildGlobCommand, formatGlobOutput, parseGlobArgs, presentGlobCall, presentGlobResult, sampleAcrossTopLevel } from './glob.ts'
+export { GLOB_MAX_RESULTS, applyGlobTool, buildGlobCommand, formatGlobOutput, parseGlobArgs, presentGlobCall, presentGlobResult, sampleAcrossTopLevel } from './glob.ts'
 export type { GlobInput, GlobSample, GlobToolCaps } from './glob.ts'
 export {
   GREP_MAX_LINE_BYTES,
@@ -49,6 +50,8 @@ export {
   presentGrepResult,
 } from './grep.ts'
 export type { GrepInput, GrepToolCaps } from './grep.ts'
+export { GLOB_VCS_EXCLUDES, SEARCH_SCOPE_PARAMETER, scopeFlags, scopeSummary } from './scope.ts'
+export type { ProjectScope, SearchScope } from './scope.ts'
 export {
   RAW_OUTPUT_MAX_BYTES,
   SEARCH_GRACE_MS,
@@ -93,6 +96,14 @@ export interface Config {
    * `@deepseek-ai/dsh-tool-call-timeout-policy` through `exec.signal`.
    */
   timeoutMs?: number
+  /**
+   * The project search scope. When set, both tools accept `search_scope` and
+   * default to project files: hidden entries and these directory names are
+   * skipped, ignore files apply unless an explicit pattern or include filter
+   * overrides them, and each result states its root and scope. `null` (the
+   * default) keeps unscoped searches without the argument.
+   */
+  projectScope?: ProjectScope | null
 }
 
 export const Config: z<Config> = z.object({
@@ -105,6 +116,7 @@ export const Config: z<Config> = z.object({
   graceMs: z.number().default(SEARCH_GRACE_MS),
   stderrMaxBytes: z.number().default(SEARCH_STDERR_MAX_BYTES),
   timeoutMs: z.number().default(SEARCH_TIMEOUT_MS),
+  projectScope: z.union([z.const(null), z.object({ excludedDirectories: z.array(z.string()).required() })]).default(null),
 })
 
 /** The shape after schemastery applied the defaults. */
@@ -140,6 +152,13 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   }
   assertPositiveInteger('stderrMaxBytes', resolved.stderrMaxBytes)
   assertPositiveInteger('timeoutMs', resolved.timeoutMs)
+  // schemastery omits a `null` default from the resolved object.
+  const projectScope = resolved.projectScope ?? null
+  for (const name of projectScope?.excludedDirectories ?? []) {
+    if (name.length === 0 || /[\\/*?[\]{}!,]/.test(name)) {
+      throw new Error('tool-fs-search: projectScope.excludedDirectories entries must be plain directory names')
+    }
+  }
   applyGlobTool(ctx, {
     sampleOverCapGlobResults: resolved.sampleOverCapGlobResults,
     maxResults: resolved.globMaxResults,
@@ -148,6 +167,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     graceMs: resolved.graceMs,
     stderrMaxBytes: resolved.stderrMaxBytes,
     timeoutMs: resolved.timeoutMs,
+    projectScope,
   })
   applyGrepTool(ctx, {
     maxMatches: resolved.grepMaxMatches,
@@ -157,5 +177,6 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     graceMs: resolved.graceMs,
     stderrMaxBytes: resolved.stderrMaxBytes,
     timeoutMs: resolved.timeoutMs,
+    projectScope,
   })
 }

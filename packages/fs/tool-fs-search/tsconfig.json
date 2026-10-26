@@ -46,6 +46,9 @@
     },
     {
       "path": "../../util/ripgrep"
+    },
+    {
+      "path": "../../util/values"
     }
   ]
 }
