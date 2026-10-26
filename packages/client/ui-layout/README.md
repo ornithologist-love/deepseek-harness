@@ -9,6 +9,8 @@ English | [中文](README.zh.md)
 
 ## Summary
 
+Embedders can call `ctx.layout.setSingleColumn(true)` to present the existing sidebar and main view as full-width pages. `showSidebar()` opens navigation, selecting a main panel returns to its content, and both columns remain mounted so input and browsing state survive the switch. Disable single-column mode to restore the normal column widths.
+
 This package provides the Web GUI's three-column AppFrame, edge-column widths, and `ctx.layout` presentation control. The right column concedes space before the center; its occupant renders fullscreen while the frame retains the wide-screen track underneath. The theme presenter owns color scheme, alias tokens, font sizes, font lists, and document metadata. Layout state resets on reload.
 
 ## Table of Contents
@@ -105,3 +107,5 @@ These limits define the current layout behavior. They are current package constr
 None.
 
 </details>
+
+Document presentation may set `__DSH_LAYOUT_OPTIONS__.persistentPanels` to keep selected main-slot occupants mounted while hidden, and `documentTitle` to fix the browser title. Omitted options retain normal panel teardown and native Session-title projection. Persistent panels must be registered main keys and remain owned by their plugin lifetime.

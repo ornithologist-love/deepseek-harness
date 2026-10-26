@@ -9,6 +9,8 @@ kind: "package-reference"
 
 ## 概述
 
+嵌入方可调用 `ctx.layout.setSingleColumn(true)`，将现有侧栏和主视图显示为两个全宽页面。`showSidebar()` 打开导航，选择主面板返回内容；两列始终保留挂载，输入和浏览状态随切换保留。关闭单列模式恢复原有列宽。
+
 本包提供 Web GUI 的三栏 AppFrame、左右栏宽度与 `ctx.layout` 呈现控制。右栏先让步以保护中栏空间，全屏由占用方呈现，框架保留宽屏底层轨道。主题呈现器负责配色、别名 token、字号、字体列表与 document 元数据；布局状态在刷新后重置。
 
 ## 目录
@@ -105,3 +107,5 @@ Windows Electron 的 `data-windows-titlebar` 标记在所有列上方预留顶�
 无。
 
 </details>
+
+文档呈现可通过 `__DSH_LAYOUT_OPTIONS__.persistentPanels` 指定隐藏后仍保持挂载的主面板，通过 `documentTitle` 固定浏览器标题。不提供时沿用主面板卸载和原生会话标题投影。常驻面板使用已注册的主面板标识，资源仍归对应插件生命周期管理。

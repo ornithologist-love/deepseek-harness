@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type {
-  PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
+  InjectFace, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
 } from '@deepseek-ai/dsh-client-ui-slots'
 import { CENTER_MIN, clampWidth, computeColumns, RIGHTBAR_DEFAULT_RATIO, RIGHTBAR_MAX_RATIO, RIGHTBAR_MIN, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_COLLAPSED, SIDEBAR_DEFAULT } from './columns.ts'
 import { DocumentTitle } from './DocumentTitle.tsx'
@@ -30,6 +30,7 @@ export type AppFrameProps =
   & PropsRenderSlots<'sidebar' | 'main' | 'rightbar' | 'shell.bottom' | 'shell.overlay' | 'shell.leading'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
   & PropsLocale<'common'>
+  & InjectFace<{ persistentPanels?: readonly string[]; documentTitle?: string }>
 
 /** Center column grid item (session-body building block). */
 function CenterColumn(props: { children?: ReactNode }) {
@@ -37,9 +38,13 @@ function CenterColumn(props: { children?: ReactNode }) {
 }
 
 /** Subscribe to the main key without subscribing the column frame to each panel id. */
-function MainPanel({ usePanelInfo, renderSlot }: Pick<PropsRuntime<'root'>, 'usePanelInfo'> & PropsRenderSlots<'main'>) {
-  const panelId = usePanelInfo(info => info.activePanelId)
-  return renderSlot('main', {}, { entryKey: panelId ?? 'conversation' })
+function MainPanel({ usePanelInfo, renderSlot, persistentPanels = [] }: Pick<PropsRuntime<'root'>, 'usePanelInfo'> & PropsRenderSlots<'main'> & { persistentPanels?: readonly string[] }) {
+  const active = usePanelInfo(info => info.activePanelId) ?? 'conversation'
+  if (!persistentPanels.length) return renderSlot('main', {}, { entryKey: active })
+  return <>{[...new Set([...persistentPanels, active])].map(key => <div key={key} hidden={key !== active}
+    style={{ display: key === active ? 'flex' : 'none', height: '100%', minHeight: 0, flexDirection: 'column' }}>
+    {renderSlot('main', {}, { entryKey: key })}
+  </div>)}</>
 }
 
 /**
@@ -125,6 +130,8 @@ export function AppFrame({
   actions,
   renderSlot,
   t,
+  persistentPanels = [],
+  documentTitle,
 }: AppFrameProps) {
   const layoutInfo = useStore(state => state.layoutInfo)
   const frameRef = useRef<HTMLDivElement | null>(null)
@@ -159,7 +166,9 @@ export function AppFrame({
 
   const narrow = viewport < SIDEBAR_AUTO_COLLAPSE
   const sidebarHidden = layoutInfo.sidebarHidden
-  const sidebarCollapsed = sidebarHidden || (narrow ? !layoutInfo.narrowExpanded : layoutInfo.sidebar === 0)
+  const singleColumn = layoutInfo.singleColumn && !sidebarHidden
+  const sidebarPage = singleColumn && layoutInfo.narrowExpanded
+  const sidebarCollapsed = sidebarHidden || (!singleColumn && (narrow ? !layoutInfo.narrowExpanded : layoutInfo.sidebar === 0))
   const sidebarPreference = sidebarCollapsed
     ? 0
     : layoutInfo.sidebar === 0 ? SIDEBAR_DEFAULT : layoutInfo.sidebar
@@ -232,6 +241,12 @@ export function AppFrame({
     actions.setRightbar(rightbarBase.current - dx)
   }, [actions])
   const productTitle = process.env.DSH_CLIENT_TITLE ?? t('brand.localBuild')
+  useEffect(() => {
+    if (documentTitle === undefined) return
+    const previous = document.title
+    document.title = documentTitle
+    return () => { document.title = previous }
+  }, [documentTitle])
   // The rendered template lets the grid solve the squeeze natively: the centre
   // declares its protected minimum and the right column bids up to the clamped
   // preference, so a window resize lands in the same layout pass as the frame
@@ -242,11 +257,11 @@ export function AppFrame({
   const rightbarMax = cols.rightbar === 0 ? 0 : clampWidth(rightbarPreference, RIGHTBAR_MIN, viewport * RIGHTBAR_MAX_RATIO)
   const sidebar = useMemo(() => renderSlot('sidebar', {
     collapsed: sidebarCollapsed,
-    width: cols.sidebar,
-  }), [renderSlot, sidebarCollapsed, cols.sidebar])
+    width: singleColumn ? viewport : cols.sidebar,
+  }), [renderSlot, sidebarCollapsed, cols.sidebar, singleColumn, viewport])
   const main = useMemo(() => (
-    <MainPanel usePanelInfo={usePanelInfo} renderSlot={renderSlot} />
-  ), [usePanelInfo, renderSlot])
+    <MainPanel usePanelInfo={usePanelInfo} renderSlot={renderSlot} persistentPanels={persistentPanels} />
+  ), [usePanelInfo, renderSlot, persistentPanels])
   const overlays = useMemo(() => renderSlot('shell.overlay', {}), [renderSlot])
   // Window-chrome seat over the main panels' top-left corner: only a fully
   // hidden sidebar column on macOS desktop leaves window chrome without a
@@ -254,7 +269,7 @@ export function AppFrame({
   // row (ui-sidebar). AppFrame.module.css publishes the matching
   // --dsh-frame-leading-clearance under the same collapsed condition.
   const leading = useMemo(() => renderSlot('shell.leading', {}), [renderSlot])
-  const leadingMounted = darwin && sidebarCollapsed
+  const leadingMounted = singleColumn && !sidebarPage || darwin && sidebarCollapsed
 
   return (
     <div
@@ -267,17 +282,18 @@ export function AppFrame({
           `${cols.sidebar}px minmax(${cols.rightbar === 0 ? 0 : CENTER_MIN}px, 1fr) minmax(0px, ${rightbarMax}px)`,
       }}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
+      data-single-column={singleColumn ? sidebarPage ? 'sidebar' : 'main' : undefined}
       data-rightbar-collapsed={cols.rightbar === 0 || undefined}
       data-rightbar-fullscreen={layoutInfo.rightbarFullscreen || undefined}
       data-rightbar-instant={layoutInfo.rightbarInstant || undefined}
       data-dragging={dragging || undefined}
       data-animating={animating > 0 || undefined}
     >
-      <DocumentTitle
+      {documentTitle === undefined && <DocumentTitle
         productTitle={productTitle}
         useSessions={useSessions}
         usePanelInfo={usePanelInfo}
-      />
+      />}
       <div className={css.sidebarCol}>
         {!sidebarHidden && sidebar}
       </div>
@@ -294,13 +310,13 @@ export function AppFrame({
         {overlays}
       </div>
       {!sidebarHidden && leadingMounted && (
-        <div className={css.leadingSeat} data-shell-leading>
+        <div className={singleColumn ? css.pageLeading : css.leadingSeat} data-shell-leading>
           {leading}
         </div>
       )}
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
-      {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
+      {!singleColumn && !sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
+      {!singleColumn && layoutInfo.rightbarShown && !layoutInfo.rightbarFullscreen && normal.rightbar > 0 && (
         <DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />
       )}
     </div>

@@ -7,6 +7,16 @@
   background: var(--dsw-alias-bg-base);
 }
 
+/* Page navigation retains the same sidebar, conversation and input instances. */
+.frame[data-single-column] { display: flex; flex-direction: column; }
+.frame[data-single-column] .sidebarCol { flex: 1; min-height: 0; border: 0; }
+.frame[data-single-column] .centerCol { flex: 1; min-height: 0; }
+.frame[data-single-column='main'] .sidebarCol,
+.frame[data-single-column='sidebar'] .centerCol,
+.frame[data-single-column='sidebar'] .rightbarCol,
+.frame[data-single-column='sidebar'] .bottomRow { display: none; }
+.pageLeading { order: -1; flex: none; display: flex; align-items: center; min-height: 48px; padding: env(safe-area-inset-top) 12px 0; border-bottom: 1px solid var(--dsw-alias-border-l3); }
+
 /* Only a discrete collapse/expand toggle eases the tracks (the TSX holds
    data-animating across the toggle on the deepsuite sider curve). Steady-state
    tracks move only with the viewport, and those updates must land instantly:

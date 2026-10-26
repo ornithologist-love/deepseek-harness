@@ -49,6 +49,13 @@ export interface ILayout {
    */
   setSidebarHidden(hidden: boolean): void
   /**
+   * Present the existing sidebar and main column as full-width pages.
+   * @param enabled - whether one column is visible at a time; both remain mounted.
+   */
+  setSingleColumn(enabled: boolean): void
+  /** Open the navigation column, retaining the current main panel and its input. */
+  showSidebar(): void
+  /**
    * Report the right panel's presentation without changing its expanded state.
    * @param track - whether the normal panel width reserves a grid track,
    *   including beneath a fullscreen overlay.
@@ -104,6 +111,14 @@ export class LayoutController implements ILayout {
   /** Remove or restore the sidebar column for this document. */
   setSidebarHidden(hidden: boolean): void {
     this.panels.setSidebarHidden(hidden)
+  }
+
+  setSingleColumn(enabled: boolean): void {
+    this.panels.setSingleColumn(enabled)
+  }
+
+  showSidebar(): void {
+    this.panels.showSidebar()
   }
 
   /** Report the right panel's track and fullscreen presentation. */

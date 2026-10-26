@@ -29,6 +29,8 @@ type LayoutInfo = {
    * reopen control is offered and toggles leave the preference untouched.
    */
   sidebarHidden: boolean
+  /** Display the existing sidebar and main column as full-width pages. */
+  singleColumn: boolean
   /** Last positive frame measurement; window width bootstraps the first render. */
   viewportWidth: number
   narrowExpanded: boolean
@@ -67,6 +69,8 @@ type LayoutActions = {
   setSidebar: (draft: LayoutState, px: number) => void
   toggleSidebar: (draft: LayoutState) => void
   setSidebarHidden: (draft: LayoutState, hidden: boolean) => void
+  setSingleColumn: (draft: LayoutState, enabled: boolean) => void
+  showSidebar: (draft: LayoutState) => void
   setViewportWidth: (draft: LayoutState, width: number) => void
   setRightbar: (draft: LayoutState, px: number) => void
   openRightbar: (draft: LayoutState, track: boolean, fullscreen: boolean) => void
@@ -89,6 +93,7 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
       layoutInfo: {
         sidebar: SIDEBAR_DEFAULT,
         sidebarHidden: false,
+        singleColumn: false,
         viewportWidth: window.innerWidth,
         narrowExpanded: false,
         rightbar: null,
@@ -101,6 +106,7 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
     actions: {
       selectPanel: (d, panelId: MainPanelId | null) => {
         d.panelInfo.activePanelId = panelId
+        if (d.layoutInfo.singleColumn) d.layoutInfo.narrowExpanded = false
       },
       retainMainPanels: (d, panelIds: readonly string[]) => {
         if (d.panelInfo.activePanelId !== null && !panelIds.includes(d.panelInfo.activePanelId)) {
@@ -116,11 +122,20 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
       toggleSidebar: (d) => {
         if (d.layoutInfo.sidebarHidden) return
         d.layoutInfo.rightbarInstant = false
-        if (d.layoutInfo.viewportWidth < SIDEBAR_AUTO_COLLAPSE) d.layoutInfo.narrowExpanded = !d.layoutInfo.narrowExpanded
-        else d.layoutInfo.sidebar = d.layoutInfo.sidebar === 0 ? SIDEBAR_DEFAULT : 0
+        if (d.layoutInfo.singleColumn || d.layoutInfo.viewportWidth < SIDEBAR_AUTO_COLLAPSE) {
+          d.layoutInfo.narrowExpanded = !d.layoutInfo.narrowExpanded
+        } else d.layoutInfo.sidebar = d.layoutInfo.sidebar === 0 ? SIDEBAR_DEFAULT : 0
       },
       setSidebarHidden: (d, hidden: boolean) => {
         d.layoutInfo.sidebarHidden = hidden
+      },
+      setSingleColumn: (d, enabled: boolean) => {
+        d.layoutInfo.singleColumn = enabled
+      },
+      showSidebar: (d) => {
+        if (d.layoutInfo.sidebarHidden) return
+        d.layoutInfo.narrowExpanded = true
+        if (d.layoutInfo.sidebar === 0) d.layoutInfo.sidebar = SIDEBAR_DEFAULT
       },
       // Crossing the breakpoint in either direction drops the override: the
       // narrow default is auto-collapsed, the wide state is the preference.
