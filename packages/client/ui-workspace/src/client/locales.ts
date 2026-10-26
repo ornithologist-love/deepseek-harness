@@ -6,6 +6,10 @@
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
+  'remote.allMachines': '全部',
+  'remote.machines': '筛选机器',
+  'remote.memberDirectories': '{count} 个目录',
+  'remote.primaryDirectory': '主要目录',
   'remote.chooseHost': '选择工作区所在机器',
   'remote.currentMachine': '当前机器',
   'remote.remoteMachine': '远程',
@@ -28,6 +32,7 @@ export const zh = {
   'remote.browser.showHidden': '显示隐藏文件',
   'remote.reconnecting': '正在重连 {host}…',
   'remote.workspace': '远端工作区 · {host}',
+  'remote.session': '远端会话 · {host}',
   'defaultWorkspace.failed': '无法创建默认工作区，请通过“选择工作区”选择文件夹',
   'draft.workspaceRequired': '请先选择工作区',
   'draft.initializationFailed': '暂时无法填入草稿，请稍后重试',
@@ -41,6 +46,9 @@ export const zh = {
   'shortcut.noCompletedTurn': '当前会话没有已结束的轮次',
   'shortcut.forkFailed': '无法分叉会话，请重试',
   'section.workspaces': '工作区',
+  'section.localWorkspaces': '本地工作区',
+  'machine.expand': '展开 {host}',
+  'machine.collapse': '折叠 {host}',
   'section.sessions': '会话',
   'viewOptions.label': '视图选项',
   'groupBy.label': '分组方式',
@@ -156,6 +164,10 @@ export type WorkspaceKey = keyof typeof zh
 
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
+  'remote.allMachines': 'All',
+  'remote.machines': 'Filter machines',
+  'remote.memberDirectories': '{count} directories',
+  'remote.primaryDirectory': 'Primary directory',
   'remote.chooseHost': 'Choose a workspace host',
   'remote.currentMachine': 'Current machine',
   'remote.remoteMachine': 'Remote',
@@ -178,6 +190,7 @@ export const en = {
   'remote.browser.showHidden': 'Show hidden files',
   'remote.reconnecting': 'Reconnecting to {host}…',
   'remote.workspace': 'Remote workspace · {host}',
+  'remote.session': 'Remote session · {host}',
   'defaultWorkspace.failed': 'Unable to create default workspace. Use Choose workspace to select a folder.',
   'draft.workspaceRequired': 'Choose a workspace first.',
   'draft.initializationFailed': 'Could not fill the draft. Please try again shortly.',
@@ -191,6 +204,9 @@ export const en = {
   'shortcut.noCompletedTurn': 'This session has no completed turn',
   'shortcut.forkFailed': 'Could not fork the session. Try again.',
   'section.workspaces': 'Workspaces',
+  'section.localWorkspaces': 'Local workspaces',
+  'machine.expand': 'Expand {host}',
+  'machine.collapse': 'Collapse {host}',
   'section.sessions': 'Sessions',
   'viewOptions.label': 'View options',
   'groupBy.label': 'Group by',

@@ -338,7 +338,17 @@ class UiWorkspaceService extends Service implements UiWorkspace {
 
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void {
     const external = this.presentation().external
-    if (workspaceId === undefined && external?.activeKey) { external.create(external.activeKey); return }
+    if (workspaceId === undefined && external?.activeKey) {
+      const active = external.items.find(item => item.key === external.activeKey)
+      const target = active?.workspaceId !== undefined ? active
+        : external.items.find(item => item.hostId === active?.hostId && item.workspaceId !== undefined)
+      if (target) { external.create(target.key); return }
+    }
+    if (workspaceId === undefined && external?.hideLocalWorkspaces) {
+      const workspace = external.items.find(item => item.online && item.workspaceId !== undefined)
+      if (workspace) external.create(workspace.key)
+      return
+    }
     if (options === undefined && this.presentation().newSession === 'fresh') {
       this.startFreshSession(workspaceId)
       return

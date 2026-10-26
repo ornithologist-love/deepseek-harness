@@ -15,15 +15,17 @@ function systemName(platform?: string): string {
 }
 
 /** Choose the owner before browsing. Server paths never enter local Workspace creation. */
-export function RemoteWorkspacePicker({ catalog, onLocal, onClose, renderFactorySlot, t: upstreamT }: {
+export function RemoteWorkspacePicker({ catalog, hostId: initialHostId, onLocal, onClose, renderFactorySlot, t: upstreamT }: {
   renderFactorySlot: PropsRenderFactories['renderFactorySlot']
   catalog: ExternalWorkspaceCatalog
+  /** Browse this Host directly; absent asks for the owning machine first. */
+  hostId?: ExternalWorkspaceHostId | undefined
   onLocal: () => void
   onClose: () => void
   t: WorkspacePickerProps['t']
 }) {
   const t = upstreamT
-  const [hostId, setHostId] = useState<ExternalWorkspaceHostId>()
+  const [hostId, setHostId] = useState<ExternalWorkspaceHostId | undefined>(initialHostId)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const host = catalog.hosts.find(item => item.id === hostId)
@@ -48,7 +50,7 @@ export function RemoteWorkspacePicker({ catalog, onLocal, onClose, renderFactory
     </Modal>
     {host && renderFactorySlot('workspace.directory.browser', { open: true, busy,
       title: t('remote.browser.title', { host: host.name }), listDirectory, createDirectory,
-      onClose: () => { if (!busy) onClose() }, onOpen: path => {
+      onClose: () => { if (!busy) onClose() }, onOpen: (path) => {
         setBusy(true); setError('')
         void catalog.addWorkspace(host.id, path).then(onClose).catch((failure: unknown) => {
           setError(failure instanceof Error ? failure.message : String(failure))

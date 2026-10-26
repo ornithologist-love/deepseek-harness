@@ -220,16 +220,18 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
  * @returns the row element.
  */
 export function ProjectRowItem({
-  recent = false, icon, remoteHost, group, containsCurrentDescendant = false, onToggle, onCreate, actions, drag, home, newShortcut, t,
+  recent = false, icon, remoteHost, subtitle, group, containsCurrentDescendant = false,
+  onToggle, onCreate, actions, drag, home, newShortcut, t,
 }: {
   recent?: boolean
   remoteHost?: string | undefined
+  subtitle?: string | undefined
   icon?: WorkspacePresentationIcon | undefined
   group: GroupNode
   newShortcut?: ShortcutCatalogEntry | undefined
   containsCurrentDescendant?: boolean
   onToggle: () => void
-  onCreate: () => void
+  onCreate?: (() => void) | undefined
   /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown). */
   /** `edit`, when present, replaces Rename with Edit. */
   actions?: { edit?: (() => void) | undefined; rename: () => void; delete: () => void } | undefined
@@ -257,6 +259,7 @@ export function ProjectRowItem({
       data-row-key={`workspace:${group.key}`}
       role="treeitem"
       aria-expanded={row.expanded}
+      aria-description={remoteHost === undefined ? undefined : t('remote.workspace', { host: remoteHost })}
       onClick={onToggle}
       draggable={drag !== undefined}
       onDragStart={drag === undefined
@@ -269,7 +272,7 @@ export function ProjectRowItem({
       onDragEnd={drag?.end}
     >
       <span className={clsx(css.slot, css.folder, active && css.folderActive)}>
-        {remoteHost ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" role="img" aria-label={t('remote.workspace', { host: remoteHost })}><path d="M7 18a4 4 0 0 1-.6-8 6 6 0 0 1 11.5-1A4.5 4.5 0 1 1 18 18H7Z" /></svg> : icon !== undefined
+        {icon !== undefined
           ? <img className={css.rowIcon} src={icon.src} alt={icon.alt} title={icon.title} aria-label={icon.ariaLabel} />
           : row.expanded ? <IconFolderOpenRegular /> : <IconFolderCloseRegular />}
       </span>
@@ -278,6 +281,7 @@ export function ProjectRowItem({
       </span>
       <span className={css.projectText}>
         <span className={css.title}>{label}</span>
+        {subtitle && <small className={css.subtitle}>{subtitle}</small>}
       </span>
       <span className={css.rowActions}>
         {actions !== undefined && (
@@ -309,7 +313,7 @@ export function ProjectRowItem({
             )}
           />
         )}
-        <Tooltip label={t('actions.newSession')} shortcutKeys={newShortcut?.keys} side="bottom" align="end" delayMs={500} portal>
+        {onCreate && <Tooltip label={t('actions.newSession')} shortcutKeys={newShortcut?.keys} side="bottom" align="end" delayMs={500} portal>
           <button
             type="button"
             className={css.iconButton}
@@ -319,7 +323,7 @@ export function ProjectRowItem({
           >
             <IconNewChatOutlineRegular />
           </button>
-        </Tooltip>
+        </Tooltip>}
       </span>
     </div>
   )
@@ -425,6 +429,24 @@ function SessionStatusDots({ statuses }: { statuses: readonly [SessionStatus, ..
 }
 
 /** Non-interactive pinned-row marker; the enclosing row remains the only action. */
+/**
+ * Cloud outline marking rows owned by another Host.
+ * @param size - Rendered width and height in pixels.
+ * @returns The decorative glyph.
+ */
+export function RemoteGlyph({ size }: { size: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true"><path d="M7 18a4 4 0 0 1-.6-8 6 6 0 0 1 11.5-1A4.5 4.5 0 1 1 18 18H7Z" /></svg>
+}
+
+/**
+ * Monitor outline marking the local machine's section.
+ * @param size - Rendered width and height in pixels.
+ * @returns The decorative glyph.
+ */
+export function LocalGlyph({ size }: { size: number }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="12" rx="2" /><path d="M9 20h6M12 16.5V20" /></svg>
+}
+
 function PinnedIndicator({ t }: { t: RowTranslate }) {
   const label = t('row.pinned')
   return (
@@ -559,12 +581,16 @@ export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t }: 
  * @returns the session row.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRenameRequest, renderSlot, onReveal, drag, flat = false, navigationOnly = false, t,
+  node, currentId, now, onOpen, onRenameRequest, renderSlot, onReveal, drag, flat = false, navigationOnly = false, remoteHost, rowKey, t,
 }: {
   node: SessionNode
   flat?: boolean
   /** External navigation cannot mutate local Session rows. */
   navigationOnly?: boolean
+  /** Owning remote machine, shown beside the update time. */
+  remoteHost?: string | undefined
+  /** Host-scoped identity for external rows whose Session ids may overlap local ones. */
+  rowKey?: string | undefined
   currentId: string | undefined
   now: number
   onOpen: (id: SessionNode['id']) => void
@@ -606,7 +632,8 @@ export function SessionNodeItem({
   const ownRow = (
     <div
       ref={rowRef}
-      data-row-key={`session:${node.id}`}
+      data-row-key={rowKey ?? `session:${node.id}`}
+      data-navigation-only={navigationOnly || undefined}
       className={clsx(
         css.sessionRow, selected && css.selected, menuOpen && css.menuOpen,
         row.archived && css.archived,
@@ -614,7 +641,8 @@ export function SessionNodeItem({
       )}
       role="treeitem"
       aria-selected={selected}
-      aria-description={row.archived ? t('toast.archivedNotOpenable') : undefined}
+      aria-description={row.archived ? t('toast.archivedNotOpenable')
+        : remoteHost === undefined ? undefined : t('remote.session', { host: remoteHost })}
       onClick={() => { onOpen(node.id) }}
       onPointerEnter={marquee.enter}
       onPointerLeave={marquee.leave}
@@ -668,7 +696,7 @@ export function SessionNodeItem({
           happened in it yet, so a "now" timestamp and the row verbs
           (rename/fork/archive) would all act on content that does not
           exist — both trailing cells stay off until the first prompt. */}
-      {!row.blank && !navigationOnly && (
+      {!row.blank && (
         <span
           className={css.time}
           aria-hidden={primaryStatus.trailingLabel === undefined ? undefined : true}
@@ -679,10 +707,16 @@ export function SessionNodeItem({
       {/* Trails the time so the marker occupies the same right-edge cell as
           the hover pin button that replaces it. */}
       {row.pinned && !row.archived && <PinnedIndicator t={t} />}
+      {/* One fixed cell, so a remote marker occupies its own column beyond the
+          time whichever label the row's status puts there; a local row reserves
+          the same cell empty and keeps the column from moving between rows. */}
+      <span className={css.remoteMarker} title={remoteHost} aria-hidden="true">
+        {remoteHost === undefined ? null : <RemoteGlyph size={14} />}
+      </span>
       {/* The strip's clicks stay in the strip: the trigger and every
           row.action entry act without also opening the row, so an entry's
           button needs no propagation handling of its own. */}
-      {!row.blank && (
+      {!row.blank && !navigationOnly && (
         <span className={css.rowActions} onClick={(e) => { e.stopPropagation() }}>
           <Menu
             open={menuOpen}

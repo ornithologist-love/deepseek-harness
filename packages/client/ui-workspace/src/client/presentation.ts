@@ -20,9 +20,19 @@ export type ExternalWorkspaceKey = Branded<'ExternalWorkspaceKey'>
 
 /** Navigation projections remain scoped to their source Host. */
 export interface ExternalWorkspaceCatalog {
+  /** Use this catalog as the navigation source without listing the entry Host's projects. */
+  readonly hideLocalWorkspaces?: boolean
   readonly localHost?: { readonly name: string; readonly platform: string } | undefined
-  readonly hosts: readonly { readonly id: ExternalWorkspaceHostId; readonly name: string; readonly hostname?: string; readonly platform?: string;
-    readonly address?: string; readonly online: boolean; readonly canAdd: boolean }[]
+  readonly hosts: readonly {
+    readonly id: ExternalWorkspaceHostId
+    readonly name: string
+    readonly hostname?: string
+    readonly platform?: string
+    readonly address?: string
+    readonly online: boolean
+    readonly canAdd: boolean
+    readonly local?: boolean
+  }[]
   /** Browse a directory on its owning Host. */
   readonly listDirectory: (hostId: ExternalWorkspaceHostId, path?: string, signal?: AbortSignal) => Promise<DirectoryListing>
   /** Create a directory on its owning Host. */
@@ -33,9 +43,12 @@ export interface ExternalWorkspaceCatalog {
     readonly key: ExternalWorkspaceKey
     readonly hostId: ExternalWorkspaceHostId
     readonly hostName: string
-    readonly workspaceId: WorkspaceId
+    readonly workspaceId?: WorkspaceId
     readonly title: string
     readonly path: string
+    /** Complete declared directory membership; paths belong to the source Host. */
+    readonly roots?: readonly { readonly path: string; readonly label?: string }[]
+    readonly primaryPath?: string
     readonly online: boolean
     readonly sessions: readonly SessionNode[]
   }[]
@@ -64,6 +77,12 @@ export interface WorkspacePresentationIcon {
 
 /** Presentation inputs supplied by one deployment-owned provider. */
 export interface WorkspacePresentationSnapshot {
+  /** Host-persisted machine expansion; omitted entries are expanded. Undefined host id addresses the local section. */
+  readonly machineExpansion?: {
+    readonly local?: boolean
+    readonly hosts: Readonly<Record<string, boolean>>
+    readonly setExpanded: (hostId: ExternalWorkspaceHostId | undefined, expanded: boolean) => void
+  }
   /** Additional Host-owned Workspace navigation; never enters local controllers. */
   readonly external?: ExternalWorkspaceCatalog | undefined
   /** Per-Workspace display entries; Workspaces without one keep the default presentation. */

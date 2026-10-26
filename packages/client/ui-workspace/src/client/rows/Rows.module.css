@@ -11,6 +11,12 @@
   color: var(--dsw-alias-label-primary);
 }
 
+.subtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; line-height: 15px; color: var(--dsw-alias-label-tertiary); }
+.projectRow:has(.subtitle) { height: auto; min-height: 44px; padding-block: 6px; }
+:global([data-single-column]) .projectRow,
+:global([data-single-column]) .sessionRow { height: auto; min-height: 46px; }
+:global([data-single-column]) .projectRow .rowActions { display: inline-flex; gap: 4px; }
+
 .projectRow:hover,
 .sessionRow:hover {
   background: var(--dsw-alias-interactive-bg-hover);
@@ -112,6 +118,8 @@
   gap: 0;
 }
 
+/* A title row inside a 300px sidebar is narrow: the line-height travel gives
+   the hover marquee's replaced ellipsis room without widening the row. */
 .sessionRow .title {
   margin: 0 6px 0 4px;
 }
@@ -167,7 +175,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 20px;
 }
 
@@ -186,14 +194,17 @@
   opacity: 0.88;
 }
 
-/* The ungrouped bucket's non-collapsible "Recent" heading. */
+/* The ungrouped bucket's non-collapsible "Recent" heading. It opens a new
+   region of the list rather than naming a Workspace, so it takes more air
+   above it and stays quieter than a Workspace title. */
 .recentHeading {
-  margin: 14px 0 4px;
+  margin: 18px 0 6px;
   padding: 0 8px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
-  line-height: 24px;
-  color: var(--dsw-alias-label-tertiary);
+  line-height: 20px;
+  letter-spacing: 0.02em;
+  color: var(--dsw-alias-label-caption);
 }
 
 .renameInput {
@@ -244,14 +255,23 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+/* Sized for the longest relative label ("57分钟"), so a minute-level row and a
+   day-level row below it end on the same right edge. */
 .time {
   flex: none;
+  min-width: 30px;
+  margin-left: 6px;
+  text-align: end;
   font-size: 10px;
+  font-variant-numeric: tabular-nums;
   line-height: 16px;
   color: var(--dsw-alias-label-tertiary);
 }
 
-.pinIndicator {
+/* One cell on every row: the cloud sits beyond the time rather than inside it,
+   and a local row's empty cell keeps the column still from row to row. */
+.pinIndicator,
+.remoteMarker {
   display: inline-flex;
   flex: none;
   width: 16px;
@@ -293,13 +313,19 @@
   display: inline-flex;
 }
 
+/* A Workspace header is a container, not an action bar: its hover strip keeps
+   the leading inset so the buttons ride the title's right edge. */
+.projectRow .rowActions {
+  margin-left: 4px;
+}
+
 /* The search heading has no trailing time cell, so the unarchive action
    right-aligns itself. */
 .searchResultHeading .rowActions {
   margin-left: auto;
 }
 
-.sessionRow:hover .time,
+.sessionRow:not([data-navigation-only]):hover .time,
 .sessionRow.menuOpen .time {
   display: none;
 }
@@ -309,6 +335,13 @@
 .sessionRow:hover .pinIndicator,
 .sessionRow.menuOpen .pinIndicator {
   display: none;
+}
+
+/* The hover card already names the owning machine, so the static cloud steps
+   aside for the buttons and the rows that follow stop shifting under it. */
+.sessionRow:hover .remoteMarker,
+.sessionRow.menuOpen .remoteMarker {
+  visibility: hidden;
 }
 
 /* The unclipped hover state drops the ellipsis, which would otherwise cover
