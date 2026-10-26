@@ -162,6 +162,47 @@ describe('search tools over the real subprocess service + the packaged rg', () =
     })
   })
 
+  describe('project scope', () => {
+    beforeEach(async () => {
+      await mkdir(join(dir, 'Intermediate', 'Build'), { recursive: true })
+      await writeFile(join(dir, 'Intermediate', 'Build', 'gen.ts'), 'export const alpha = 4\n')
+      await writeFile(join(dir, '.ignore'), 'skipped.ts\n')
+      await writeFile(join(dir, 'skipped.ts'), 'export const alpha = 5\n')
+      ctx = new Context()
+      provideWorkingDirectoryFixture(ctx)
+      await ctx.plugin(SystemPrompt)
+      await ctx.plugin(ToolRuntime)
+      await ctx.plugin(LocalSubprocessRuntime)
+      await ctx.plugin(ToolFsSearch, { sampleOverCapGlobResults: true, projectScope: { excludedDirectories: ['Intermediate'] } })
+    })
+
+    it('skips hidden and configured directories by default, applies ignore files without a filter, and states the root and scope', async () => {
+      const output = text(await call('glob', { pattern: '*.ts' }, agent()))
+      const [summary, , ...paths] = output.split('\n')
+      expect(summary).toBe(`Search root: ${dir}. Scope: project files; hidden entries, Intermediate and VCS metadata excluded.`)
+      // The explicit glob pattern overrides ignore files, as in ripgrep.
+      expect(paths.sort()).toEqual(['skipped.ts', join('spaced dir', "wei'rd name.ts"), join('src', 'alpha.ts'), join('src', 'beta.ts')])
+      const grepped = text(await call('grep', { pattern: 'alpha' }, agent()))
+      expect(grepped).toContain('Found 3 matches')
+      expect(grepped).not.toContain('gen.ts')
+      expect(grepped).not.toContain('skipped.ts')
+    })
+
+    it('searches hidden, ignored and generated files with search_scope all, never VCS metadata', async () => {
+      const output = text(await call('glob', { pattern: '*.ts', search_scope: 'all' }, agent()))
+      expect(output).toContain('Scope: all files, including hidden, ignored and generated files; VCS metadata excluded.')
+      expect(output).toContain(join('Intermediate', 'Build', 'gen.ts'))
+      expect(output).toContain('skipped.ts')
+      expect(output).toContain('.hidden.ts')
+      expect(output).not.toContain('config.ts')
+    })
+
+    it('searches an exact file regardless of scope', async () => {
+      const output = text(await call('grep', { pattern: 'hidden', path: '.hidden.ts' }, agent()))
+      expect(output).toBe(`Search root: ${join(dir, '.hidden.ts')}. Scope: exact file, searched regardless of scope.\n\nFound 1 match\n\n.hidden.ts\nLine 1: export const hidden = 3`)
+    })
+  })
+
   describe('per-session cwd', () => {
     it('resolves the search in the SESSION workspace, not the process cwd', async () => {
       const sessionDir = await mkdtemp(join(tmpdir(), 'dsh-search-session-'))
