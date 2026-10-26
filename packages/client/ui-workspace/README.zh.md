@@ -238,3 +238,5 @@ Workspace 与 Session 悬浮卡片会复制对应行被截断的值：激活 Wor
 无。
 
 </details>
+
+部署方可通过 `workspacePresentation.registerExternal()` 注册一个外部工作区目录。外部项目与会话复用原生行组件，导航和新建交给所属 Host，禁用本机行修改。添加目录先选择所属 Host，再调用其目录浏览、创建和登记回调；撤销提供方只移除展示，不改变本机工作区和会话历史。

@@ -238,3 +238,5 @@ These limits define the search depth, the archive surface, and the picking carri
 None.
 
 </details>
+
+A deployment may register one external Workspace catalog through `workspacePresentation.registerExternal()`. These groups reuse native project and Session rows, route navigation and creation through their owning Host, and disable local row mutations. Directory adoption first selects the owning Host and uses its registered browsing and creation callbacks; removing the provider removes its entries without changing local Workspaces or Session history.

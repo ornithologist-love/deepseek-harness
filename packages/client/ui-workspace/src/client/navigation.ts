@@ -337,6 +337,8 @@ class UiWorkspaceService extends Service implements UiWorkspace {
   }
 
   startSession(workspaceId?: WorkspaceId, options?: StartSessionOptions): void {
+    const external = this.presentation().external
+    if (workspaceId === undefined && external?.activeKey) { external.create(external.activeKey); return }
     if (options === undefined && this.presentation().newSession === 'fresh') {
       this.startFreshSession(workspaceId)
       return

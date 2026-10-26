@@ -21,6 +21,7 @@ import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
 import type { WorkspacePresentationSnapshot } from './presentation.ts'
 import css from './WorkspacePicker.module.css'
+import { RemoteWorkspacePicker } from './RemoteWorkspacePicker.tsx'
 
 const ADD_WORKSPACE = '::add-workspace'
 
@@ -36,6 +37,8 @@ export interface WorkspacePickFlowProps {
   useWorkspaces: <S>(selector: (state: WorkspaceSnapshot) => S) => S
   /** Deployment presentation entries; a Workspace with an icon shows it in place of the folder. */
   presentationItems: WorkspacePresentationSnapshot['items']
+  /** Host-owned navigation and directory adoption. */
+  external?: WorkspacePresentationSnapshot['external']
   /** Adopt a picked host directory as a real Workspace. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
   /** Bound occupancy selector hook for this surface's directory-flow hole (empty leaves the surface with no add action). */
@@ -67,6 +70,7 @@ export function WorkspacePickFlow({
   anchorRef,
   useWorkspaces,
   presentationItems,
+  external,
   createWorkspace,
   useDirectoryFlow,
   renderDirectoryFlow,
@@ -86,12 +90,13 @@ export function WorkspacePickFlow({
   const [errorOpen, setErrorOpen] = useState(false)
   const [modalError, setModalError] = useState<string | null>(null)
   const [flowOpen, setFlowOpen] = useState(false)
+  const [hostPickerOpen, setHostPickerOpen] = useState(false)
   const [pickingFolder, setPickingFolder] = useState(false)
   // One picking interaction at a time: while the flow is open (native chooser
   // pending, browse dialog up) or its pick is being adopted, every other
   // menu action stays disabled — a late outcome must not race a concurrent
   // selection or adoption.
-  const flowBusy = flowOpen || pickingFolder
+  const flowBusy = flowOpen || hostPickerOpen || pickingFolder
   useEffect(() => { onBusyChange?.(flowBusy) }, [flowBusy, onBusyChange])
 
   // The occupied hole gates the picking affordance: with no composed flow the
@@ -151,8 +156,9 @@ export function WorkspacePickFlow({
     onClose()
     setErrorOpen(false)
     setModalError(null)
-    setFlowOpen(true)
-  }, [onClose])
+    if (external?.hosts.length) setHostPickerOpen(true)
+    else setFlowOpen(true)
+  }, [onClose, external?.hosts.length])
 
   // A menu exists to disambiguate between targets. With no workspaces listed
   // and the add action the only entry left, the anchor gesture IS that action:
@@ -210,6 +216,8 @@ export function WorkspacePickFlow({
       />
       {open && !addIsTheOnlyEntry && !menuIsEmpty && workspaceSnapshot.phase === 'pending' && <div className={css.menuStatus} role="status">{t('picker.loading')}</div>}
       {renderDirectoryFlow(flowOwner)}
+      {hostPickerOpen && external && <RemoteWorkspacePicker catalog={external} t={t}
+        onClose={() => { setHostPickerOpen(false) }} onLocal={() => { setHostPickerOpen(false); setFlowOpen(true) }} />}
       <Modal
         open={errorOpen}
         onClose={closeModal}
@@ -249,14 +257,15 @@ export function WorkspacePicker({
   renderSlot,
   t,
 }: WorkspacePickerProps) {
-  const presentationItems = useWorkspacePresentation(state => state.items)
+  const presentation = useWorkspacePresentation(state => state)
   return (
     <WorkspacePickFlow
       t={t}
       open={open}
       anchorRef={anchorRef}
       useWorkspaces={useWorkspaces}
-      presentationItems={presentationItems}
+      presentationItems={presentation.items}
+      external={presentation.external}
       createWorkspace={createWorkspace}
       useDirectoryFlow={useDirectoryFlow}
       renderDirectoryFlow={owner => renderSlot('conversation.hero.workspace.directoryFlow', owner)}

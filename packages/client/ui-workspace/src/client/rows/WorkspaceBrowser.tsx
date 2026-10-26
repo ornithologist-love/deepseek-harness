@@ -39,6 +39,7 @@ import {
 } from '../tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import { AnimatedRows } from './AnimatedRows.tsx'
+import { ExternalGroups } from './ExternalGroups.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
@@ -711,6 +712,7 @@ function SessionTree({
           <EmptySessions rowState={rowState} onLeaveArchivedOnly={onLeaveArchivedOnly} t={t} />
         )}
         {groupRows}
+        <ExternalGroups catalog={presentation.external} active={panelActive} t={t} />
       </AnimatedRows>
       <span className={css.fade} />
     </HoverCardGroup>
@@ -721,7 +723,7 @@ function SessionTree({
 function FlatList({
   list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, open, onSessionRenameRequest,
   usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
-  revealSessionId, onSessionRevealed, renderSlot, t,
+  revealSessionId, onSessionRevealed, renderSlot, t, external,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
@@ -740,6 +742,7 @@ function FlatList({
 > & {
   list: SessionListState
   sessionIds: readonly SessionId[]
+  external: WorkspacePresentationSnapshot['external']
 }) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
@@ -814,6 +817,7 @@ function FlatList({
             />
           )
         })}
+        <ExternalGroups catalog={external} active={panelActive} t={t} />
       </AnimatedRows>
       <span className={css.fade} />
     </HoverCardGroup>
@@ -840,7 +844,7 @@ function SearchResults({
   remote,
   resultLimit,
   usePanelInfo,
-  t,
+  t, external,
 }: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo'> & {
   workspaces: readonly WorkspaceView[]
   archivedSessionIds: readonly SessionNode['id'][]
@@ -851,6 +855,7 @@ function SearchResults({
   query: string
   remote: RemoteSearchState
   resultLimit: number
+  external: WorkspacePresentationSnapshot['external']
 }) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const list = useSessions(s => s)
@@ -915,6 +920,7 @@ function SearchResults({
           </div>
         )}
       </div>
+        <ExternalGroups catalog={external} active={panelActive} query={query} t={t} />
       <span className={css.fade} />
     </div>
   )
@@ -1410,6 +1416,7 @@ export function WorkspaceBrowser({
           anchorRef={wsPlusRef}
           useWorkspaces={useWorkspaces}
           presentationItems={presentation.items}
+          external={presentation.external}
           createWorkspace={createWorkspace}
           useDirectoryFlow={useDirectoryFlow}
           renderDirectoryFlow={owner => renderSlot('sidebar.workspaces.directoryFlow', owner)}
@@ -1447,6 +1454,7 @@ export function WorkspaceBrowser({
         {wide && (normalizedQuery !== ''
           ? (
             <SearchResults
+              external={presentation.external}
               usePanelInfo={usePanelInfo}
               useSessions={useSessions}
               useSessionStatus={useSessionStatus}
@@ -1464,6 +1472,7 @@ export function WorkspaceBrowser({
           : groupBy === 'flat'
             ? (
               <FlatList
+                external={presentation.external}
                 usePanelInfo={usePanelInfo}
                 list={list}
                 sessionIds={orderedFlatSessionIds}

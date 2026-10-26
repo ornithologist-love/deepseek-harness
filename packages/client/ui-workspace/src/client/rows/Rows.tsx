@@ -220,9 +220,10 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
  * @returns the row element.
  */
 export function ProjectRowItem({
-  recent = false, icon, group, containsCurrentDescendant = false, onToggle, onCreate, actions, drag, home, newShortcut, t,
+  recent = false, icon, remoteHost, group, containsCurrentDescendant = false, onToggle, onCreate, actions, drag, home, newShortcut, t,
 }: {
   recent?: boolean
+  remoteHost?: string | undefined
   icon?: WorkspacePresentationIcon | undefined
   group: GroupNode
   newShortcut?: ShortcutCatalogEntry | undefined
@@ -268,7 +269,7 @@ export function ProjectRowItem({
       onDragEnd={drag?.end}
     >
       <span className={clsx(css.slot, css.folder, active && css.folderActive)}>
-        {icon !== undefined
+        {remoteHost ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" role="img" aria-label={t('remote.workspace', { host: remoteHost })}><path d="M7 18a4 4 0 0 1-.6-8 6 6 0 0 1 11.5-1A4.5 4.5 0 1 1 18 18H7Z" /></svg> : icon !== undefined
           ? <img className={css.rowIcon} src={icon.src} alt={icon.alt} title={icon.title} aria-label={icon.ariaLabel} />
           : row.expanded ? <IconFolderOpenRegular /> : <IconFolderCloseRegular />}
       </span>
@@ -558,10 +559,12 @@ export function SearchResultItem({ result, currentId, onOpen, onUnarchive, t }: 
  * @returns the session row.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRenameRequest, renderSlot, onReveal, drag, flat = false, t,
+  node, currentId, now, onOpen, onRenameRequest, renderSlot, onReveal, drag, flat = false, navigationOnly = false, t,
 }: {
   node: SessionNode
   flat?: boolean
+  /** External navigation cannot mutate local Session rows. */
+  navigationOnly?: boolean
   currentId: string | undefined
   now: number
   onOpen: (id: SessionNode['id']) => void
@@ -655,7 +658,7 @@ export function SessionNodeItem({
       <span
         ref={titleRef}
         className={clsx(css.title, flat && !showStatus && css.flatTitle)}
-        onDoubleClick={row.blank
+        onDoubleClick={row.blank || navigationOnly
           ? undefined
           : (e) => { e.stopPropagation(); onRenameRequest(node.id, row.title) }}
       >
@@ -665,7 +668,7 @@ export function SessionNodeItem({
           happened in it yet, so a "now" timestamp and the row verbs
           (rename/fork/archive) would all act on content that does not
           exist — both trailing cells stay off until the first prompt. */}
-      {!row.blank && (
+      {!row.blank && !navigationOnly && (
         <span
           className={css.time}
           aria-hidden={primaryStatus.trailingLabel === undefined ? undefined : true}

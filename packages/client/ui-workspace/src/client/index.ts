@@ -63,6 +63,7 @@ import { en, zh, type WorkspaceKey } from './locales.ts'
 
 export type { MainSelection, StartSessionOptions, UiWorkspace } from './navigation.ts'
 export type {
+  ExternalWorkspaceCatalog, ExternalWorkspaceHostId, ExternalWorkspaceKey,
   WorkspacePresentation, WorkspacePresentationIcon, WorkspacePresentationSnapshot,
 } from './presentation.ts'
 export type {
