@@ -68,10 +68,10 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelP
     <div className={css.overlay} role="presentation">
       <div className={css.mask} aria-hidden="true" onClick={onClose} />
       <div ref={panel} tabIndex={-1} data-shortcut-modal="settings" className={css.panel} role="dialog" aria-modal="true" aria-labelledby={titleId}>
-        <nav className={css.nav}>
+        <nav className={css.nav} data-settings-nav>
           <div className={css.navTitle} id={titleId} tabIndex={-1}
             data-modal-autofocus={active === undefined ? '' : undefined}>{renderSlot('settings.header', {})}</div>
-          <div className={css.navList}>
+          <div className={css.navList} data-settings-nav-list>
             {rows.map(row => (
               <button
                 key={row.id}
@@ -87,15 +87,15 @@ function SettingsPanel({ rows, renderSlot, activeId, onSelect, onClose }: PanelP
             ))}
           </div>
         </nav>
-        <div className={css.content}>
-          <div className={css.header}>
+        <div className={css.content} data-settings-content>
+          <div className={css.header} data-settings-header>
             <div className={css.actions}>{renderSlot('settings.action', {})}</div>
             <button type="button" className={css.close} onClick={onClose}>
               <IconCloseOutlineRegular size={14} />
               <span className={css.hiddenLabel}>{renderSlot('settings.close', {})}</span>
             </button>
           </div>
-          <div className={css.options}>
+          <div className={css.options} data-settings-options>
             {active !== undefined && renderSlot('settings.section', { close: onClose }, { only: active })}
           </div>
         </div>

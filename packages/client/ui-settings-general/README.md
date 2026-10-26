@@ -9,6 +9,8 @@ English | [中文](README.zh.md)
 
 ## Summary
 
+Embedders can handle the synchronous `settings/open-request` event and return `true` to route settings to the selected surface. The sidebar trigger, keyboard command, and `settingsShell.open()` share this navigation; an unhandled request opens the local dialog.
+
 Use this package to give the dsh web client a Settings panel, connection-recovery control, feature-contributed navigation, and sequential first-run onboarding. Users can open it from the sidebar, retry a failed connection immediately, and access a local configuration file when the Host makes one available on a loopback browser. Feature packages supply their own settings rows, sections, and onboarding steps; this package supplies their shared presentation and the Coding Tools switch without adding onboarding copy.
 
 ## Table of Contents
@@ -136,3 +138,5 @@ These limits define what the shell itself provides versus what features must sup
 None.
 
 </details>
+
+A document without the sidebar may set `__DSH_LAYOUT_OPTIONS__.settingsMount` to `conversation.header.settings`. The composed owner declares that root-scoped slot; the same native Settings shell, sections and actions mount there. Settings markup exposes the `data-settings-*` anchors for document-scoped responsive styling.

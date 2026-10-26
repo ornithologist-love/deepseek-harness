@@ -58,6 +58,14 @@ export type { SettingsKey } from './locales.ts'
 export type { ISettingsShell } from './shell-service.ts'
 
 declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * @mode bail
+     * @param sectionId - requested settings section, absent for the default section.
+     * @returns true when an embedding surface handles this navigation.
+     */
+    'settings/open-request'(sectionId?: string): boolean | void
+  }
   interface Context {
     /** The outward face only; the concrete service stays inside this plugin. */
     settingsShell: import('./shell-service.ts').ISettingsShell
@@ -65,6 +73,10 @@ declare module '@deepseek-ai/cordis' {
 }
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
+  interface SlotMap {
+    /** The same Settings shell hosted by a sidebar-less conversation. */
+    'conversation.header.settings': SlotMap['sidebar.settings']
+  }
   interface LocaleNamespaceMap {
     /** Shell chrome + shell-owned General section copy. */
     settings: SettingsKey
@@ -186,8 +198,10 @@ export function apply(ctx: ClientContext): void {
       },
     },
   })
-  ctx.slots.inject('sidebar.settings', () => {
-    const shellHandle = createSettingsShellStore()
+  const settingsMount = Reflect.get(globalThis, '__DSH_LAYOUT_OPTIONS__')?.settingsMount === 'conversation.header.settings'
+    ? 'conversation.header.settings' : 'sidebar.settings'
+  ctx.slots.inject(settingsMount, () => {
+    const shellHandle = createSettingsShellStore(sectionId => ctx.bail('settings/open-request', sectionId) === true)
     const shellInstance = shellHandle.create()
     const shellStore: typeof shellHandle = { ...shellHandle, create: () => shellInstance }
     const disposeService = ctx.reflect.provide('settingsShell', new SettingsShell(shellInstance.actions))
@@ -211,7 +225,7 @@ export function apply(ctx: ClientContext): void {
     })
 
     const disposeSlot = ctx.slots.register({
-      name: 'sidebar.settings',
+      name: settingsMount,
       locale: NS,
       store: shellStore,
       children: {
