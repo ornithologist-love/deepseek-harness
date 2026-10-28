@@ -198,6 +198,9 @@ describe('ModelSelect catalog badges', () => {
     const session = runtime.sessions.retainFor(runtime.ctx, sessionId)
     await runtime.root.declare({
       'conversation.input.model.label': { kind: 'single', scope: 'session', inline: true },
+      'conversation.input.model.icon': { kind: 'single', scope: 'session', inline: true },
+      'conversation.input.model.badge': { kind: 'single', scope: 'session', inline: true },
+      'conversation.input.model.provider-setup': { kind: 'single', scope: 'session' },
     }, ({ renderSlot, SessionProvider }) => <SessionProvider session={session}>
       <Select locked={false} available directory={createSnapshotStore(badged())} load={vi.fn()} resolveText={chinese}
         select={vi.fn()} t={t} renderSlot={renderSlot} />
