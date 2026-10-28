@@ -31,7 +31,7 @@ import { WELCOME_NOTICE_SETTINGS_NAMESPACE } from '../onboarding-copy.ts'
 import { Config, ONBOARDING_CONFIG_GLOBAL } from '../onboarding-config.ts'
 
 export type { ModelsSectionInjected, ModelsSectionProps } from './ModelsSection.tsx'
-export type { CredentialPromptOwnerProps, ModelsFooterOwnerProps, ProviderCardExtrasOwnerProps } from './slot-contract.ts'
+export type { CredentialPromptOwnerProps, ModelsHeaderOwnerProps, ModelsFooterOwnerProps, ProviderCardExtrasOwnerProps } from './slot-contract.ts'
 export type { ModelsKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -97,6 +97,7 @@ export function apply(ctx: ClientContext): void {
     schema,
     t,
     credentialOnlyProviders: configured.credentialOnlyProviders,
+    hiddenProviders: configured.hiddenProviders,
     providerIcons: configured.providerIcons,
     providerEditorLayouts: configured.providerEditorLayouts,
   })
@@ -144,6 +145,7 @@ export function apply(ctx: ClientContext): void {
     label: () => t('nav'),
     inject: injected,
     children: {
+      'settings.models.header': { kind: 'list', scope: 'root' },
       'settings.models.provider-card': { kind: 'keyed', scope: 'root' },
       'settings.models.footer': { kind: 'list', scope: 'root' },
     },

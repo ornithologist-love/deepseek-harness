@@ -23,6 +23,8 @@ export interface Config {
    * edits credentials only and shows no custom-provider tag.
    */
   credentialOnlyProviders: string[]
+  /** Provider routes omitted from the settings cards and add-provider catalog; model availability is unchanged. */
+  hiddenProviders: string[]
   /** Provider icon per provider route id. */
   providerIcons: Record<string, ProviderIconConfig>
   /** Explicit editor family per adapter settings namespace; unlisted namespaces keep the built-in mapping. */
@@ -34,6 +36,7 @@ export const Config: z<Partial<Config>, Config> = z.object({
   credentialOnboarding: z.boolean().default(true),
   welcomeNotice: z.boolean().default(true),
   credentialOnlyProviders: z.array(z.string()).default([]),
+  hiddenProviders: z.array(z.string()).default([]),
   // `monochrome` and `scale` stay optional so a deployment states only what it
   // changes; the schema's own default fills them once the value is parsed.
   providerIcons: z.dict(z.object({

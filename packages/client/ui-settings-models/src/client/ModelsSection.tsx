@@ -26,7 +26,7 @@ import type { ReactNode } from 'react'
 import { Button, IconPlusOutlineRegular, Modal, SegmentedControl } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { LlmNativeAuth, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
-// Type-only: pulls this package's SlotMap merge (the two Models child slots).
+// Type-only: pulls this package's SlotMap merge (the Models child slots).
 import type {} from './slot-contract.ts'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
 import { deriveKeyRef, protocolChoices, providerUsable, reasoningLevelChoices } from './store.ts'
@@ -54,6 +54,8 @@ export interface ModelsSectionInjected {
   t: (key: keyof typeof en) => string
   /** Provider routes whose catalog the deployment manages (see `Config.credentialOnlyProviders`). */
   credentialOnlyProviders?: readonly string[]
+  /** Provider routes omitted from cards and the add catalog (see `Config.hiddenProviders`). */
+  hiddenProviders?: readonly string[]
   /** Provider icons by route id (see `Config.providerIcons`). */
   providerIcons?: Readonly<Record<string, ProviderIconConfig>>
   /** Editor family per settings namespace (see `Config.providerEditorLayouts`). */
@@ -67,7 +69,7 @@ export interface ModelsSectionInjected {
 type AddMode = 'catalog' | 'custom'
 
 /** The child slots this section declares and dispatches (see ./slot-contract.ts). */
-type ModelsChildSlots = 'settings.models.provider-card' | 'settings.models.footer'
+type ModelsChildSlots = 'settings.models.header' | 'settings.models.provider-card' | 'settings.models.footer'
 
 /** The child-slot dispatch function the renderer binds for the section. */
 type ModelsRenderSlot = PropsRenderSlots<ModelsChildSlots>['renderSlot']
@@ -289,7 +291,7 @@ export function providerCopy(template: string, target: ProviderIdentity): string
  */
 export function ModelsSection(props: ModelsSectionProps): ReactNode {
   const {
-    controller, useSnapshot, operations, schema, t, credentialOnlyProviders, providerIcons, providerEditorLayouts,
+    controller, useSnapshot, operations, schema, t, credentialOnlyProviders, hiddenProviders, providerIcons, providerEditorLayouts,
     renderSlot,
   } = props
   if (
@@ -305,6 +307,7 @@ export function ModelsSection(props: ModelsSectionProps): ReactNode {
         schema,
         t,
         ...credentialOnlyProviders === undefined ? {} : { credentialOnlyProviders },
+        ...hiddenProviders === undefined ? {} : { hiddenProviders },
         ...providerIcons === undefined ? {} : { providerIcons },
         ...providerEditorLayouts === undefined ? {} : { providerEditorLayouts },
       }}
@@ -314,7 +317,7 @@ export function ModelsSection(props: ModelsSectionProps): ReactNode {
 }
 
 function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderSlot: ModelsRenderSlot }): ReactNode {
-  const { controller, operations, schema, t, credentialOnlyProviders, providerIcons, providerEditorLayouts } = injected
+  const { controller, operations, schema, t, credentialOnlyProviders, hiddenProviders, providerIcons, providerEditorLayouts } = injected
   const snapshot = injected.useSnapshot(value => value)
   const state = { ...snapshot, rows: snapshot.rows.map(row => row.entry.provider === 'deepseek-account'
     ? { ...row, entry: { ...row.entry, displayName: t('deepSeekAccount') } } : row) }
@@ -434,9 +437,10 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
   // One fact decides both first-run postures on this page and the onboarding
   // step: whether the user already has a provider to talk to.
   const anyUsable = state.rows.some(providerUsable)
-  const configured = state.rows.filter(row => row.configured)
-  const configurable = state.rows.filter(row => state.namespaces.has(row.entry.settingsNs))
-  const addable: AddableRow[] = state.rows.flatMap((row) => {
+  const visibleRows = state.rows.filter(row => !hiddenProviders?.includes(row.entry.provider))
+  const configured = visibleRows.filter(row => row.configured)
+  const configurable = visibleRows.filter(row => state.namespaces.has(row.entry.settingsNs))
+  const addable: AddableRow[] = visibleRows.flatMap((row) => {
     const namespace = state.namespaces.get(row.entry.settingsNs)
     return namespace === undefined || row.configured ? [] : [{ row, namespace }]
   })
@@ -483,6 +487,7 @@ function Loaded({ injected, renderSlot }: { injected: ModelsSectionFace; renderS
     <div className={styles['section']}>
       <h2 className={styles['title']}>{t('title')}</h2>
       <p className={styles['intro']}>{t('intro')}</p>
+      {renderSlot('settings.models.header', { providers: state.rows.filter(row => row.configured).map(row => row.entry) })}
       {!state.writable && state.status === 'ready' ? <p className={styles['notice']}>{t('readOnly')}</p> : null}
       {savedIdentity === undefined
         ? null

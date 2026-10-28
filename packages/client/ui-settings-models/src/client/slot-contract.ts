@@ -22,6 +22,8 @@ import type { ProviderDirectoryEntry } from './store.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
+    /** Ordered extension area above the provider cards, including providers hidden from those cards. */
+    'settings.models.header': { kind: 'list'; scope: 'root'; owner: ModelsHeaderOwnerProps }
     /**
      * One provider card's adapter extension area, dispatched with
      * `entryKey = settingsNs` on every card that renders a directory row: a
@@ -41,6 +43,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'settings.models.footer': { kind: 'list'; scope: 'root'; owner: ModelsFooterOwnerProps }
   }
+}
+
+/** Owner share of the header area. */
+export interface ModelsHeaderOwnerProps {
+  /** Configured provider entries before the settings-only visibility filter. */
+  providers: readonly ProviderDirectoryEntry[]
 }
 
 /** Owner share of one provider-card extension occurrence. */

@@ -20,6 +20,7 @@ export function apply(ctx: Context, config: Config): void {
         credentialOnboarding: config.credentialOnboarding,
         welcomeNotice: config.welcomeNotice,
         credentialOnlyProviders: config.credentialOnlyProviders,
+        hiddenProviders: config.hiddenProviders,
         providerIcons: config.providerIcons,
         providerEditorLayouts: config.providerEditorLayouts,
       },
