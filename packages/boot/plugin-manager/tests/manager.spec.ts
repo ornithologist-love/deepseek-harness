@@ -731,6 +731,12 @@ it('refuses management bundle disablement and permits repeated bundle selections
   expect(await manager.setBundleEnabled('extra', true)).toMatchObject({ application: 'applied', changed: false })
 })
 
+it('keeps configured protected bundles selected and installed', async () => {
+  const { manager } = await fixture('live', false, undefined, { protectedBundles: ['extra'] })
+  expect((await manager.listBundles()).find(row => row.name === 'extra')).toMatchObject({ readOnlyReason: 'management-required', removable: false })
+  expect(await manager.setBundleEnabled('extra', false)).toMatchObject({ changed: false, application: 'failed', error: { code: 'management-required' } })
+})
+
 it.each([
   '@deepseek-ai/dsh-host-plugin-inventory',
   '@deepseek-ai/dsh-typert-registry',

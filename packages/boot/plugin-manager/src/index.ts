@@ -60,6 +60,8 @@ export interface Config {
    * unless that is npm's own registry or one of these.
    */
   fallbackRegistries?: string[]
+  /** Bundle package names the manager refuses to disable or remove, in addition to the bundles carrying its own components. */
+  protectedBundles?: string[]
 }
 
 /** An http(s) URL, as pnpm's `--registry` takes it. */
@@ -215,9 +217,12 @@ export class PluginManager extends TypertRemoteService {
     idleTimeoutMs: z.number().step(1).min(1000).default(600000),
     registry: z.string().pattern(REGISTRY_URL),
     fallbackRegistries: z.array(z.string().pattern(REGISTRY_URL)).default([NPMMIRROR_REGISTRY]),
+    protectedBundles: z.array(z.string().min(1)).default([]),
   })
   /** Management bundles remain protected if their files become unreadable. */
   private readonly managementBundles = new Set<string>()
+  /** Deployment-protected bundles, read-only like management bundles. */
+  private readonly protectedBundles: ReadonlySet<string>
   /**
    * The registry each package was last installed from by this manager in this process. pnpm verifies lockfile tarball
    * URLs against its default registry unless they belong to a named registry, so a later removal names it again.
@@ -243,6 +248,7 @@ export class PluginManager extends TypertRemoteService {
     this.ownerEntryId = ctx.fiber.entry?.id
     this.ownerContext = ctx
     this.profile = ctx.profileContext
+    this.protectedBundles = new Set((config as Required<Config>).protectedBundles)
     for (const name of this.profile.startedBundles) this.protectsManager(name)
     this.outputBytes = (config as Required<Config>).outputBytes
     this.lockWaitMs = (config as Required<Config>).lockWaitMs
@@ -835,7 +841,7 @@ export class PluginManager extends TypertRemoteService {
   }
 
   private protectsManager(name: string): boolean {
-    if (this.managementBundles.has(name)) return true
+    if (this.managementBundles.has(name) || this.protectedBundles.has(name)) return true
     let rows: EntryOptions[]
     try { rows = this.bundleRows(name) } catch (_error) {
       // Unreadable bundles contribute no new rows; listBundles reports their diagnostics.
