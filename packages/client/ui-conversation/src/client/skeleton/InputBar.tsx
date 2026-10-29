@@ -14,7 +14,7 @@
  */
 
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, KeyboardEvent, MouseEvent } from 'react'
+import type { ChangeEvent, KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import clsx from 'clsx'
 import {
   IconPlusOutlineMedium, IconWarningOutlineRegular, Toast, Tooltip,
@@ -43,6 +43,15 @@ import css from './InputBar.module.css'
 
 export type InputBarProps = ComposerBarProps
 
+/** Reports whether a controls occupant mounted the meter it was offered. */
+function PlacedMeter({ onPlaced, children }: { onPlaced: (placed: boolean) => void; children: ReactNode }) {
+  useLayoutEffect(() => {
+    onPlaced(true)
+    return () => { onPlaced(false) }
+  }, [onPlaced])
+  return <>{children}</>
+}
+
 export const InputBar = memo(function InputBar({
   useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments,
   retryFileUpload,
@@ -60,6 +69,7 @@ export const InputBar = memo(function InputBar({
   const commandMenuOpen = useMenuLauncher(source => source === 'command')
   const [activity, setActivity] = useState(false)
   useEffect(() => { setActivity(false) }, [sessionId])
+  const [meterPlaced, setMeterPlaced] = useState(false)
   const promptError = useSession(s => s.promptError) ?? null
   const running = useSession(s => s.running) ?? false
   const subagent = useSession(s => s.subagent) ?? null
@@ -407,6 +417,13 @@ export const InputBar = memo(function InputBar({
       {renderSlot('conversation.input.activity', { locked, onActiveChange: setActivity })}
     </div>
   )
+  // The meter is offered to a controls occupant; the dock keeps it until one
+  // actually mounts it, so the default row and occupants that skip it are unchanged.
+  const meterControl = activity ? null : (
+    <PlacedMeter onPlaced={setMeterPlaced}>
+      <ContextMeter useProjection={useProjection} t={t} />
+    </PlacedMeter>
+  )
   const submitControls = (
     <>
       {interruptible && (
@@ -538,7 +555,7 @@ export const InputBar = memo(function InputBar({
           {renderSlot('conversation.input.controls', {
             commands: commandsControl, fileInput: draftFileInput, permission: permissionControl, plan: planControl,
             left: leftControls, right: rightControls, model: modelControl, activity: activityControl,
-            submit: submitControls, expanded: activity,
+            meter: meterControl, submit: submitControls, expanded: activity,
           }, { fallback: defaultControls })}
         </div>
       </div>
@@ -546,7 +563,7 @@ export const InputBar = memo(function InputBar({
         {variant === 'composer' && input !== undefined && sessionId !== undefined
           ? renderSlot('conversation.composer.dock', {})
           : null}
-        {activity ? null : <ContextMeter useProjection={useProjection} t={t} />}
+        {activity || meterPlaced ? null : <ContextMeter useProjection={useProjection} t={t} />}
       </div>
     </div>
   )

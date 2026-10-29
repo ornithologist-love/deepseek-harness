@@ -524,6 +524,11 @@ export interface InputControlsOwnerProps {
   model: ReactNode
   /** `conversation.input.activity` occupant in its width-tracking wrapper. */
   activity: ReactNode
+  /**
+   * Context-occupancy meter. The bar shows it under the card unless an
+   * occupant mounts this node, which moves the meter into the control row.
+   */
+  meter: ReactNode
   /** Stop and submit buttons. */
   submit: ReactNode
   /** Whether the activity occupant claims the row; the default row then hides the other controls. */
