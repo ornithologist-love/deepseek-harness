@@ -152,10 +152,15 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
         d.layoutInfo.rightbar = clampWidth(px, RIGHTBAR_MIN, Math.max(RIGHTBAR_MIN, d.layoutInfo.viewportWidth * RIGHTBAR_MAX_RATIO))
       },
       openRightbar: (d, track: boolean, fullscreen: boolean) => {
+        // A phone shows the sidebar as its own page; the expanded panel replaces
+        // it rather than opening beside it, so the toggle that leaves the panel
+        // never clears the page's own state.
+        if (!d.layoutInfo.singleColumn && d.layoutInfo.viewportWidth < SIDEBAR_AUTO_COLLAPSE) {
+          d.layoutInfo.narrowExpanded = false
+        }
         if (!d.layoutInfo.rightbarShown || d.layoutInfo.rightbarTrack !== track || d.layoutInfo.rightbarFullscreen !== fullscreen) {
           d.layoutInfo.rightbarInstant = d.layoutInfo.rightbarFullscreen && !fullscreen
         }
-        if (!d.layoutInfo.rightbarShown && d.layoutInfo.viewportWidth < SIDEBAR_AUTO_COLLAPSE) d.layoutInfo.narrowExpanded = false
         d.layoutInfo.rightbar ??= Math.max(RIGHTBAR_MIN, Math.round(d.layoutInfo.viewportWidth * RIGHTBAR_DEFAULT_RATIO))
         d.layoutInfo.rightbarShown = true
         d.layoutInfo.rightbarTrack = track

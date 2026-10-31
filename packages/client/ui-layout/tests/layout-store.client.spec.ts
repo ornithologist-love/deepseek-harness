@@ -86,6 +86,14 @@ describe('createLayoutStore', () => {
     actions.setViewportWidth(980)
     expect(store.getSnapshot().layoutInfo.narrowExpanded).toBe(false)
   })
+
+  it('replaces the narrow sidebar page when the right panel opens', () => {
+    const { store, actions } = createLayoutStore().create()
+    actions.setViewportWidth(980)
+    actions.toggleSidebar()
+    actions.openRightbar(true, false)
+    expect(store.getSnapshot().layoutInfo).toMatchObject({ narrowExpanded: false, rightbarShown: true })
+  })
 })
 
 describe('main panel selection', () => {
@@ -215,8 +223,9 @@ describe('right panel', () => {
     actions.openRightbar(true, false)
     expect(store.getSnapshot().layoutInfo).toMatchObject({ sidebar: 400, narrowExpanded: false })
     actions.toggleSidebar()
-    actions.openRightbar(true, true)
     expect(store.getSnapshot().layoutInfo.narrowExpanded).toBe(true)
+    actions.openRightbar(true, true)
+    expect(store.getSnapshot().layoutInfo.narrowExpanded).toBe(false)
     actions.closeRightbar()
     actions.openRightbar(true, false)
     expect(store.getSnapshot().layoutInfo.narrowExpanded).toBe(false)
