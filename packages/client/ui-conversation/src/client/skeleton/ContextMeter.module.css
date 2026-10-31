@@ -152,3 +152,42 @@
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-primary);
 }
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--dsw-alias-border-l3);
+}
+
+.footerHint {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.compact {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.compact:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-active);
+}
+
+.compact:disabled {
+  color: var(--dsw-alias-label-tertiary);
+  cursor: not-allowed;
+}

@@ -476,6 +476,7 @@ export function apply(ctx: Context, config: Config = Config({})): void {
           retryFileUpload: undefined,
           toggleCommandMenu: undefined,
           stop: undefined,
+          compact: undefined,
           hooks: {
             stopShortcut,
             busyEnter: submissionPolicy.busyEnter,
@@ -552,6 +553,12 @@ export function apply(ctx: Context, config: Config = Config({})): void {
             })
           },
         stop: () => { stop(sessionId) },
+        compact: () => {
+          // The host executor logs the command lifecycle; its outcome renders as a flow node.
+          sessions.binding(sessionId)?.session.command('/compact').catch((_error: unknown) => {
+            // Transport failure leaves no command node; the user can retry from the panel.
+          })
+        },
         hooks: {
           stopShortcut,
           busyEnter: submissionPolicy.busyEnter,

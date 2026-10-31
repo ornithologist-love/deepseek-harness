@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom'
 import type { UseProjection } from '@deepseek-ai/dsh-api-session-controller/client'
 // Type-only: the `contextPressure` / `contextBreakdown` projection key merges.
 import type {} from '@deepseek-ai/dsh-token-meter/client'
-import { Tooltip, useAnchoredPosition, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconArchiveOutlineRegular, Tooltip, useAnchoredPosition, useDismissOnOutsidePointer } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ComposerBarProps } from '../contract/slots.ts'
 import { contextOccupancy } from '../context-occupancy.ts'
 import css from './ContextMeter.module.css'
@@ -51,9 +51,13 @@ export interface ContextMeterProps {
   useProjection: UseProjection
   /** The owning bar's locale seat, passed down as a plain prop. */
   t: ComposerBarProps['t']
+  /** Run manual compaction; absent hides the panel action. */
+  compact?: (() => void) | undefined
+  /** Whether the agent is busy; manual compaction only runs while idle. */
+  busy?: boolean
 }
 
-export function ContextMeter({ useProjection, t }: ContextMeterProps) {
+export function ContextMeter({ useProjection, t, compact, busy = false }: ContextMeterProps) {
   const pressure = useProjection('contextPressure')
   const breakdown = useProjection('contextBreakdown')
   const [open, setOpen] = useState(false)
@@ -171,6 +175,24 @@ export function ContextMeter({ useProjection, t }: ContextMeterProps) {
                 </div>
               ))}
             </dl>
+          )}
+          {compact !== undefined && (
+            <div className={css.footer}>
+              <span className={css.footerHint}>{t('context.compact.hint')}</span>
+              <button
+                type="button"
+                className={css.compact}
+                disabled={busy}
+                title={busy ? t('context.compact.busy') : undefined}
+                onClick={() => {
+                  setOpen(false)
+                  compact()
+                }}
+              >
+                <IconArchiveOutlineRegular size={14} />
+                <span>{t('context.compact.action')}</span>
+              </button>
+            </div>
           )}
         </div>,
         document.body,

@@ -55,7 +55,7 @@ function PlacedMeter({ onPlaced, children }: { onPlaced: (placed: boolean) => vo
 export const InputBar = memo(function InputBar({
   useSession, useInput, inputActions, keyboard, addFiles, removeAttachment, resolveDraftAttachments,
   retryFileUpload,
-  toggleCommandMenu, stop, t,
+  toggleCommandMenu, stop, compact, t,
   renderSlot, useBusyEnter, useFileUploads, useNotices, useLexicon, useMenuLauncher, useStopShortcut,
   useProjection, sessionId, variant, disabled: inert = false, blocked,
   workspacePickerOpen = false, onRequestWorkspace,
@@ -421,7 +421,7 @@ export const InputBar = memo(function InputBar({
   // actually mounts it, so the default row and occupants that skip it are unchanged.
   const meterControl = activity ? null : (
     <PlacedMeter onPlaced={setMeterPlaced}>
-      <ContextMeter useProjection={useProjection} t={t} />
+      <ContextMeter useProjection={useProjection} t={t} compact={compact} busy={running} />
     </PlacedMeter>
   )
   const submitControls = (
@@ -563,7 +563,7 @@ export const InputBar = memo(function InputBar({
         {variant === 'composer' && input !== undefined && sessionId !== undefined
           ? renderSlot('conversation.composer.dock', {})
           : null}
-        {activity || meterPlaced ? null : <ContextMeter useProjection={useProjection} t={t} />}
+        {activity || meterPlaced ? null : <ContextMeter useProjection={useProjection} t={t} compact={compact} busy={running} />}
       </div>
     </div>
   )
