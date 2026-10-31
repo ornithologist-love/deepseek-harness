@@ -192,7 +192,7 @@ async function main(): Promise<number> {
     // Cleanup failures must not mask the child's exit code: report and keep going.
     if (initialized) {
       try {
-        sandbox?.dispose()
+        await sandbox?.dispose()
       } catch (error) {
         process.stderr.write(`${RUNNER_SIGNATURE}: cleanup: ${error instanceof Error ? error.message : String(error)}\n`)
       }

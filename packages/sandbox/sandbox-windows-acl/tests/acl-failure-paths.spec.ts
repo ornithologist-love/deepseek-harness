@@ -18,12 +18,13 @@ import { grantWrite, revokeWrite, withPathLock } from '../src/acl.ts'
 import { allocBytes, ptrAddress } from '../src/ffi.ts'
 import type { NativePtr, Win32Bindings } from '../src/ffi.ts'
 import * as abi from '../src/win32-abi.ts'
+import { asyncSecurityInfoMock } from './async-security-info.ts'
 
 const PVOID = koffi.pointer('void')
 
 /** The stub the grant/revoke happy path needs; every call succeeds until a field is overridden per test. */
 function aclApi(overrides: Partial<Win32Bindings> = {}): Win32Bindings {
-  return {
+  const api = {
     getTempPathW: vi.fn((_length: number, buffer: Buffer) => {
       const temp = tmpdir().replace(/[\\/]$/u, '')
       buffer.write(temp, 'utf16le')
@@ -56,6 +57,8 @@ function aclApi(overrides: Partial<Win32Bindings> = {}): Win32Bindings {
     formatMessageW: vi.fn(() => 0),
     ...overrides,
   } as Win32Bindings
+  asyncSecurityInfoMock(api.setNamedSecurityInfoW)
+  return api
 }
 
 /** One SID allocation: revision@0, subAuthorityCount@1, identifierAuthority@2 (6 bytes), subauthorities@8. */
@@ -173,11 +176,11 @@ function readStub(dacl: NativePtr | null, label: NativePtr | null, descriptor: b
 }
 
 describe('withPathLock failure paths', () => {
-  it('fails closed when CreateFileW returns an invalid handle', () => {
+  it('fails closed when CreateFileW returns an invalid handle', async () => {
     const api = aclApi({ createFileW: vi.fn(() => 0n as NativePtr) })
     let caught: unknown
     try {
-      withPathLock(api, 'C:\\locked', () => {})
+      await withPathLock(api, 'C:\\locked', async () => {})
     } catch (error) {
       caught = error
     }
@@ -185,12 +188,12 @@ describe('withPathLock failure paths', () => {
     expect((caught as Win32Error).api).toBe('CreateFileW')
   })
 
-  it('closes the handle and reports when LockFileEx fails', () => {
+  it('closes the handle and reports when LockFileEx fails', async () => {
     const closeHandle = vi.fn(() => 1)
     const api = aclApi({ lockFileEx: vi.fn(() => 0), closeHandle })
     let caught: unknown
     try {
-      withPathLock(api, 'C:\\locked', () => {})
+      await withPathLock(api, 'C:\\locked', async () => {})
     } catch (error) {
       caught = error
     }
@@ -199,12 +202,12 @@ describe('withPathLock failure paths', () => {
     expect(closeHandle).toHaveBeenCalledWith(7n)
   })
 
-  it('closes the handle and reports when UnlockFileEx fails', () => {
+  it('closes the handle and reports when UnlockFileEx fails', async () => {
     const closeHandle = vi.fn(() => 1)
     const api = aclApi({ unlockFileEx: vi.fn(() => 0), closeHandle })
     let caught: unknown
     try {
-      withPathLock(api, 'C:\\locked', () => {})
+      await withPathLock(api, 'C:\\locked', async () => {})
     } catch (error) {
       caught = error
     }
@@ -213,11 +216,11 @@ describe('withPathLock failure paths', () => {
     expect(closeHandle).toHaveBeenCalledWith(7n)
   })
 
-  it('reports a failed CloseHandle after a successful action', () => {
+  it('reports a failed CloseHandle after a successful action', async () => {
     const api = aclApi({ closeHandle: vi.fn(() => 0) })
     let caught: unknown
     try {
-      withPathLock(api, 'C:\\locked', () => {})
+      await withPathLock(api, 'C:\\locked', async () => {})
     } catch (error) {
       caught = error
     }
@@ -227,11 +230,11 @@ describe('withPathLock failure paths', () => {
 })
 
 describe('buildLowLabelAcl failure paths', () => {
-  it('reports a failed GetLengthSid for the Low label SID', () => {
+  it('reports a failed GetLengthSid for the Low label SID', async () => {
     const api = aclApi({ getLengthSid: vi.fn(() => 0) })
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -239,11 +242,11 @@ describe('buildLowLabelAcl failure paths', () => {
     expect((caught as Win32Error).api).toBe('GetLengthSid')
   })
 
-  it('reports a failed LocalAlloc for the label ACL', () => {
+  it('reports a failed LocalAlloc for the label ACL', async () => {
     const api = aclApi({ localAlloc: vi.fn(() => 0n as NativePtr) })
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -251,12 +254,12 @@ describe('buildLowLabelAcl failure paths', () => {
     expect((caught as Win32Error).api).toBe('LocalAlloc')
   })
 
-  it('frees the label ACL and reports when InitializeAcl fails', () => {
+  it('frees the label ACL and reports when InitializeAcl fails', async () => {
     const localFree = vi.fn(() => 0n as NativePtr)
     const api = aclApi({ initializeAcl: vi.fn(() => 0), localFree })
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -265,12 +268,12 @@ describe('buildLowLabelAcl failure paths', () => {
     expect(localFree).toHaveBeenCalledWith(11n)
   })
 
-  it('frees the label ACL and reports when AddMandatoryAce fails', () => {
+  it('frees the label ACL and reports when AddMandatoryAce fails', async () => {
     const localFree = vi.fn(() => 0n as NativePtr)
     const api = aclApi({ addMandatoryAce: vi.fn(() => 0), localFree })
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -281,12 +284,12 @@ describe('buildLowLabelAcl failure paths', () => {
 })
 
 describe('mergeAndApply failure paths', () => {
-  it('reports a SetEntriesInAclW failure when the directory carries no descriptor to free', () => {
+  it('reports a SetEntriesInAclW failure when the directory carries no descriptor to free', async () => {
     const api = aclApi({ setEntriesInAclW: vi.fn(() => 5) }) // default descriptor: none
     const sid = craftSid(1, 0)
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -294,12 +297,12 @@ describe('mergeAndApply failure paths', () => {
     expect((caught as Win32Error).api).toBe('SetEntriesInAclW')
   })
 
-  it('reports a NULL merged ACL when there is no descriptor to free', () => {
+  it('reports a NULL merged ACL when there is no descriptor to free', async () => {
     const api = aclApi({ setEntriesInAclW: vi.fn(() => 0) }) // no out slot write, no descriptor
     const sid = craftSid(1, 0)
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -307,7 +310,7 @@ describe('mergeAndApply failure paths', () => {
     expect((caught as Win32Error).api).toBe('SetEntriesInAclW')
   })
 
-  it('frees the descriptor and reports when SetEntriesInAclW fails', () => {
+  it('frees the descriptor and reports when SetEntriesInAclW fails', async () => {
     const localFree = vi.fn(() => 0n as NativePtr)
     const api = aclApi({
       getNamedSecurityInfoW: readStub(null, null, 6n), // an existing descriptor without a DACL
@@ -317,7 +320,7 @@ describe('mergeAndApply failure paths', () => {
     const sid = craftSid(1, 0)
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -326,7 +329,7 @@ describe('mergeAndApply failure paths', () => {
     expect(localFree).toHaveBeenCalledWith(6n)
   })
 
-  it('frees the descriptor and reports a NULL merged ACL', () => {
+  it('frees the descriptor and reports a NULL merged ACL', async () => {
     const localFree = vi.fn(() => 0n as NativePtr)
     const api = aclApi({
       getNamedSecurityInfoW: readStub(null, null, 6n),
@@ -336,7 +339,7 @@ describe('mergeAndApply failure paths', () => {
     const sid = craftSid(1, 0)
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -345,13 +348,13 @@ describe('mergeAndApply failure paths', () => {
     expect(localFree).toHaveBeenCalledWith(6n)
   })
 
-  it('frees the merged ACL and the label ACL and reports when SetNamedSecurityInfoW fails', () => {
+  it('frees the merged ACL and the label ACL and reports when SetNamedSecurityInfoW fails', async () => {
     const localFree = vi.fn(() => 0n as NativePtr)
     const api = aclApi({ setNamedSecurityInfoW: vi.fn(() => 5), localFree })
     const sid = craftSid(1, 0)
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -361,7 +364,7 @@ describe('mergeAndApply failure paths', () => {
     expect(localFree).toHaveBeenCalledWith(11n) // label ACL
   })
 
-  it('reports a failed descriptor LocalFree after a successful apply', () => {
+  it('reports a failed descriptor LocalFree after a successful apply', async () => {
     const api = aclApi({
       getNamedSecurityInfoW: readStub(null, null, 6n),
       localFree: vi.fn(() => 1n as NativePtr), // both frees "fail"; the first is checked
@@ -369,7 +372,7 @@ describe('mergeAndApply failure paths', () => {
     const sid = craftSid(1, 0)
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -377,14 +380,14 @@ describe('mergeAndApply failure paths', () => {
     expect((caught as Win32Error).api).toBe('LocalFree')
   })
 
-  it('reports a failed merged-ACL LocalFree after a successful apply', () => {
+  it('reports a failed merged-ACL LocalFree after a successful apply', async () => {
     // No existing descriptor (the default stub): the merge's only LocalFree
     // is the merged ACL's, which "fails" and is checked after the apply.
     const api = aclApi({ localFree: vi.fn(() => 1n as NativePtr) })
     const sid = craftSid(1, 0)
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -392,7 +395,7 @@ describe('mergeAndApply failure paths', () => {
     expect((caught as Win32Error).api).toBe('LocalFree')
   })
 
-  it('reports a failed label-ACL LocalFree after a successful apply', () => {
+  it('reports a failed label-ACL LocalFree after a successful apply', async () => {
     // Every free succeeds until the label ACL's: descriptor and merged ACL
     // return null, the label ACL returns a stale pointer.
     const localFree = vi.fn()
@@ -406,7 +409,7 @@ describe('mergeAndApply failure paths', () => {
     const sid = craftSid(1, 0)
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', sid, craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -415,7 +418,7 @@ describe('mergeAndApply failure paths', () => {
     expect(localFree).toHaveBeenLastCalledWith(11n)
   })
 
-  it('frees the label ACL when SetEntriesInAclW fails during a revoke', () => {
+  it('frees the label ACL when SetEntriesInAclW fails during a revoke', async () => {
     // The revoke carries no label ACL of its own: the early exit must still
     // release the descriptor and leave the label edit untouched.
     const localFree = vi.fn(() => 0n as NativePtr)
@@ -427,7 +430,7 @@ describe('mergeAndApply failure paths', () => {
     })
     let caught: unknown
     try {
-      revokeWrite(api, 'C:\\granted', sid)
+      await revokeWrite(api, 'C:\\granted', sid)
     } catch (error) {
       caught = error
     }
@@ -436,7 +439,7 @@ describe('mergeAndApply failure paths', () => {
     expect(localFree).toHaveBeenCalledWith(6n)
   })
 
-  it('frees the descriptor on the null-merged-ACL path during a revoke', () => {
+  it('frees the descriptor on the null-merged-ACL path during a revoke', async () => {
     const localFree = vi.fn(() => 0n as NativePtr)
     const sid = craftSid(1, 0)
     const api = aclApi({
@@ -446,7 +449,7 @@ describe('mergeAndApply failure paths', () => {
     })
     let caught: unknown
     try {
-      revokeWrite(api, 'C:\\granted', sid)
+      await revokeWrite(api, 'C:\\granted', sid)
     } catch (error) {
       caught = error
     }
@@ -455,7 +458,7 @@ describe('mergeAndApply failure paths', () => {
     expect(localFree).toHaveBeenCalledWith(6n)
   })
 
-  it('frees the descriptor when the label ACL build fails', () => {
+  it('frees the descriptor when the label ACL build fails', async () => {
     // The read already owns a descriptor allocation; the label failure must
     // not strand it.
     const localFree = vi.fn(() => 0n as NativePtr)
@@ -466,7 +469,7 @@ describe('mergeAndApply failure paths', () => {
     })
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -476,12 +479,12 @@ describe('mergeAndApply failure paths', () => {
     expect(localFree).toHaveBeenCalledWith(6n) // the read descriptor
   })
 
-  it('frees the label ACL when SetEntriesInAclW fails', () => {
+  it('frees the label ACL when SetEntriesInAclW fails', async () => {
     const localFree = vi.fn(() => 0n as NativePtr)
     const api = aclApi({ setEntriesInAclW: vi.fn(() => 5), localFree })
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -490,7 +493,7 @@ describe('mergeAndApply failure paths', () => {
     expect(localFree).toHaveBeenCalledWith(11n) // the label ACL this apply owns
   })
 
-  it('frees the label ACL and the descriptor on the null-merged-ACL path', () => {
+  it('frees the label ACL and the descriptor on the null-merged-ACL path', async () => {
     const localFree = vi.fn(() => 0n as NativePtr)
     const api = aclApi({
       getNamedSecurityInfoW: readStub(null, null, 6n),
@@ -499,7 +502,7 @@ describe('mergeAndApply failure paths', () => {
     })
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
+      await grantWrite(api, 'C:\\granted', craftSid(1, 0), craftLowLabelSid(), craftWorldSid())
     } catch (error) {
       caught = error
     }
@@ -517,7 +520,7 @@ describe('revokeWrite label handling', () => {
     return { information: call?.[2] as number, sacl: call?.[6] }
   }
 
-  it('keeps the shared Low label while another capability grant stands', () => {
+  it('keeps the shared Low label while another capability grant stands', async () => {
     const sid = craftSid(1, 0)
     const otherSid = craftSid(1, 0, [0, 0, 0, 0, 0, 6])
     const world = craftWorldSid()
@@ -529,13 +532,13 @@ describe('revokeWrite label handling', () => {
       ),
       setNamedSecurityInfoW,
     })
-    expect(revokeWrite(api, 'C:\\granted', sid)).toBe(true)
+    expect(await revokeWrite(api, 'C:\\granted', sid)).toBe(true)
     const { information, sacl } = applyArgs(setNamedSecurityInfoW)
     expect(information & abi.LABEL_SECURITY_INFORMATION).toBe(0) // the label was left untouched
     expect(sacl).toBeNull()
   })
 
-  it('clears the Low label once the last capability grant is revoked', () => {
+  it('clears the Low label once the last capability grant is revoked', async () => {
     const sid = craftSid(1, 0)
     const world = craftWorldSid()
     const setNamedSecurityInfoW = vi.fn(() => 0)
@@ -543,22 +546,22 @@ describe('revokeWrite label handling', () => {
       getNamedSecurityInfoW: readStub(craftGrantedAcl(sid, world, true), null, 6n),
       setNamedSecurityInfoW,
     })
-    expect(revokeWrite(api, 'C:\\granted', sid)).toBe(true)
+    expect(await revokeWrite(api, 'C:\\granted', sid)).toBe(true)
     expect(applyArgs(setNamedSecurityInfoW).information & abi.LABEL_SECURITY_INFORMATION).toBe(abi.LABEL_SECURITY_INFORMATION)
   })
 
-  it('clears the Low label when a malformed tiny DACL hides any foreign grant', () => {
+  it('clears the Low label when a malformed tiny DACL hides any foreign grant', async () => {
     const acl = allocBytes(32)
     koffi.encode(acl, 'uint8', 2)
     koffi.encode(acl, 2, 'uint16', 4) // smaller than the ACL header
     koffi.encode(acl, 4, 'uint16', 1)
     const setNamedSecurityInfoW = vi.fn(() => 0)
     const api = aclApi({ getNamedSecurityInfoW: readStub(acl, null, 6n), setNamedSecurityInfoW })
-    expect(revokeWrite(api, 'C:\\granted', craftSid(1, 0))).toBe(true)
+    expect(await revokeWrite(api, 'C:\\granted', craftSid(1, 0))).toBe(true)
     expect(applyArgs(setNamedSecurityInfoW).information & abi.LABEL_SECURITY_INFORMATION).toBe(abi.LABEL_SECURITY_INFORMATION)
   })
 
-  it('clears the Low label when a lying ACE size hides any foreign grant', () => {
+  it('clears the Low label when a lying ACE size hides any foreign grant', async () => {
     const acl = allocBytes(32)
     koffi.encode(acl, 'uint8', 2)
     koffi.encode(acl, 2, 'uint16', 8)
@@ -566,13 +569,13 @@ describe('revokeWrite label handling', () => {
     koffi.encode(acl, 10, 'uint16', 100)
     const setNamedSecurityInfoW = vi.fn(() => 0)
     const api = aclApi({ getNamedSecurityInfoW: readStub(acl, null, 6n), setNamedSecurityInfoW })
-    expect(revokeWrite(api, 'C:\\granted', craftSid(1, 0))).toBe(true)
+    expect(await revokeWrite(api, 'C:\\granted', craftSid(1, 0))).toBe(true)
     expect(applyArgs(setNamedSecurityInfoW).information & abi.LABEL_SECURITY_INFORMATION).toBe(abi.LABEL_SECURITY_INFORMATION)
   })
 })
 
 describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
-  it('grantWrite skips the apply when the standing exact ACE and the exact label match (descriptor freed, nothing merged)', () => {
+  it('grantWrite skips the apply when the standing exact ACE and the exact label match (descriptor freed, nothing merged)', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -583,12 +586,12 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       localFree,
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).not.toHaveBeenCalled()
     expect(localFree).toHaveBeenCalledWith(6n)
   })
 
-  it('grantWrite skips the apply without freeing when the exact ACE and label stand but no descriptor owns them', () => {
+  it('grantWrite skips the apply without freeing when the exact ACE and label stand but no descriptor owns them', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -600,12 +603,12 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       localFree,
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).not.toHaveBeenCalled()
     expect(localFree).not.toHaveBeenCalled()
   })
 
-  it('grantWrite reports a failed descriptor LocalFree on the exact-ACE/exact-label skip path', () => {
+  it('grantWrite reports a failed descriptor LocalFree on the exact-ACE/exact-label skip path', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -615,7 +618,7 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
     })
     let caught: unknown
     try {
-      grantWrite(api, 'C:\\granted', sid, lowSid, world)
+      await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     } catch (error) {
       caught = error
     }
@@ -623,7 +626,7 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
     expect((caught as Win32Error).api).toBe('LocalFree')
   })
 
-  it('does not skip when a root granted by an earlier build carries the ACE and label but no ambient-delete deny', () => {
+  it('does not skip when a root granted by an earlier build carries the ACE and label but no ambient-delete deny', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -632,11 +635,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       getNamedSecurityInfoW: readStub(craftGrantedAcl(sid, world, true, false), craftAclWithLabel(lowSid, true), 6n),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('does not skip when the deny names another trustee', () => {
+  it('does not skip when the deny names another trustee', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -647,11 +650,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       ),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('does not treat a deny of another right as the ambient-delete deny', () => {
+  it('does not treat a deny of another right as the ambient-delete deny', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -662,11 +665,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       ),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('does not treat an Allow ACE as the ambient-delete deny', () => {
+  it('does not treat an Allow ACE as the ambient-delete deny', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -677,11 +680,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       ),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('does not skip when the standing ACE and label match but the label ACL is absent', () => {
+  it('does not skip when the standing ACE and label match but the label ACL is absent', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -690,11 +693,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       getNamedSecurityInfoW: readStub(craftGrantedAcl(sid, world, true), null, 6n),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('does not skip when the exact ACE stands but the label names another integrity level', () => {
+  it('does not skip when the exact ACE stands but the label names another integrity level', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -703,11 +706,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       getNamedSecurityInfoW: readStub(craftGrantedAcl(sid, world, true), craftAclWithLabel(lowSid, false), 6n),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('falls back to the merge path when the standing ACE names a different SID', () => {
+  it('falls back to the merge path when the standing ACE names a different SID', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -716,11 +719,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       getNamedSecurityInfoW: readStub(craftGrantedAcl(sid, world, false), craftAclWithLabel(lowSid, true), 6n),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('treats an implausibly small ACL size as no exact grant', () => {
+  it('treats an implausibly small ACL size as no exact grant', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -733,11 +736,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       getNamedSecurityInfoW: readStub(acl, craftAclWithLabel(lowSid, true), 6n),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('treats an ACE that would overrun the ACL as no exact grant', () => {
+  it('treats an ACE that would overrun the ACL as no exact grant', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -751,11 +754,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       getNamedSecurityInfoW: readStub(acl, craftAclWithLabel(lowSid, true), 6n),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('treats an implausibly small label ACL size as no exact label', () => {
+  it('treats an implausibly small label ACL size as no exact label', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -768,11 +771,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       getNamedSecurityInfoW: readStub(craftGrantedAcl(sid, world, true), label, 6n),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('treats a label ACE that would overrun its ACL as no exact label', () => {
+  it('treats a label ACE that would overrun its ACL as no exact label', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -786,11 +789,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       getNamedSecurityInfoW: readStub(craftGrantedAcl(sid, world, true), label, 6n),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('does not treat a no-write-up ACL Allow ACE as the mandatory label', () => {
+  it('does not treat a no-write-up ACL Allow ACE as the mandatory label', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -804,11 +807,11 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       ),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 
-  it('does not treat a label ACE granting write-up as the exact label', () => {
+  it('does not treat a label ACE granting write-up as the exact label', async () => {
     const sid = craftSid(1, 0)
     const lowSid = craftLowLabelSid()
     const world = craftWorldSid()
@@ -821,31 +824,31 @@ describe('the exact-ACE/exact-label skip and ACL-walk defenses', () => {
       ),
       setNamedSecurityInfoW,
     })
-    grantWrite(api, 'C:\\granted', sid, lowSid, world)
+    await grantWrite(api, 'C:\\granted', sid, lowSid, world)
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(1)
   })
 })
 
 describe('revokeWrite no-DACL path', () => {
-  it('reports nothing to revoke when the read yields neither DACL nor descriptor', () => {
+  it('reports nothing to revoke when the read yields neither DACL nor descriptor', async () => {
     // The default stub encodes a NULL DACL and a NULL descriptor.
     const api = aclApi()
     const sid = craftSid(1, 0)
-    expect(revokeWrite(api, 'C:\\granted', sid)).toBe(false)
+    expect(await revokeWrite(api, 'C:\\granted', sid)).toBe(false)
   })
 
-  it('frees a descriptor that carries no DACL and reports nothing to revoke', () => {
+  it('frees a descriptor that carries no DACL and reports nothing to revoke', async () => {
     const localFree = vi.fn(() => 0n as NativePtr)
     const api = aclApi({
       getNamedSecurityInfoW: readStub(null, null, 6n), // descriptor WITHOUT a DACL
       localFree,
     })
     const sid = craftSid(1, 0)
-    expect(revokeWrite(api, 'C:\\granted', sid)).toBe(false)
+    expect(await revokeWrite(api, 'C:\\granted', sid)).toBe(false)
     expect(localFree).toHaveBeenCalledWith(6n)
   })
 
-  it('reports a failed descriptor LocalFree on the no-DACL path', () => {
+  it('reports a failed descriptor LocalFree on the no-DACL path', async () => {
     const api = aclApi({
       getNamedSecurityInfoW: readStub(null, null, 6n),
       localFree: vi.fn(() => 1n as NativePtr),
@@ -853,7 +856,7 @@ describe('revokeWrite no-DACL path', () => {
     const sid = craftSid(1, 0)
     let caught: unknown
     try {
-      revokeWrite(api, 'C:\\granted', sid)
+      await revokeWrite(api, 'C:\\granted', sid)
     } catch (error) {
       caught = error
     }

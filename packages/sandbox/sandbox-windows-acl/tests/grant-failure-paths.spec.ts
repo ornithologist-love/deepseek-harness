@@ -12,11 +12,13 @@ import koffi from 'koffi'
 
 import type { NativePtr, Win32Bindings } from '../src/ffi.ts'
 import { AclWriteGrant } from '../src/index.ts'
+import { asyncSecurityInfoMock } from './async-security-info.ts'
 
 const PVOID = koffi.pointer('void')
 
 /** Stub binding table: only the members a test drives, so the rest are never called. */
 function stubBindings(overrides: Partial<Win32Bindings>): Win32Bindings {
+  if (overrides.setNamedSecurityInfoW !== undefined) asyncSecurityInfoMock(overrides.setNamedSecurityInfoW)
   return overrides as Win32Bindings
 }
 
@@ -87,16 +89,16 @@ describe('AclWriteGrant failure paths', () => {
     expect(() => AclWriteGrant.create('S-1-4-42-42', api)).toThrow(/null SID/)
   })
 
-  it('dispose aggregates a failing revocation into an AggregateError (best-effort cleanup)', () => {
+  it('dispose aggregates a failing revocation into an AggregateError (best-effort cleanup)', async () => {
     const { api, failReads } = grantThenFailApi()
     const grant = AclWriteGrant.create('S-1-4-42-42', api)
-    grant.add('C:\\granted')
+    await grant.add('C:\\granted')
     expect(grant.paths).toEqual(['C:\\granted'])
     failReads()
-    expect(() =>{  grant.dispose() }).toThrow(AggregateError)
+    await expect(grant.dispose()).rejects.toThrow(AggregateError)
   })
 
-  it('dispose aggregates a failing SID free into an AggregateError', () => {
+  it('dispose aggregates a failing SID free into an AggregateError', async () => {
     const api = stubBindings({
       convertStringSidToSidW: vi.fn((_sid: string, slot: NativePtr) => {
         koffi.encode(slot, PVOID, 42n)
@@ -109,7 +111,7 @@ describe('AclWriteGrant failure paths', () => {
       formatMessageW: vi.fn(() => 0),
     })
     const grant = AclWriteGrant.create('S-1-4-42-42', api)
-    expect(() =>{  grant.dispose() }).toThrow(AggregateError)
+    await expect(grant.dispose()).rejects.toThrow(AggregateError)
   })
 
   it('create fails closed when the Low label SID cannot be created', () => {

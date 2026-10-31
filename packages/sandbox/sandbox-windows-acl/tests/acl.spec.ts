@@ -21,6 +21,7 @@ import { createRestrictedToken, makeWellKnownSid } from '../src/token.ts'
 import { allocOverlapped, allocPtrSlot, decodePtr, isInvalidHandle, isNullPtr, win32 } from '../src/ffi.ts'
 import type { NativePtr, Win32Bindings } from '../src/ffi.ts'
 import * as abi from '../src/win32-abi.ts'
+import type { AsyncSecurityInfoCall } from './async-security-info.ts'
 
 const isWin32 = process.platform === 'win32'
 
@@ -226,7 +227,7 @@ describe.skipIf(!isWin32)('ACL editing', () => {
     const childDir = join(dir, 'child')
     const childFile = join(dir, 'child.txt')
     try {
-      grantWrite(api, dir, capabilitySid, lowSid, world)
+      await grantWrite(api, dir, capabilitySid, lowSid, world)
       mkdirSync(childDir)
       writeFileSync(childFile, 'x')
       const isWorldDeny = (ace: TypedAce): boolean =>
@@ -251,13 +252,13 @@ describe.skipIf(!isWin32)('ACL editing', () => {
     const lowSid = lowLabelSid(api)
     const world = worldSid(api)
     try {
-      grantWrite(api, dir, sidA, lowSid, world)
-      grantWrite(api, dir, sidB, lowSid, world)
-      revokeWrite(api, dir, sidA)
+      await grantWrite(api, dir, sidA, lowSid, world)
+      await grantWrite(api, dir, sidB, lowSid, world)
+      await revokeWrite(api, dir, sidA)
       expect(readDirectAces(api, dir).some(ace => ace.sid === 'S-1-4-4242-21')).toBe(false)
       expect(readDirectAces(api, dir).some(ace => ace.sid === 'S-1-4-4242-22')).toBe(true)
       expect(readLabelAces(api, dir)).toHaveLength(1) // the surviving grant still needs it
-      revokeWrite(api, dir, sidB)
+      await revokeWrite(api, dir, sidB)
       expect(readLabelAces(api, dir)).toEqual([]) // the last revoke clears it
     } finally {
       if (!isNullPtr(sidA)) api.localFree(sidA)
@@ -290,13 +291,13 @@ describe.skipIf(!isWin32)('ACL editing', () => {
       expect(applyResult, `SetNamedSecurityInfoW setup (${applyResult})`).toBe(abi.ERROR_SUCCESS)
       expect(isNullPtr(freed)).toBe(true)
 
-      grantWrite(api, dir, capabilitySid, lowSid, world)
+      await grantWrite(api, dir, capabilitySid, lowSid, world)
 
       const granted = readDirectAces(api, dir)
       expect(granted.some(ace => ace.sid === 'S-1-5-32-545')).toBe(true) // explicit ACE preserved
       expect(granted.some(ace => ace.sid === 'S-1-4-4242-1')).toBe(true)
 
-      revokeWrite(api, dir, capabilitySid)
+      await revokeWrite(api, dir, capabilitySid)
 
       const aces = readDirectAces(api, dir)
       expect(aces.some(ace => ace.sid === 'S-1-5-32-545')).toBe(true) // explicit ACE preserved
@@ -318,7 +319,7 @@ describe.skipIf(!isWin32)('ACL editing', () => {
     const world = worldSid(api)
     try {
       expect(readLabelAces(api, dir)).toEqual([])
-      grantWrite(api, dir, capabilitySid, lowSid, world)
+      await grantWrite(api, dir, capabilitySid, lowSid, world)
       expect(readLabelAces(api, dir)).toEqual([
         { sid: 'S-1-16-4096', mask: abi.SYSTEM_MANDATORY_LABEL_NO_WRITE_UP },
       ])
@@ -326,7 +327,7 @@ describe.skipIf(!isWin32)('ACL editing', () => {
       // removes; the capability ACE stays the only delete authority there.
       const denied = readDirectAces(api, dir).filter(ace => ace.sid === 'S-1-1-0')
       expect(denied).toEqual([{ sid: 'S-1-1-0', mask: abi.FILE_DELETE_CHILD }])
-      revokeWrite(api, dir, capabilitySid)
+      await revokeWrite(api, dir, capabilitySid)
       expect(readLabelAces(api, dir)).toEqual([])
       expect(readDirectAces(api, dir).some(ace => ace.sid === 'S-1-4-4242-9')).toBe(false)
     } finally {
@@ -342,19 +343,19 @@ describe.skipIf(!isWin32)('ACL editing', () => {
     const capabilitySid = sidFromString(api, 'S-1-4-4242-2')
     const lowSid = lowLabelSid(api)
     const world = worldSid(api)
-    const apply = vi.spyOn(api, 'setNamedSecurityInfoW')
+    const apply = vi.spyOn(api.setNamedSecurityInfoW as AsyncSecurityInfoCall, 'async')
     try {
-      grantWrite(api, dir, capabilitySid, lowSid, world)
+      await grantWrite(api, dir, capabilitySid, lowSid, world)
       expect(apply).toHaveBeenCalledTimes(1)
       // The exact ACE, deny, and label now stand (the per-session grant
       // surviving from a previous server lifetime): the second grant is a read only.
-      grantWrite(api, dir, capabilitySid, lowSid, world)
+      await grantWrite(api, dir, capabilitySid, lowSid, world)
       expect(apply).toHaveBeenCalledTimes(1)
       const aces = readDirectAces(api, dir)
       expect(aces.filter(ace => ace.sid === 'S-1-4-4242-2')).toHaveLength(1)
       expect(aces.filter(ace => ace.sid === 'S-1-1-0')).toHaveLength(1)
       expect(readLabelAces(api, dir)).toHaveLength(1)
-      revokeWrite(api, dir, capabilitySid)
+      await revokeWrite(api, dir, capabilitySid)
       expect(readDirectAces(api, dir).some(ace => ace.sid === 'S-1-4-4242-2')).toBe(false)
     } finally {
       apply.mockRestore()
@@ -374,8 +375,8 @@ describe.skipIf(!isWin32)('ACL editing', () => {
     // Workspace ACEs are STANDING: dispose frees the instance's SID
     // allocations but deliberately leaves the ACEs — they are the reuse
     // cache the next provision's exact-ACE skip consumes.
-    sandboxA.dispose()
-    sandboxB.dispose()
+    await sandboxA.dispose()
+    await sandboxB.dispose()
     const aces = readDirectAces(api, dir)
     expect(aces.some(ace => ace.sid === 'S-1-4-9000-1')).toBe(true)
     expect(aces.some(ace => ace.sid === 'S-1-4-9000-2')).toBe(true)
@@ -393,7 +394,7 @@ describe.skipIf(!isWin32)('ACL editing', () => {
       mode: 'workspace-write',
     })
     await sandbox.init()
-    sandbox.dispose()
+    await sandbox.dispose()
     const workspaceAces = readDirectAces(api, workspaceDir)
     expect(workspaceAces.some(ace => ace.sid === 'S-1-4-9000-3')).toBe(true)
     expect(readLabelAces(api, workspaceDir)).toEqual([
@@ -474,10 +475,10 @@ describe.skipIf(!isWin32)('ACL editing', () => {
     const dir = scratch()
     const lockPath = lockFilePath(api, dir)
     let attempts = 0
-    expect(() => withPathLock(api, dir, () => {
+    await expect(withPathLock(api, dir, async () => {
       attempts++
       throw new Error('action failure')
-    })).toThrow('action failure')
+    })).rejects.toThrow('action failure')
     expect(attempts).toBe(1)
     // The lock was released: a fresh immediate lock succeeds.
     const handle = api.createFileW(
@@ -509,7 +510,7 @@ describe.skipIf(!isWin32)('ACL editing', () => {
       expect(mask & 0x00040000).toBe(0) // WRITE_DAC must never be granted
       expect(mask & 0x00080000).toBe(0) // WRITE_OWNER must never be granted
     } finally {
-      sandbox.dispose()
+      await sandbox.dispose()
     }
   })
 })

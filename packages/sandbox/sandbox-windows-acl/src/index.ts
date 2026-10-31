@@ -268,14 +268,14 @@ export class AclSandbox {
       if (this.manageDacls) {
         if (this.writeSidPtr !== undefined) {
           for (const path of this.writableDirs) {
-            grantWrite(api, path, this.writeSidPtr, lowLabelSid, worldSid)
+            await grantWrite(api, path, this.writeSidPtr, lowLabelSid, worldSid)
           }
           if (tempDir !== null && this.tempWriteSidPtr !== undefined) {
             // Record BEFORE granting: grantWrite can throw after a successful
             // apply (a LocalFree failure), and the fail-closed catch must still
             // revoke that path (revoking an ungranted path is a no-op merge).
             this.grantedPaths.push({ path: tempDir, sidPtr: this.tempWriteSidPtr })
-            grantWrite(api, tempDir, this.tempWriteSidPtr, lowLabelSid, worldSid)
+            await grantWrite(api, tempDir, this.tempWriteSidPtr, lowLabelSid, worldSid)
           }
         }
       }
@@ -319,7 +319,7 @@ export class AclSandbox {
       }
       for (const grant of this.grantedPaths) {
         try {
-          revokeWrite(api, grant.path, grant.sidPtr)
+          await revokeWrite(api, grant.path, grant.sidPtr)
         } catch (cleanupError) {
           cleanupFailures.push(cleanupError)
         }
@@ -405,15 +405,16 @@ export class AclSandbox {
    * Revoke the revocable (temp) grants, free the SID, close the token; the
    * standing workspace ACEs stay (the reuse cache). Reports every cleanup
    * failure.
+   * @returns completion after native revocation and resource release.
    */
-  dispose(): void {
+  async dispose(): Promise<void> {
     const api = this.api
     if (api === undefined) return
     const failures: unknown[] = []
     if (this.manageDacls) {
       for (const grant of this.grantedPaths) {
         try {
-          revokeWrite(api, grant.path, grant.sidPtr)
+          await revokeWrite(api, grant.path, grant.sidPtr)
         } catch (error) {
           failures.push(error)
         }

@@ -274,6 +274,8 @@ export class LocalSandboxProvider extends SandboxProvider {
    */
   private readonly workspaceGrants = new Map<string, AclWriteGrant>()
   private readonly tempCapabilities = new Map<string, AclTempCapability>()
+  private aclGrantWork: Promise<void> = Promise.resolve()
+  private aclGrantsDisposed = false
 
   constructor(ctx: Context, config: Config) {
     super(ctx)
@@ -305,8 +307,10 @@ export class LocalSandboxProvider extends SandboxProvider {
     // shutdown leaves no temp ACEs behind (workspace ACEs stand by design —
     // the reuse cache; an unclean shutdown leaves them for the next
     // provision's exact-ACE skip).
-    ctx.effect(() => () => {
-      this.revokeAclGrants()
+    ctx.effect(() => async () => {
+      this.aclGrantsDisposed = true
+      await this.aclGrantWork
+      await this.revokeAclGrants()
     })
   }
 
@@ -334,7 +338,8 @@ export class LocalSandboxProvider extends SandboxProvider {
       })
     }
     const selected = this.selectRunner(policy.mode)
-    const runnerArgv = this.runnerArgv(selected.runner, policy)
+    const runnerArgv = await this.runnerArgv(selected.runner, policy)
+    signal?.throwIfAborted()
     return Promise.resolve<ConfinedArgv>({
       argv: [...runnerArgv, '--', ...argv],
       enforcement: selected.enforcement,
@@ -344,7 +349,7 @@ export class LocalSandboxProvider extends SandboxProvider {
   }
 
   /** The selected rung's runner invocation (program + profile arguments) for one policy. */
-  private runnerArgv(runner: SelectedRunner['runner'], policy: SandboxPolicy): string[] {
+  private async runnerArgv(runner: SelectedRunner['runner'], policy: SandboxPolicy): Promise<string[]> {
     switch (runner) {
       case 'bwrap': return ['bwrap', ...bwrapProfileArgs(policy)]
       case 'landlock': return [this.landlockLauncher(), ...landlockProfileArgs(policy)]
@@ -366,7 +371,7 @@ export class LocalSandboxProvider extends SandboxProvider {
    * @param policy - the resolved per-call policy.
    * @returns the runner invocation.
    */
-  private windowsAclRunnerArgv(policy: SandboxPolicy): string[] {
+  private async windowsAclRunnerArgv(policy: SandboxPolicy): Promise<string[]> {
     const sessionId = policy.sessionId
     if (sessionId === undefined || policy.mode === 'read-only') {
       return [
@@ -376,7 +381,13 @@ export class LocalSandboxProvider extends SandboxProvider {
         '--mode', policy.mode,
       ]
     }
-    const temp = this.materializeAclGrant(sessionId, policy.workspaceRoot)
+    const task = this.aclGrantWork.then(() => {
+      if (this.aclGrantsDisposed) throw new Error('sandbox-local: Windows ACL provider is disposed')
+      return this.materializeAclGrant(sessionId, policy.workspaceRoot)
+    })
+    this.aclGrantWork = task.then(() => {}, () => {})
+    const temp = await task
+    if (this.aclGrantsDisposed) throw new Error('sandbox-local: Windows ACL provider is disposed')
     return [
       ...this.windowsAclRunnerInvocation(),
       '--workspace', policy.workspaceRoot,
@@ -400,19 +411,19 @@ export class LocalSandboxProvider extends SandboxProvider {
    * @param workspaceRoot - the resolved policy root.
    * @returns the pair's private temp directory and write capability.
    */
-  private materializeAclGrant(sessionId: SessionId, workspaceRoot: string): AclTempCapability {
+  private async materializeAclGrant(sessionId: SessionId, workspaceRoot: string): Promise<AclTempCapability> {
     assertTempRootOutsideWorkspace(workspaceRoot, tmpdir())
     const writeSid = workspaceWriteSid(workspaceRoot)
     if (!this.workspaceGrants.has(workspaceRoot)) {
       const grant = AclWriteGrant.create(writeSid)
       try {
-        grant.add(workspaceRoot, true)
+        await grant.add(workspaceRoot, true)
       } catch (error) {
         // Free the SID; a standing ACE (if the apply succeeded before a
         // post-apply throw) is the intended end state, not an error
         // artifact — nothing to revoke.
         try {
-          grant.dispose()
+          await grant.dispose()
         } catch (cleanupError) {
           throw new AggregateError([error, cleanupError], 'sandbox-local windows-acl workspace grant failed and its cleanup also failed')
         }
@@ -428,12 +439,12 @@ export class LocalSandboxProvider extends SandboxProvider {
     let grant: AclWriteGrant | undefined
     try {
       grant = AclWriteGrant.create(tempSid)
-      grant.add(tempDir)
+      await grant.add(tempDir)
     } catch (error) {
       const cleanupFailures: unknown[] = []
       if (grant !== undefined) {
         try {
-          grant.dispose()
+          await grant.dispose()
         } catch (cleanupError) {
           cleanupFailures.push(cleanupError)
         }
@@ -462,12 +473,12 @@ export class LocalSandboxProvider extends SandboxProvider {
    * of it, but a new provider never reuses the residue's random path or SID;
    * OS temp hygiene (or manual removal) eventually reclaims it.
    */
-  private revokeAclGrants(): void {
+  private async revokeAclGrants(): Promise<void> {
     if (this.workspaceGrants.size === 0 && this.tempCapabilities.size === 0) return
     const failures: unknown[] = []
     for (const grant of [...this.workspaceGrants.values(), ...[...this.tempCapabilities.values()].map(capability => capability.grant)]) {
       try {
-        grant.dispose()
+        await grant.dispose()
       } catch (error) {
         failures.push(error)
       }
