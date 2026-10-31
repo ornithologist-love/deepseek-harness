@@ -25,6 +25,27 @@ export type { NativePtr } from '@deepseek-ai/dsh-win32-process'
 type Koffi = typeof import('koffi')['default']
 type Ptr = ReturnType<Koffi['pointer']>
 
+/**
+ * Run a bound Koffi call off the event loop, retaining its arguments until completion.
+ * @param call - a native Koffi binding with its asynchronous entry.
+ * @param args - native arguments retained through the completion callback.
+ * @returns the native result, or a rejection from Koffi.
+ */
+export function callWin32Async<Args extends unknown[], Result>(
+  call: (...args: Args) => Result,
+  ...args: Args
+): Promise<Result> {
+  const asynchronous = call as typeof call & {
+    async(...values: [...Args, (error: Error | null, result: Result) => void]): void
+  }
+  return new Promise((resolve, reject) => {
+    asynchronous.async(...args, (error, result) => {
+      if (error !== null) reject(error)
+      else resolve(result)
+    })
+  })
+}
+
 const requireKoffi = createLazyRequire<Koffi>('koffi', import.meta.url)
 let cachedTypes: { PVOID: Ptr; PPVOID: Ptr } | undefined
 

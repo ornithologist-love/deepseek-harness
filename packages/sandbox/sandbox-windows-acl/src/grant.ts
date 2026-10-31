@@ -101,10 +101,11 @@ export class AclWriteGrant {
    * @param standing - the edits outlive this grant (the workspace reuse
    *   cache; dispose() skips revoking it). Default false (revoked on
    *   dispose — the temp-directory lifecycle).
+   * @returns completion after native propagation; await before using or disposing the grant.
    */
-  add(path: string, standing = false): void {
+  async add(path: string, standing = false): Promise<void> {
     ;(standing ? this.standingPaths : this.revocablePaths).push(path)
-    grantWrite(this.api, path, this.sidPtr, this.lowLabelSidPtr, this.worldSidPtr)
+    await grantWrite(this.api, path, this.sidPtr, this.lowLabelSidPtr, this.worldSidPtr)
   }
 
   /** Every directory currently carrying the grant, in grant order. */
@@ -112,12 +113,15 @@ export class AclWriteGrant {
     return [...this.standingPaths, ...this.revocablePaths]
   }
 
-  /** Revoke every revocable grant (standing security descriptor edits stay) and free the SIDs; reports every cleanup failure. */
-  dispose(): void {
+  /**
+   * Revoke every revocable grant (standing security descriptor edits stay) and free the SIDs.
+   * @returns completion after revocation, rejecting with every cleanup failure.
+   */
+  async dispose(): Promise<void> {
     const failures: unknown[] = []
     for (const path of this.revocablePaths) {
       try {
-        revokeWrite(this.api, path, this.sidPtr)
+        await revokeWrite(this.api, path, this.sidPtr)
       } catch (error) {
         failures.push(error)
       }
