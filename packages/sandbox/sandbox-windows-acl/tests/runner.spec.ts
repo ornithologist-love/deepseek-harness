@@ -184,7 +184,7 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
     expect(existsSync(renamedDir)).toBe(true)
   }, 30_000)
 
-  it('paired SIDs: the runner trusts caller-owned private-temp grants and materializes nothing itself', () => {
+  it('paired SIDs: the runner trusts caller-owned private-temp grants and materializes nothing itself', async () => {
     const seamWorkspace = join(scratchRoot, 'seam-workspace')
     mkdirSync(seamWorkspace)
     const writeSid = workspaceWriteSid(seamWorkspace)
@@ -192,7 +192,7 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
     mkdirSync(privateTemp)
     const privateTempSid = tempWriteSid(privateTemp)
     const grant = AclWriteGrant.create(privateTempSid)
-    grant.add(privateTemp)
+    await grant.add(privateTemp)
     try {
       const probe = [
         "$ErrorActionPreference='SilentlyContinue';",
@@ -217,12 +217,12 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
       expect(existsSync(join(seamWorkspace, 'server-granted.txt'))).toBe(false)
       expect(existsSync(join(privateTemp, 'server-granted.txt'))).toBe(true)
     } finally {
-      grant.dispose()
+      await grant.dispose()
       rmSync(privateTemp, { recursive: true, force: true })
     }
   }, 30_000)
 
-  it('temp capabilities isolate sibling sessions that share one workspace SID', () => {
+  it('temp capabilities isolate sibling sessions that share one workspace SID', async () => {
     const writeSid = workspaceWriteSid(writableDir)
     const tempA = join(isolatedTemp, 'session-a')
     const tempB = join(isolatedTemp, 'session-b')
@@ -233,9 +233,9 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
     const workspaceGrant = AclWriteGrant.create(writeSid)
     const grantA = AclWriteGrant.create(sidA)
     const grantB = AclWriteGrant.create(sidB)
-    workspaceGrant.add(writableDir)
-    grantA.add(tempA)
-    grantB.add(tempB)
+    await workspaceGrant.add(writableDir)
+    await grantA.add(tempA)
+    await grantB.add(tempB)
     const sharedWorkspaceFile = join(writableDir, 'shared-between-sessions.txt')
     const probe = [
       "const fs = require('node:fs');",
@@ -270,9 +270,9 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
       expect(existsSync(join(tempA, 'b-escaped.txt'))).toBe(false)
       expect(readFileSync(join(tempA, 'a.txt'), 'utf8')).toBe('OWN')
     } finally {
-      workspaceGrant.dispose()
-      grantA.dispose()
-      grantB.dispose()
+      await workspaceGrant.dispose()
+      await grantA.dispose()
+      await grantB.dispose()
       rmSync(tempA, { recursive: true, force: true })
       rmSync(tempB, { recursive: true, force: true })
     }
@@ -346,7 +346,7 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
     }
   }, 30_000)
 
-  it('mode-downgrade leak regression: a STANDING workspace grant is inert under read-only and effective again on re-upgrade', () => {
+  it('mode-downgrade leak regression: a STANDING workspace grant is inert under read-only and effective again on re-upgrade', async () => {
     // The reported defect: a session that materialized its grant in
     // workspace-write keeps the ACE standing for the server lifetime. After
     // switching to read-only, the restricted token's read-only list must carry NO
@@ -359,7 +359,7 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
     mkdirSync(privateTemp)
     const privateTempSid = tempWriteSid(privateTemp)
     const grant = AclWriteGrant.create(writeSid)
-    grant.add(writableDir)
+    await grant.add(writableDir)
     try {
       const downgradeProbe = [
         "$ErrorActionPreference='SilentlyContinue';",
@@ -386,7 +386,7 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
       expect(reupgraded.stdout).toContain('REUPGRADE-WRITE: OK')
       expect(existsSync(join(writableDir, 'reupgraded.txt'))).toBe(true)
     } finally {
-      grant.dispose()
+      await grant.dispose()
       rmSync(privateTemp, { recursive: true, force: true })
     }
   }, 30_000)
@@ -461,7 +461,7 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
     }
   }, 60_000)
 
-  it('cross-root delete regression: one session cannot delete inside ANOTHER granted root', () => {
+  it('cross-root delete regression: one session cannot delete inside ANOTHER granted root', async () => {
     // Both roots carry the Low label, so the integrity check alone would not
     // stop this: Windows also authorizes a delete from the parent directory's
     // FILE_DELETE_CHILD right, which the capability intersection never reaches.
@@ -475,8 +475,8 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
     const otherTempSid = tempWriteSid(otherTemp)
     const otherWorkspaceGrant = AclWriteGrant.create(otherWorkspaceSid)
     const otherTempGrant = AclWriteGrant.create(otherTempSid)
-    otherWorkspaceGrant.add(otherWorkspace, true)
-    otherTempGrant.add(otherTemp)
+    await otherWorkspaceGrant.add(otherWorkspace, true)
+    await otherTempGrant.add(otherTemp)
     // Session A's own roots, granted the same way, run through the runner.
     const ownWorkspace = join(scratchRoot, 'own-workspace')
     const ownTemp = join(scratchRoot, 'own-temp')
@@ -486,8 +486,8 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
     const ownTempSid = tempWriteSid(ownTemp)
     const ownWorkspaceGrant = AclWriteGrant.create(ownWorkspaceSid)
     const ownTempGrant = AclWriteGrant.create(ownTempSid)
-    ownWorkspaceGrant.add(ownWorkspace, true)
-    ownTempGrant.add(ownTemp)
+    await ownWorkspaceGrant.add(ownWorkspace, true)
+    await ownTempGrant.add(ownTemp)
     try {
       const victims = {
         ownWork: join(ownWorkspace, 'victim.txt'),
@@ -516,10 +516,10 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
       expect(existsSync(victims.ownWork)).toBe(false)
       expect(existsSync(victims.ownTemp)).toBe(false)
     } finally {
-      ownWorkspaceGrant.dispose()
-      ownTempGrant.dispose()
-      otherWorkspaceGrant.dispose()
-      otherTempGrant.dispose()
+      await ownWorkspaceGrant.dispose()
+      await ownTempGrant.dispose()
+      await otherWorkspaceGrant.dispose()
+      await otherTempGrant.dispose()
       rmSync(ownTemp, { recursive: true, force: true })
       rmSync(otherTemp, { recursive: true, force: true })
     }
@@ -547,7 +547,7 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
     }
   }, 30_000)
 
-  it('a FullControl open inside a granted root still works for files (the deny inherits to containers only)', () => {
+  it('a FullControl open inside a granted root still works for files (the deny inherits to containers only)', async () => {
     // The ambient-delete deny is 0x40, a member of FILE_ALL_ACCESS: inheriting
     // it onto files would deny every GENERIC_ALL/FullControl open by the user,
     // Administrators, SYSTEM, or the DSH host. Directories inside a granted
@@ -560,7 +560,7 @@ describe.skipIf(!isWin32 || !pwshAvailable())('windows-acl runner', () => {
     writeFileSync(join(granted, 'file.txt'), 'x')
     writeFileSync(join(child, 'deep.txt'), 'x')
     const grant = AclWriteGrant.create(workspaceWriteSid(granted))
-    grant.add(granted, true)
+    await grant.add(granted, true)
     try {
       const probe = `
 $ErrorActionPreference='SilentlyContinue'
@@ -584,12 +584,12 @@ TryOpen 'DIRECTORY' '${child}'
       expect(result.stdout).toContain('NESTED-FILE: OK')
       expect(result.stdout).toContain('DIRECTORY: DENIED')
     } finally {
-      grant.dispose()
+      await grant.dispose()
       rmSync(granted, { recursive: true, force: true })
     }
   }, 60_000)
 
-  it('revoking one of two grants on a directory leaves the shared Low label usable', () => {
+  it('revoking one of two grants on a directory leaves the shared Low label usable', async () => {
     // Two capabilities may target one directory; the revoke of the first must
     // not strip the label the second one's child still writes through.
     const shared = join(scratchRoot, 'shared-root')
@@ -598,10 +598,10 @@ TryOpen 'DIRECTORY' '${child}'
     const sidB = `${sidA}-1`
     const grantA = AclWriteGrant.create(sidA)
     const grantB = AclWriteGrant.create(sidB)
-    grantA.add(shared, true)
-    grantB.add(shared)
+    await grantA.add(shared, true)
+    await grantB.add(shared)
     try {
-      grantB.dispose() // revokes B's ACE, must keep the shared label
+      await grantB.dispose() // revokes B's ACE, must keep the shared label
       const target = join(shared, 'after-revoke.txt')
       const result = runRunner([
         '--workspace', shared, '--temp', isolatedTemp, '--mode', 'workspace-write',
@@ -611,7 +611,7 @@ TryOpen 'DIRECTORY' '${child}'
       expect(result.status, `stderr: ${result.stderr}`).toBe(0)
       expect(existsSync(target)).toBe(true)
     } finally {
-      grantA.dispose()
+      await grantA.dispose()
       rmSync(shared, { recursive: true, force: true })
     }
   }, 60_000)

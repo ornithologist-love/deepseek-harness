@@ -20,6 +20,7 @@ import koffi from 'koffi'
 import type { NativePtr, Win32Bindings } from '../src/ffi.ts'
 import { AclSandbox } from '../src/index.ts'
 import * as abi from '../src/win32-abi.ts'
+import { asyncSecurityInfoMock } from './async-security-info.ts'
 
 const PVOID = koffi.pointer('void')
 
@@ -105,6 +106,7 @@ function happyStubs(): HappyStubs {
     return 0
   })
   const setNamedSecurityInfoW = vi.fn(() => 0)
+  asyncSecurityInfoMock(setNamedSecurityInfoW)
   const localAlloc = vi.fn(() => fresh())
   const initializeAcl = vi.fn(() => 1)
   const addMandatoryAce = vi.fn(() => 1)
@@ -275,7 +277,7 @@ describe('AclSandbox init', () => {
     await sandbox.init()
     expect(convertStringSidToSidW).not.toHaveBeenCalled()
     expect(setNamedSecurityInfoW).not.toHaveBeenCalled()
-    expect(() => { sandbox.dispose() }).not.toThrow() // no write SID: nothing to revoke or free
+    await expect(sandbox.dispose()).resolves.toBeUndefined() // no write SID: nothing to revoke or free
   })
 
   it('applies no grants when the caller owns the DACLs (manageDacls: false)', async () => {
@@ -284,7 +286,7 @@ describe('AclSandbox init', () => {
     const sandbox = new AclSandbox({ writableDirs: [workspace], tempDir: null, writeSid: 'S-1-4-9000-5', mode: 'workspace-write', manageDacls: false })
     await sandbox.init()
     expect(setNamedSecurityInfoW).not.toHaveBeenCalled()
-    expect(() => { sandbox.dispose() }).not.toThrow() // caller-owned DACLs: nothing to revoke
+    await expect(sandbox.dispose()).resolves.toBeUndefined() // caller-owned DACLs: nothing to revoke
   })
 
   it('refuses a second init on the same instance', async () => {
@@ -376,7 +378,7 @@ describe('AclSandbox spawn', () => {
     const sandbox = new AclSandbox({ writableDirs: [], tempDir: null, mode: 'read-only' })
     await sandbox.init()
     expect(() => sandbox.spawn({ command: 'probe.exe', controlFileDescriptor: 7 })).toThrow('control pipe requires inherited stdio')
-    sandbox.dispose()
+    await sandbox.dispose()
   })
 
   it('forwards the inherited control pipe to the restricted child', async () => {
@@ -386,7 +388,7 @@ describe('AclSandbox spawn', () => {
     await sandbox.init()
     const child = sandbox.spawn({ command: 'probe.exe', stdio: 'inherit', controlFileDescriptor: 7 })
     await expect(child.wait()).resolves.toEqual({ stdout: Buffer.alloc(0), stderr: Buffer.alloc(0), exitCode: 42 })
-    sandbox.dispose()
+    await sandbox.dispose()
   })
 
   it('refuses to spawn before init', () => {
@@ -431,10 +433,10 @@ describe('AclSandbox spawn', () => {
 })
 
 describe('AclSandbox dispose', () => {
-  it('is a no-op before init', () => {
+  it('is a no-op before init', async () => {
     const workspace = scratch()
     const sandbox = new AclSandbox({ writableDirs: [workspace], tempDir: null, writeSid: 'S-1-4-9000-15', mode: 'workspace-write' })
-    expect(() => { sandbox.dispose() }).not.toThrow()
+    await expect(sandbox.dispose()).resolves.toBeUndefined()
   })
 
   it('aggregates a failing temp revocation into an AggregateError', async () => {
@@ -450,7 +452,7 @@ describe('AclSandbox dispose', () => {
     })
     await sandbox.init()
     getNamedSecurityInfoW.mockReturnValue(2)
-    expect(() => { sandbox.dispose() }).toThrow(/1 cleanup failure/u)
+    await expect(sandbox.dispose()).rejects.toThrow(/1 cleanup failure/u)
   })
 
   it('aggregates SID and token cleanup failures into an AggregateError', async () => {
@@ -459,7 +461,7 @@ describe('AclSandbox dispose', () => {
     const sandbox = new AclSandbox({ writableDirs: [workspace], tempDir: null, writeSid: 'S-1-4-9000-17', mode: 'workspace-write' })
     await sandbox.init()
     localFree.mockReturnValue(1n)
-    expect(() => { sandbox.dispose() }).toThrow(AggregateError)
+    await expect(sandbox.dispose()).rejects.toThrow(AggregateError)
   })
 
   it('reports a failed close of the restricted token', async () => {
@@ -477,6 +479,6 @@ describe('AclSandbox dispose', () => {
     })
     closeHandle.mockImplementation((handle: NativePtr) => (handle === restrictedToken ? 0 : 1))
     await sandbox.init()
-    expect(() => { sandbox.dispose() }).toThrow(AggregateError)
+    await expect(sandbox.dispose()).rejects.toThrow(AggregateError)
   })
 })

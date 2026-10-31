@@ -59,8 +59,8 @@ describe.skipIf(!isWin32 || !pwshAvailable())('AclSandbox write restriction', ()
     await sandbox.init()
   })
 
-  afterAll(() => {
-    sandbox.dispose()
+  afterAll(async () => {
+    await sandbox.dispose()
     rmSync(scratchRoot, { recursive: true, force: true })
     rmSync(isolatedTemp, { recursive: true, force: true })
   })

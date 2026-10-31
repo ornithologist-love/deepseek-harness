@@ -11,11 +11,44 @@ import koffi from 'koffi'
 
 import { Win32Error } from '@deepseek-ai/dsh-win32-process'
 import {
-  allocBytes, decodePtrAt, getTempPath,
+  allocBytes, callWin32Async, decodePtrAt, getTempPath,
   isInvalidHandle, sameSidAt,
 } from '../src/ffi.ts'
 import type { NativePtr, Win32Bindings } from '../src/ffi.ts'
 import * as abi from '../src/win32-abi.ts'
+
+describe('asynchronous native calls', () => {
+  it('uses the asynchronous entry and waits for its result', async () => {
+    const started = Promise.withResolvers<(error: Error | null, result: number) => void>()
+    const synchronous = vi.fn((_value: number) => 0)
+    const binding = Object.assign(synchronous, {
+      async: vi.fn((_value: number, complete: (error: Error | null, result: number) => void) => {
+        started.resolve(complete)
+      }),
+    })
+    const operation = callWin32Async(binding, 42)
+    const complete = await started.promise
+    expect(synchronous).not.toHaveBeenCalled()
+    complete(null, 7)
+    await expect(operation).resolves.toBe(7)
+  })
+
+  it('preserves a native asynchronous failure', async () => {
+    const error = new Error('native completion failed')
+    const binding = Object.assign(vi.fn(() => 0), {
+      async: (complete: (error: Error | null, result: number) => void): void => { complete(error, 0) },
+    })
+    await expect(callWin32Async(binding)).rejects.toBe(error)
+  })
+
+  it('rejects when dispatching the native call throws', async () => {
+    const error = new Error('native dispatch failed')
+    const binding = Object.assign(vi.fn(() => 0), {
+      async: (): never => { throw error },
+    })
+    await expect(callWin32Async(binding)).rejects.toBe(error)
+  })
+})
 
 /** A stub whose formatMessageW supplies text to the GetTempPath failure path. */
 function formatApi(): { api: Win32Bindings; formatMessageW: ReturnType<typeof vi.fn> } {

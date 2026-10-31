@@ -40,38 +40,38 @@ describe.skipIf(!isWin32)('AclWriteGrant (server-side materialization)', () => {
     expect(() => AclWriteGrant.create('S-1-4-abc-1')).toThrow(/ConvertStringSidToSidW/u)
   })
 
-  it('add materializes the ACE (idempotently) and reports grant order; dispose revokes revocable paths and keeps standing paths standing', () => {
+  it('add materializes the ACE (idempotently) and reports grant order; dispose revokes revocable paths and keeps standing paths standing', async () => {
     const dir = scratch()
     const standingDir = scratch()
     const grant = AclWriteGrant.create('S-1-4-9000-77')
-    grant.add(dir) // revocable: the session-temp lifecycle
-    grant.add(standingDir, true) // standing: the workspace reuse cache
+    await grant.add(dir) // revocable: the session-temp lifecycle
+    await grant.add(standingDir, true) // standing: the workspace reuse cache
     expect(grant.paths).toEqual([standingDir, dir])
     expect(icaclsText(dir)).toContain('S-1-4-9000-77')
     expect(icaclsText(standingDir)).toContain('S-1-4-9000-77')
     // A second add over the standing exact ACE is a DACL-read no-op: the
     // grant stays exactly one ACE (the reuse across sessions/restarts).
-    grant.add(dir)
-    grant.add(standingDir, true)
+    await grant.add(dir)
+    await grant.add(standingDir, true)
     expect(icaclsText(dir)).toContain('S-1-4-9000-77')
     expect(icaclsText(standingDir)).toContain('S-1-4-9000-77')
-    grant.dispose()
+    await grant.dispose()
     expect(icaclsText(dir)).not.toContain('S-1-4-9000-77')
     expect(icaclsText(standingDir)).toContain('S-1-4-9000-77')
   })
 
-  it('two grants with different SIDs coexist and revoke independently', () => {
+  it('two grants with different SIDs coexist and revoke independently', async () => {
     const dir = scratch()
     const grantA = AclWriteGrant.create('S-1-4-9000-78')
     const grantB = AclWriteGrant.create('S-1-4-9000-79')
-    grantA.add(dir)
-    grantB.add(dir)
+    await grantA.add(dir)
+    await grantB.add(dir)
     expect(icaclsText(dir)).toContain('S-1-4-9000-78')
     expect(icaclsText(dir)).toContain('S-1-4-9000-79')
-    grantA.dispose()
+    await grantA.dispose()
     expect(icaclsText(dir)).not.toContain('S-1-4-9000-78')
     expect(icaclsText(dir)).toContain('S-1-4-9000-79')
-    grantB.dispose()
+    await grantB.dispose()
     expect(icaclsText(dir)).not.toContain('S-1-4-9000-79')
   })
 })
