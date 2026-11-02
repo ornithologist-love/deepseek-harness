@@ -17,7 +17,7 @@ socket.once('connect', () => {
   socket.write(secret);
 });
 socket.once('data', acknowledgement => {
-  if (acknowledgement.toString() !== '1') { socket.destroy(); process.exitCode = 127; return; }
+  if (acknowledgement[0] !== 49) { socket.destroy(); process.exitCode = 127; return; }
   const child = spawn(argv[0], argv.slice(1), {
     stdio: hasControl ? ['inherit', 'inherit', 'inherit', 'ignore', 'ignore', 'ignore', 'ignore', 'pipe'] : 'inherit',
     env: hasControl ? { ...process.env, DSH_SUBPROCESS_CONTROL: 'pipe' } : process.env,
@@ -28,8 +28,12 @@ socket.once('data', acknowledgement => {
     process.exitCode = code ?? (signal ? 1 : 0);
     if (!hasControl) socket.end();
   });
-  if (hasControl) { socket.pipe(child.stdio[7]); child.stdio[7].pipe(socket); }
-  socket.once('close', () => { if (child.exitCode === null) child.kill(); });
+  if (hasControl) {
+    if (acknowledgement.length > 1) child.stdio[7].write(acknowledgement.subarray(1));
+    socket.pipe(child.stdio[7]);
+    child.stdio[7].pipe(socket);
+    socket.once('close', () => { child.stdio[7].destroy(); });
+  }
 });
 `
 

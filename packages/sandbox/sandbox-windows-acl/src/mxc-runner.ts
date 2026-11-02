@@ -143,8 +143,11 @@ export async function runMxc(args: string[]): Promise<number> {
           while (!isJobEmpty(api, child.job)) await delay(25)
         }
       } finally {
-        closeHandleChecked(api, child.process, 'MXC executor process')
-        closeHandleChecked(api, child.job, 'MXC executor job')
+        try {
+          closeHandleChecked(api, child.process, 'MXC executor process')
+        } finally {
+          closeHandleChecked(api, child.job, 'MXC executor job')
+        }
       }
     }
   } catch (error) {
