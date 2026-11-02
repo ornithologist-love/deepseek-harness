@@ -162,6 +162,88 @@ function readCurrentSecurity(
   return { oldAcl: decodePtr(daclSlot), labelAcl: decodePtr(saclSlot), descriptor: decodePtr(descriptorSlot) }
 }
 
+/** Serialized directory permissions owned by a workspace-grant lease. */
+export interface WriteSecuritySnapshot {
+  /** Complete DACL bytes; null denotes a NULL DACL. */
+  dacl: string | null
+  /** Mandatory-label ACL bytes; null denotes the implicit Medium label. */
+  label: string | null
+}
+
+function copyAcl(acl: NativePtr | null): string | null {
+  if (acl === null) return null
+  const length = decodeUint16At(acl, 2)
+  const bytes = Buffer.alloc(length)
+  for (let offset = 0; offset < length; offset++) bytes[offset] = decodeUint8At(acl, offset)
+  return bytes.toString('base64')
+}
+
+/** Read a lease's recovery record without changing the directory. */
+export function snapshotWriteSecurity(api: Win32Bindings, path: string): WriteSecuritySnapshot {
+  const { oldAcl, labelAcl, descriptor } = readCurrentSecurity(api, path)
+  try { return { dacl: copyAcl(oldAcl), label: copyAcl(labelAcl) } }
+  finally {
+    if (descriptor !== null && !isNullPtr(api.localFree(descriptor))) {
+      throwLastError(api, 'LocalFree', `snapshotWriteSecurity(${path})`)
+    }
+  }
+}
+
+function savedAcl(value: string | null): Buffer | null {
+  if (value === null) return null
+  const bytes = Buffer.from(value, 'base64')
+  if (bytes.length < abi.ACL_HEADER_SIZE || bytes.readUInt16LE(2) !== bytes.length) {
+    throw new Error('Invalid workspace-grant recovery ACL')
+  }
+  return bytes
+}
+
+/**
+ * Restore a completed lease's label and, only when unchanged since its grant,
+ * its DACL. Concurrent user permission edits are retained.
+ * @returns whether the DACL could also be restored without replacing newer edits.
+ */
+export async function restoreWriteSecurity(
+  api: Win32Bindings, path: string, before: WriteSecuritySnapshot, applied: WriteSecuritySnapshot | null,
+): Promise<boolean> {
+  return withPathLock(api, path, async () => {
+    const current = snapshotWriteSecurity(api, path)
+    const restoreDacl = applied !== null && current.dacl === applied.dacl
+    const dacl = restoreDacl ? savedAcl(before.dacl) : null
+    const label = savedAcl(before.label)
+    let implicitLabel: NativePtr | null = null
+    let mediumSid: NativePtr | null = null
+    try {
+      // An unlabeled root is effectively Medium. Propagate that level first:
+      // simply clearing the root can leave inherited Low labels on its outputs.
+      if (label === null) {
+        const slot = allocPtrSlot()
+        if (api.convertStringSidToSidW('S-1-16-8192', slot) === 0) throwLastError(api, 'ConvertStringSidToSidW', 'Medium label')
+        mediumSid = decodePtr(slot)
+        if (mediumSid === null) throw new Error('Medium label SID is missing')
+        implicitLabel = buildLowLabelAcl(api, mediumSid)
+      }
+      const information = abi.LABEL_SECURITY_INFORMATION | (restoreDacl ? abi.DACL_SECURITY_INFORMATION : 0)
+      const result = await callWin32Async(api.setNamedSecurityInfoW,
+        path, abi.SE_FILE_OBJECT, information, null, null, dacl, label ?? implicitLabel)
+      if (result !== abi.ERROR_SUCCESS) throwWin32(api, 'SetNamedSecurityInfoW', result, `restoreWriteSecurity(${path})`)
+      if (label === null) {
+        const clear = await callWin32Async(api.setNamedSecurityInfoW,
+          path, abi.SE_FILE_OBJECT, abi.LABEL_SECURITY_INFORMATION, null, null, null, null)
+        if (clear !== abi.ERROR_SUCCESS) throwWin32(api, 'SetNamedSecurityInfoW', clear, `restore implicit label(${path})`)
+      }
+      const verified = snapshotWriteSecurity(api, path)
+      if (verified.label !== before.label || (restoreDacl && verified.dacl !== before.dacl)) {
+        throw new Error(`Workspace permission recovery verification failed: ${path}`)
+      }
+      return restoreDacl
+    } finally {
+      if (implicitLabel !== null) api.localFree(implicitLabel)
+      if (mediumSid !== null) api.localFree(mediumSid)
+    }
+  })
+}
+
 /**
  * Build the Low mandatory label applied with every write grant: one
  * SYSTEM_MANDATORY_LABEL_ACE naming `lowLabelSidPtr` with the no-write-up

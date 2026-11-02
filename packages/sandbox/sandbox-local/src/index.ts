@@ -9,12 +9,10 @@
  * the per-WORKSPACE identity derived from the canonical member paths
  * (`memberSetWriteSid`; one member keeps `workspaceWriteSid`), while every live session receives a RANDOM private
  * temp directory and its own derived capability (`tempWriteSid`). The
- * workspace-root ACE materializes once per workspace per server lifetime
- * and STANDS (the cross-session reuse cache — the exact-ACE skip makes
- * every later provision O(1) instead of re-propagating the tree per
- * session); the private-temp ACEs are revoked on dispose. The runner
- * receives both SIDs (their presence marks the seam-managed contract) and
- * stops managing DACLs itself. The rung reports partial enforcement because
+ * private-temp ACEs are revoked on provider disposal. The runner receives
+ * both SIDs, owns a recoverable workspace-grant lease, and restores workspace
+ * permissions after the last overlapping confined invocation exits.
+ * The rung reports partial enforcement because
  * NTFS hard links alias one file object across paths, reads stay unconfined,
  * and a tree another AppContainer tool has ACL'd with a package SID is not
  * readable by the Low-integrity child.
@@ -37,7 +35,7 @@ import z from '@deepseek-ai/schemastery'
 import { SandboxProvider, SandboxUnavailableError, canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, ConfinedSandboxMode, RunnerFailureRule, SandboxEnforcement, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { AclWriteGrant, assertTempRootOutsideWorkspace, memberSetWriteSid, registerAclDiagnosisSkill, tempWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
+import { AclWriteGrant, WorkspaceWriteLease, assertTempRootOutsideWorkspace, memberSetWriteSid, registerAclDiagnosisSkill, tempWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from './profiles.ts'
 
@@ -244,9 +242,8 @@ const RUNNER_FAILURE_RULES = {
 /**
  * Local process-sandbox provider. Registers as `ctx.sandbox`. Caches the
  * chain verdict and, on the windows-acl rung, the write grants
- * ({@link AclWriteGrant}: the standing workspace-root grant per workspace
- * and the revocable private-temp grant per live session/workspace pair, the
- * latter revoked on provider dispose); the one-time probes spawn nothing
+ * ({@link AclWriteGrant}: the revocable private-temp grant per live
+ * session/workspace pair); the one-time probes spawn nothing
  * else.
  */
 export class LocalSandboxProvider extends SandboxProvider {
@@ -266,14 +263,12 @@ export class LocalSandboxProvider extends SandboxProvider {
   /** Cached chain verdict; undefined until the first confined wrap needs it. */
   private selectedRunner: SelectedRunner | 'unavailable' | undefined
   /**
-   * Server-lifetime write grants (windows-acl rung): the STANDING
-   * member-root grant per workspace member set (its ACE is the cross-session reuse
-   * cache and outlives the provider — never revoked) and the REVOCABLE
-   * private-temp grant per live session/workspace pair (revoked on provider
-   * dispose).
+   * Server-lifetime write grants (windows-acl rung): the revocable
+   * private-temp grant per live session/workspace pair. Workspace permissions
+   * belong to the runner's invocation lease.
    */
-  private readonly workspaceGrants = new Map<string, AclWriteGrant>()
   private readonly tempCapabilities = new Map<string, AclTempCapability>()
+  private readonly workspaceRecovery: Promise<void>
   private aclGrantWork: Promise<void> = Promise.resolve()
   private aclGrantsDisposed = false
 
@@ -294,6 +289,9 @@ export class LocalSandboxProvider extends SandboxProvider {
       throw new Error('sandbox-local: runnerFailureSignatures entries must be non-empty single-line strings')
     }
     this.runnerCommand = runner.length > 0 ? runner : undefined
+    this.workspaceRecovery = process.platform === 'win32' && runner.length === 0
+      ? WorkspaceWriteLease.recover() : Promise.resolve()
+    void this.workspaceRecovery.catch(error => ctx.logger.warn('Windows workspace-grant recovery failed', error))
     this.configuredRunnerFailureSignatures = runnerFailureSignatures
     this.probeTimeoutMs = config.probeTimeoutMs as number
     assertPositiveFinite('probeTimeoutMs', this.probeTimeoutMs)
@@ -304,9 +302,8 @@ export class LocalSandboxProvider extends SandboxProvider {
       ctx.inject(['skills'], (skillsCtx) => { registerAclDiagnosisSkill(skillsCtx) })
     }
     // The temp grants are revoked with the provider: a clean server
-    // shutdown leaves no temp ACEs behind (workspace ACEs stand by design —
-    // the reuse cache; an unclean shutdown leaves them for the next
-    // provision's exact-ACE skip).
+    // shutdown leaves no temp ACEs behind. Each runner restores its workspace
+    // edits after the confined process range exits.
     ctx.effect(() => async () => {
       this.aclGrantsDisposed = true
       await this.aclGrantWork
@@ -364,17 +361,17 @@ export class LocalSandboxProvider extends SandboxProvider {
 
   /**
    * The windows-acl runner argv for one policy. With a calling session (the
-   * policy's `sessionId`) under workspace-write, the grants are materialized
-   * once per provider lifetime — the standing workspace-root grant per
-   * workspace and a revocable, RANDOM private-temp capability per live
-   * session/workspace pair. The runner receives `--write-sid` plus
-   * `--temp-write-sid` and grants nothing itself. Agentless workspace-write
+   * policy's `sessionId`) under workspace-write, a revocable, RANDOM
+   * private-temp capability is materialized per live session/workspace pair.
+   * The runner receives `--write-sid` plus `--temp-write-sid`, leases the
+   * workspace grant, and leaves the caller-owned temp grant alone. Agentless workspace-write
    * calls pass the ambient temp ROOT and no SID flags: the runner creates and
    * removes a random private child directory for that one invocation.
    * @param policy - the resolved per-call policy.
    * @returns the runner invocation.
    */
   private async windowsAclRunnerArgv(policy: SandboxPolicy): Promise<string[]> {
+    await this.workspaceRecovery
     const roots = policy.workspaceRoots ?? [policy.workspaceRoot]
     const workspaceArgs = roots.flatMap(root => ['--workspace', root])
     const sessionId = policy.sessionId
@@ -404,9 +401,8 @@ export class LocalSandboxProvider extends SandboxProvider {
   }
 
   /**
-   * Materialize one workspace-write policy's ACEs once per provider
-   * lifetime. The workspace SID and standing root grant are shared by the
-   * workspace. The temp directory is random and carries a distinct SID, so
+   * Materialize one workspace-write policy's private-temp ACE once per provider
+   * lifetime. The temp directory is random and carries a distinct SID, so
    * another session on the same workspace cannot use the shared workspace
    * SID to enter it. A fresh provider always chooses a new path; crash
    * residue therefore cannot collide with or authorize a resumed session.
@@ -419,25 +415,6 @@ export class LocalSandboxProvider extends SandboxProvider {
    */
   private async materializeAclGrant(sessionId: SessionId, workspaceRoot: string, roots: readonly string[]): Promise<AclTempCapability> {
     for (const root of roots) assertTempRootOutsideWorkspace(root, tmpdir())
-    const writeSid = memberSetWriteSid(roots)
-    const members = JSON.stringify([...roots].sort())
-    if (!this.workspaceGrants.has(members)) {
-      const grant = AclWriteGrant.create(writeSid)
-      try {
-        for (const root of roots) await grant.add(root, true)
-      } catch (error) {
-        // Free the SID; a standing ACE (if the apply succeeded before a
-        // post-apply throw) is the intended end state, not an error
-        // artifact — nothing to revoke.
-        try {
-          await grant.dispose()
-        } catch (cleanupError) {
-          throw new AggregateError([error, cleanupError], 'sandbox-local windows-acl workspace grant failed and its cleanup also failed')
-        }
-        throw error
-      }
-      this.workspaceGrants.set(members, grant)
-    }
     const key = JSON.stringify([String(sessionId), workspaceRoot])
     const existing = this.tempCapabilities.get(key)
     if (existing !== undefined) return existing
@@ -474,16 +451,16 @@ export class LocalSandboxProvider extends SandboxProvider {
   /**
    * Dispose every write grant (provider dispose): the revocable temp ACEs
    * are revoked, the private temp directories this provider created are
-   * removed, and every SID allocation is freed; the standing workspace ACEs
-   * stay (the reuse cache). Cleanup failures are reported, not thrown:
+   * removed, and every SID allocation is freed. Workspace grants belong to
+   * invocation leases. Cleanup failures are reported, not thrown:
    * cordis teardown must not be aborted by grant cleanup. A crash skips all
    * of it, but a new provider never reuses the residue's random path or SID;
    * OS temp hygiene (or manual removal) eventually reclaims it.
    */
   private async revokeAclGrants(): Promise<void> {
-    if (this.workspaceGrants.size === 0 && this.tempCapabilities.size === 0) return
+    if (this.tempCapabilities.size === 0) return
     const failures: unknown[] = []
-    for (const grant of [...this.workspaceGrants.values(), ...[...this.tempCapabilities.values()].map(capability => capability.grant)]) {
+    for (const grant of [...this.tempCapabilities.values()].map(capability => capability.grant)) {
       try {
         await grant.dispose()
       } catch (error) {
@@ -497,7 +474,6 @@ export class LocalSandboxProvider extends SandboxProvider {
         failures.push(error)
       }
     }
-    this.workspaceGrants.clear()
     this.tempCapabilities.clear()
     if (failures.length > 0) {
       this.ctx.logger.warn(`sandbox-local: windows-acl grant cleanup completed with ${failures.length} failure(s)`)

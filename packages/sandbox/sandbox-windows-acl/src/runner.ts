@@ -3,8 +3,8 @@
  * seam spawns in place of the caller's command. It creates the
  * WRITE_RESTRICTED token with the workspace write-SID allowlist, spawns the
  * wrapped argv under it with the CALLER'S stdio inherited (bytes flow
- * straight through), mirrors the child's exit code, and revokes its temp
- * grant on exit (workspace ACEs stay standing as the reuse cache).
+ * straight through), mirrors the child's exit code, and releases its
+ * workspace lease after the complete confined process range has exited.
  *
  * Stable argv contract (the seam builds it; a native-exe replacement would
  * keep the same contract):
@@ -29,9 +29,9 @@
  *    (logon SID, EVERYONE) and differ only by the capabilities.
  *
  * `--write-sid` + `--temp-write-sid`: the seam's grant contract — the
- * CALLER has already materialized distinct workspace and private-temp ACEs
- * and owns their revocation, so the runner neither grants nor revokes
- * (`manageDacls: false`). Both values are checked against their owning paths.
+ * CALLER materializes and owns the private-temp ACE. The runner leases the
+ * workspace ACE and label independently (`manageWorkspaceDacls: true`). Both
+ * values are checked against their owning paths.
  * Without the pair (standalone/agentless use), workspace-write treats
  * `--temp` as a ROOT, creates a random private child directory, derives its
  * own temp SID, and removes that directory after the child exits. In both
@@ -170,6 +170,7 @@ async function main(): Promise<number> {
       ...writeSid === undefined ? {} : { writeSid },
       ...privateTempSid === undefined ? {} : { tempWriteSid: privateTempSid },
       manageDacls: !seamManaged,
+      manageWorkspaceDacls: true,
     })
     await sandbox.init()
     initialized = true
