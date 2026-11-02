@@ -129,7 +129,7 @@ describe('AssistantMarkdown Markdown image Slot', () => {
 
   it('renders a settled image through a contributed replacement', () => {
     vi.spyOn(document, 'baseURI', 'get').mockReturnValue(BASE)
-    const renderSlot = vi.fn<AssistantMarkdownProps['renderSlot']>(() => (
+    const renderSlot = vi.fn(() => (
       // The replacement replaces the native presentation entirely.
       <span data-testid="replacement">replaced</span>
     ))
@@ -156,7 +156,7 @@ describe('AssistantMarkdown Markdown image Slot', () => {
 
   it('keeps the native image when no replacement is contributed', () => {
     vi.spyOn(document, 'baseURI', 'get').mockReturnValue(BASE)
-    const renderSlot = vi.fn<AssistantMarkdownProps['renderSlot']>((_name, _owner, options) => options?.fallback ?? null)
+    const renderSlot = vi.fn((_name: string, _owner: object, options?: { fallback?: React.ReactNode }) => options?.fallback ?? null)
     const { container } = render(
       <AssistantMarkdown renderSlot={renderSlot} useDisclosure={useDisclosure} useGroupAction={useSearchableHidden}
         usePresentation={useDetailedPresentation}

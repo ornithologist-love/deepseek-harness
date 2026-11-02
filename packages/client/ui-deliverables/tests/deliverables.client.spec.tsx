@@ -1063,7 +1063,9 @@ describe('presented files', () => {
     const withCwd: typeof props = {
       ...props,
       useSessions: <T,>(select: (state: SessionListState) => T): T =>
-        select({ ids: ['viewed'], byId: { viewed: { cwd } } as SessionListState['byId'], phase: 'ready', projectionsBySession: {} }),
+        select({
+          ids: [SessionId('viewed')], byId: { viewed: { cwd } } as SessionListState['byId'], phase: 'ready', projectionsBySession: {},
+        }),
     }
     const openFile = vi.fn<(path: string) => void>()
     const view = render(<Deliverables {...withCwd} renderSlot={renderSlot} matched={selectDeliverables(owner)!}
@@ -1083,7 +1085,9 @@ describe('presented files', () => {
     const owners: SlotMap['deliverables.file.preview']['owner'][] = []
     const renderSlot: Parameters<typeof Deliverables>[0]['renderSlot'] = (name, input) => {
       if (name === 'deliverables.file.preview') {
-        const owner = input as SlotMap['deliverables.file.preview']['owner']
+        // The generic dispatch share widens to object, so name the child's owner to read it.
+        const share: object = input
+        const owner = share as SlotMap['deliverables.file.preview']['owner']
         owners.push(owner)
         return <figure data-deliverable-preview data-preview-path={owner.file.path} />
       }

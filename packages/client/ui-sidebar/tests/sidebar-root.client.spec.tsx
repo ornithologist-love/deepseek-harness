@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Menu, Modal, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { allowAllAccess, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import type { RemoteEndpoint } from '@deepseek-ai/dsh-api-remote-access/client'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 import type {
@@ -22,6 +23,9 @@ const useResource = (() => ({ status: 'none' as const, value: undefined, failure
 const usePanelInfo: GlobalStandardProps['usePanelInfo'] = selector => selector({ activePanelId: null })
 
 const t: SidebarRootComponentProps['t'] = makeTranslate({ ...commonEn, ...en })
+
+// Access endpoints are a compile-time contract: an undeclared action gates nothing.
+const NEW_SESSION = 'session/create' satisfies RemoteEndpoint
 
 afterEach(() => {
   cleanup()
@@ -443,7 +447,7 @@ it('wires the shell.leading controls to the shared sidebar actions', () => {
   cleanup()
 
   // A page whose access snapshot excludes starting a Session keeps only the sidebar toggle.
-  render(<HeaderLeadingControls {...props} useRemoteAccess={action => action !== 'session/create'} />)
+  render(<HeaderLeadingControls {...props} useRemoteAccess={action => action !== NEW_SESSION} />)
   expect(screen.getByRole('button', { name: en['toggle.open'] })).toBeTruthy()
   expect(screen.queryByRole('button', { name: en['session.new.label'] })).toBeNull()
 })

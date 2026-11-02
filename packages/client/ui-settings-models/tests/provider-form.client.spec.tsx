@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import Schema from '@deepseek-ai/schemastery'
 import { Context } from '@deepseek-ai/cordis'
 import { bindSnapshotSelector, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
+// Namespace declarations every fake Remote is read through in this program.
+import type {} from './remote-namespaces.client.ts'
 import type { SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { ModelsSection, providerCopy } from '../src/client/ModelsSection.tsx'
@@ -81,7 +83,9 @@ function remoteOk<T>(value: T) {
 type RefusalCode = 'credential/rejected' | 'settings/conflict' | 'settings/rejected'
 
 /** One refusal per code, each carrying the details its own code declares. */
-const REFUSALS: { [Code in RefusalCode]: (message: string) => RemoteError<Code> } = {
+type Refusals = { [Code in RefusalCode]: (message: string) => RemoteError<Code> }
+
+const REFUSALS: Refusals = {
   'credential/rejected': message => new RemoteError('credential/rejected', message, { ref: 'OPENAI_API_KEY' }),
   'settings/conflict': message =>
     new RemoteError('settings/conflict', message, { ns: 'llm-pi-ai', expected: 7, actual: 8 }),

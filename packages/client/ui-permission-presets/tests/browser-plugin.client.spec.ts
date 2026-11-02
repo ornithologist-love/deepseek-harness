@@ -465,7 +465,7 @@ describe('ui-permission browser plugin', () => {
   it('a deferred Host saves the pick through selectPermission instead of running /permission', async () => {
     const b = await bench()
     b.values.set(sid('s1'), { currentValue: 'workspace-write' })
-    const select = (b.permissionSelect()!.inject as (...args: never[]) => PermissionSelectInjected)(sid('s1'))
+    const select = slotInjected<PermissionSelectInjected>(b.permissionSelect())(sid('s1'))
 
     // Eager Hosts run the Agent command; the deferred branch must not start one.
     await expect(select.select('read-only')).resolves.toBe(true)

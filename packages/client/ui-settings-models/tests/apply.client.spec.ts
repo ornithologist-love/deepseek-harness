@@ -9,6 +9,8 @@ import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
 import { remoteDefaultResponses } from '@deepseek-ai/dsh-client-test-runtime/src/assembly/remote-default-responses.ts'
 import { ok, RemoteMock } from '@deepseek-ai/dsh-remote-mock'
+// Namespace declarations the fake Remote is read through in this program.
+import type {} from './remote-namespaces.client.ts'
 import { apply as settingsApply, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { apply, inject, refreshIfLoaded } from '@deepseek-ai/dsh-client-ui-settings-models/client'
 import {
@@ -107,6 +109,7 @@ describe('ui-settings-models apply', () => {
           welcomeNotice: true,
           credentialOnlyProviders: [],
           providerIcons: {},
+          hiddenProviders: [],
           providerEditorLayouts: {},
         },
       }])
@@ -134,6 +137,7 @@ describe('ui-settings-models apply', () => {
       welcomeNotice: true,
       credentialOnlyProviders: [],
       providerIcons: {},
+      hiddenProviders: [],
       providerEditorLayouts: {},
     })
     expect(hostPlugin.Config['~standard'].validate({ credentialOnboarding: 'false' })).toHaveProperty('issues')
@@ -164,12 +168,13 @@ describe('ui-settings-models apply', () => {
       welcomeNotice: false,
       credentialOnlyProviders: ['acme'],
       providerIcons: { acme: icon },
+      hiddenProviders: [],
       providerEditorLayouts: { 'llm-acme': 'pi-ai' },
     })
     await host.await()
     try {
       const rows: IndexInjection[] = []
-      ctx.emit('webserver/index-inject', rows)
+      ctx.emit('webserver/index-inject', rows, PAGE_PEER)
       expect(rows).toEqual([{
         kind: 'global',
         name: ONBOARDING_CONFIG_GLOBAL,
@@ -178,6 +183,7 @@ describe('ui-settings-models apply', () => {
           welcomeNotice: false,
           credentialOnlyProviders: ['acme'],
           providerIcons: { acme: icon },
+          hiddenProviders: [],
           providerEditorLayouts: { 'llm-acme': 'pi-ai' },
         },
       }])

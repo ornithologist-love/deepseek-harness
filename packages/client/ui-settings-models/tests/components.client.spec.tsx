@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import Schema from '@deepseek-ai/schemastery'
 import { Context } from '@deepseek-ai/cordis'
 import { bindSnapshotSelector, RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
+// Namespace declarations every fake Remote is read through in this program.
+import type {} from './remote-namespaces.client.ts'
 import type {
   CredentialInfo, RemoteResult, SettingsNamespaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
@@ -165,7 +167,9 @@ function remoteOk<T>(value: T) {
 type RefusalCode = 'credential/rejected' | 'gateway/internal' | 'settings/conflict' | 'settings/rejected'
 
 /** One refusal per code, each carrying the details its own code declares. */
-const REFUSALS: { [Code in RefusalCode]: (message: string) => RemoteError<Code> } = {
+type Refusals = { [Code in RefusalCode]: (message: string) => RemoteError<Code> }
+
+const REFUSALS: Refusals = {
   'credential/rejected': message => new RemoteError('credential/rejected', message, { ref: 'DEEPSEEK_API_KEY' }),
   'gateway/internal': message => new RemoteError('gateway/internal', message, {}),
   'settings/conflict': message =>

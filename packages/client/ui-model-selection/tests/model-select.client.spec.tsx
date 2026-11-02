@@ -1133,7 +1133,9 @@ describe('ModelSelect deployment decorations', () => {
     { id: 'plain', name: 'Plain', models: [{ id: 'only', name: 'Only' }] },
     { id: 'empty', name: 'Empty Provider', models: [] },
   ]
-  const decorate: ComponentProps<typeof ModelSelect>['renderSlot'] = (name, owner, options) => {
+  // A loose dispatch signature keeps the generic owner share out of the way;
+  // the per-key owner reads below use the SlotMap owners declared in slots.ts.
+  const decorate = (name: string, owner: object, options?: { fallback?: React.ReactNode }) => {
     if (name === 'conversation.input.model.icon') {
       const { provider, model, placement } = owner as ModelIconOwner
       return <i data-testid={`icon-${placement}-${provider?.id ?? 'none'}-${model?.id ?? 'none'}`} />

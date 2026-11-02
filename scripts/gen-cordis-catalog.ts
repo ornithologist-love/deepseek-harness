@@ -123,8 +123,10 @@ export const SERVICE_PAGE: Record<string, string> = {
   forgePanel: 'forge.md',
   forgeSession: 'forge.md',
   sessionController: 'session.md',
+  sessionCommandPolicy: 'session.md',
   sessionSkillCatalog: 'skills.md',
   sessions: 'session.md',
+  sessionNavigationInput: 'workspace.md',
   sessionLogDeepSeek: 'session.md',
   settings: 'settings.md',
   sessionTitle: 'session-title.md',
@@ -221,6 +223,8 @@ export const SERVICE_WALK_EXEMPTIONS: Record<string, string> = {
   sidebarRight: 'client-side right-Sidebar navigation face — packages/client/ui-sidebar-right/README.md owns the API',
   sidebarRightTabs: 'client-side right-Sidebar tab-type registry — packages/client/ui-sidebar-right/README.md owns the API',
   documentPreviews: 'client-side document renderer registry — docs/subsystems/sidebar-right.md owns the API',
+  workspacePresentation: 'client-side Workspace presentation registry — packages/client/ui-workspace/README.md owns the API',
+  settingsShell: 'client-side settings shell host accessor — packages/client/ui-settings-general/README.md owns the API',
 }
 
 /**
@@ -290,6 +294,7 @@ export const EVENT_WALK_EXEMPTIONS: Record<string, string> = {
   'slash/input-insert-text': 'client-face slash-input protocol — packages/client/ui-input-trigger/README.md owns the API',
   'slots/changed': 'client-face slot invalidation signal — packages/client/ui-renderer/README.md owns the API',
   'theme/change': 'client-face theme switch signal — packages/client/ui-theme/README.md owns the API',
+  'settings/open-request': 'client-face settings navigation request — packages/client/ui-settings-general/README.md owns the API',
 }
 
 /**
@@ -845,6 +850,8 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   ToolRegistrationOptions: 'tools.md',
   ResolvedToolSet: 'tools.md',
   ToolSchema: 'tools.md',
+  TrackedToolCall: 'tools.md',
+  ToolCallInterruptReason: 'tools.md',
   SettingsNamespace: 'settings.md',
   SettingsDescriptor: 'settings.md',
   SettingsDescribeValue: 'settings.md',
@@ -1087,6 +1094,14 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   SubagentRunEndInfo: 'event payload contract is owned by packages/subagent/subagent/src/types.ts',
   SubagentRunInfo: 'event payload contract is owned by packages/subagent/subagent/src/types.ts',
   WorkflowAgentEndInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
+  SessionConfiguration: 'saved composer choices are owned by packages/api/session-controller/src/types.ts',
+  SessionInterruptToolCallRequest: 'interrupt request is owned by packages/api/session-controller/src/types.ts',
+  SessionInterruptToolCallValue: 'interrupt result is owned by packages/api/session-controller/src/types.ts',
+  SessionUploadValidator: 'upload validator contract is owned by packages/client/file-upload/src/index.ts',
+  WorkspaceRootResolver: 'workspace root resolver is owned by packages/sandbox/sandbox-policy/src/index.ts',
+  WorkspaceDirectorySource: 'workspace directory source is owned by packages/workspace/workspace/README.md',
+  WorkspaceHistoricalDirectorySource: 'workspace directory source is owned by packages/workspace/workspace/README.md',
+  WorkspaceSessionSource: 'workspace Session source is owned by packages/workspace/workspace/README.md',
   WorkflowAgentInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
   WorkflowResultInfo: 'event-local snapshot is owned by packages/workflow/workflow/src/index.ts',
   WorkspaceFileScope: 'Host workspace file lookup contract is owned by packages/api/workspace-files/README.md',

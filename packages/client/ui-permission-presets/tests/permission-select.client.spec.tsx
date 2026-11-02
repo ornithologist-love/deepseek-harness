@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type {
   PermissionCatalog, PermissionSelection,
@@ -28,7 +29,57 @@ const CATALOG: PermissionCatalog = {
   ],
 }
 
-const t: PermissionSelectProps['t'] = makeTranslate(accessZh)
+/**
+ * The shipped Chinese copy the assertions read, behind the namespace-bound
+ * `t` seat: the merged namespace union also admits the common vocabulary,
+ * which this dictionary alone does not cover.
+ */
+const t = makeTranslate(accessZh) as PermissionSelectProps['t']
+
+/** A derived hook this copy never calls: reading it would return a stand-in. */
+function unreadHook(): never {
+  throw new Error('Unexpected framework seat read')
+}
+
+/**
+ * The selector hooks the outlet binds: reading any of them stops the test.
+ * They keep their call shape because a component signature, not a value, is
+ * what the props type carries.
+ */
+const lockStandardProps = {
+  useSession: unreadHook,
+  useAccess: unreadHook,
+  useConversation: unreadHook,
+  useInput: unreadHook,
+  useChat: unreadHook,
+  useTrajectory: unreadHook,
+  usePanelInfo: unreadHook,
+  useSessions: unreadHook,
+  useSessionStatus: unreadHook,
+  useSessionRetainInfo: unreadHook,
+  useSessionAccess: unreadHook,
+  useResource: unreadHook,
+  useWorkspaces: unreadHook,
+  useWorkspaceAccess: unreadHook,
+  useRemoteAccess: unreadHook,
+  useContextMenu: unreadHook,
+}
+
+/** The input actions the outlet passes; the select only forwards them. */
+function inputActionsDouble(): PermissionSelectProps['inputActions'] {
+  const unread = unreadHook
+  return {
+    insertQuote: unread,
+    captureInsertion: unread,
+    insertText: unread,
+    setDraft: unread,
+    persistDraft: unread,
+    addAttachments: unread,
+    removeAttachment: unread,
+    pruneAttachments: unread,
+    submit: unread,
+  }
+}
 
 function setup(options: {
   selection?: PermissionSelection | undefined
@@ -53,9 +104,12 @@ function setup(options: {
   const useProjection = (_key: string, selector?: (value: unknown) => unknown) =>
     boundSelection(state => (selector ?? (value => value))(state.value))
   const select = vi.fn(options.select ?? (() => Promise.resolve(true)))
+  // A seat this copy never reads stops the test instead of returning a stand-in.
   const props = {
+    ...lockStandardProps,
     locked: options.locked ?? false,
-    useProjection,
+    sessionId: SessionId('s1'),
+    inputActions: inputActionsDouble(),
     usePermissionCatalog: bindSnapshotSelector(catalog),
     useFullAccessAcknowledged: bindSnapshotSelector(acknowledged),
     acknowledgeFullAccess,
@@ -63,7 +117,8 @@ function setup(options: {
     colors: options.colors ?? {},
     select,
     t,
-  } satisfies Omit<PermissionSelectProps, 'useProjection'>
+    useProjection,
+  } satisfies PermissionSelectProps
   const view = render(<PermissionSelect {...props} />)
   return { acknowledged, acknowledgeFullAccess, catalog, props, select, selection, view }
 }

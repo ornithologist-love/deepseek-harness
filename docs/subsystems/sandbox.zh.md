@@ -208,11 +208,21 @@ The sandbox-policy service (`ctx.sandboxPolicy`). Owns the deployment default mo
  * mode outranks the session's last `sandbox/mode` event, which outranks the
  * deployment default. A session cwd is its workspace-write boundary; the
  * configured root is the fallback for agentless calls and sessions without a
- * cwd.
+ * cwd. A registered workspace-root source that owns the session replaces that
+ * boundary with its primary member and adds the other members to the explicit
+ * writable directories.
  * @param request - optional session and approved mode override.
- * @returns the fully resolved per-call mode and absolute workspace root.
+ * @returns the fully resolved per-call mode, absolute workspace root, and extra directories.
  */
 resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy
+
+/**
+ * Register a source of multi-folder workspace members. Agentless calls stay
+ * single-root; at most one source may own a session.
+ * @param resolver - synchronous reader of the calling session's member directories.
+ * @returns disposer removing this source from future resolutions.
+ */
+registerWorkspaceRoots(resolver: WorkspaceRootResolver): () => void
 
 /**
  * Read the session override without applying the deployment default.

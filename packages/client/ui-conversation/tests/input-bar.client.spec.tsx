@@ -114,6 +114,8 @@ interface BenchOptions {
   commandMenuOpen?: boolean
   busyEnter?: 'queue' | 'steer'
   toggleCommandMenu?: (selection: { start: number; end: number }) => void
+  /** The manual `/compact` seat the context meter offers. */
+  compact?: () => void
 }
 
 /** One pending queue row (the runtime snapshot shape, as the dock tests build it). */
@@ -226,6 +228,7 @@ function bench(over?: BenchOptions) {
     useLexicon: bindSnapshotSelector(shell.lexicon),
     useMenuLauncher: bindSnapshotSelector(menuLauncher),
     stop,
+    compact: over?.compact ?? vi.fn(),
     // Mirrors the real lookup chain (conversation namespace, then common).
     t: over?.t ?? makeTranslate(zh, commonZh),
     renderSlot,

@@ -308,10 +308,21 @@ async function settingsWithoutChip(initialPreset: string, settingsRosterGate?: P
 /** A slot entry's inject factory, typed by the face the registration declares. */
 type InjectFactory<T> = (arg: never) => T
 
-function slotInjected<T>(slots: SlotRegistry, name: string, id?: string): InjectFactory<T> {
+/** Slot names this suite resolves through {@link slotInjected}. */
+type SpecSlotName =
+  | 'conversation.hero.agentPreset'
+  | 'conversation.session.header.actions'
+  | 'settings.section'
+
+function slotInjected<T>(slots: SlotRegistry, name: SpecSlotName, id?: string): InjectFactory<T> {
   const entry = slots.entries(name).find(candidate => id === undefined || candidate.options.id === id)
   if (entry === undefined) throw new Error(`no ${name} entry registered`)
   return entry.inject as InjectFactory<T>
+}
+
+/** Resolve an entry whose inject closure takes no parameter (the chip and the label). */
+function seatInjected(slots: SlotRegistry, name: SpecSlotName): object {
+  return (slotInjected<object>(slots, name) as () => object)()
 }
 
 describe('ui-agent-preset apply', () => {
@@ -1103,8 +1114,8 @@ describe('ui-agent-preset apply', () => {
     })
     try {
       await ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'uiWorkspace'], apply }).await()
-      const seat = slotInjected<AgentPresetSeatInjected>(slots, 'conversation.hero.agentPreset')()
-      const label = slotInjected<AgentPresetLabelInjected>(slots, 'conversation.session.header.actions')()
+      const seat = seatInjected(slots, 'conversation.hero.agentPreset') as AgentPresetSeatInjected
+      const label = seatInjected(slots, 'conversation.session.header.actions') as AgentPresetLabelInjected
       expect(seat.hiddenPrefixes).toEqual(['external-'])
       expect(seat.seatRequiresDeveloperTools).toBe(true)
       expect(label.hiddenPrefixes).toEqual(['external-'])
@@ -1119,8 +1130,8 @@ describe('ui-agent-preset apply', () => {
       defaults.ctx.provide('sessions', sessionsDouble(defaults.ctx, { byId: {} }) as never)
       defaults.ctx.provide('uiWorkspace', uiWorkspaceDouble() as never)
       await defaults.ctx.plugin({ inject: [...inject, 'conversation', 'sessions', 'uiWorkspace'], apply }).await()
-      const defaultSeat = slotInjected<AgentPresetSeatInjected>(defaults.slots, 'conversation.hero.agentPreset')()
-      const defaultLabel = slotInjected<AgentPresetLabelInjected>(defaults.slots, 'conversation.session.header.actions')()
+      const defaultSeat = seatInjected(defaults.slots, 'conversation.hero.agentPreset') as AgentPresetSeatInjected
+      const defaultLabel = seatInjected(defaults.slots, 'conversation.session.header.actions') as AgentPresetLabelInjected
       expect(defaultSeat.hiddenPrefixes).toEqual([])
       expect(defaultSeat.seatRequiresDeveloperTools).toBe(false)
       expect(defaultLabel.hiddenPrefixes).toEqual([])
@@ -1533,7 +1544,8 @@ describe('AgentPresetSeatController reconciliation', () => {
     () => ({ id: SessionId('blank'), blank: true, projectionValues: { agentPreset: 'standard' } }),
     { id: undefined, introduce: false }, true)
 
-    expect(await controller.select('minimal')).toBeUndefined()
+    // `configure` is the Host's commit of the draft preset, so the save applies.
+    expect(await controller.select('minimal')).toEqual({ kind: 'applied' })
 
     expect(configure).toHaveBeenCalledExactlyOnceWith({ sessionId: SessionId('blank'), agentPreset: 'minimal' })
     expect(select).not.toHaveBeenCalled()
@@ -1552,7 +1564,10 @@ describe('AgentPresetSeatController reconciliation', () => {
     () => ({ id: SessionId('blank'), blank: true, projectionValues: { agentPreset: 'standard' } }),
     { id: undefined, introduce: false }, true)
 
-    expect(await controller.select('minimal')).toBe('Session execution has already started')
+    // A refused save reports the Host's bare cause, not the preset name again.
+    expect(await controller.select('minimal')).toEqual({
+      kind: 'refused', reason: 'Session execution has already started',
+    })
     expect(controller.store.getSnapshot()).toMatchObject({
       current: 'standard', error: { preset: { id: 'minimal' }, reason: 'Session execution has already started' },
     })
@@ -1569,7 +1584,8 @@ describe('AgentPresetSeatController reconciliation', () => {
     () => ({ id: SessionId('blank'), blank: true, projectionValues: { agentPreset: 'standard' } }),
     { id: undefined, introduce: false }, true)
 
-    expect(await controller.select('minimal')).toBeUndefined()
+    // An answer without a preset falls back to the staged one, which the save committed.
+    expect(await controller.select('minimal')).toEqual({ kind: 'applied' })
     expect(controller.store.getSnapshot()).toMatchObject({ current: 'minimal', busy: false, error: null })
   })
 

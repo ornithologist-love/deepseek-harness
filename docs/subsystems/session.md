@@ -848,6 +848,56 @@ type SessionLogUploadExclusion = (request: SessionLogUploadRequest) => boolean
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — the language sides differ only in locale-specific paired document paths. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
 
+<a id="ctxsessioncommandpolicy--sessioncommandpolicy"></a>
+
+### `ctx.sessionCommandPolicy` — `SessionCommandPolicy`
+
+Host policy around commands; continuation retains canonical validation and admission.
+
+```ts cordis-catalog
+/**
+ * Validate and record permission choices without constructing an Agent.
+ * @param session - Session whose permission preset changes.
+ * @param preset - preset id to validate and record.
+ */
+configurePermission?(session: Session, preset: string): void
+
+/**
+ * Apply creation defaults; initial selection validates without saving a global default.
+ * @param request - requested creation defaults.
+ * @param next - canonical creation continuing the controller's own logic.
+ * @param selectInitialModel - initial selection applied without saving a global default.
+ * @returns the created Session choices.
+ */
+create?( request: SessionCreateRequest, next: (request: SessionCreateRequest) => Promise<SessionCreateValue>, selectInitialModel: (request: SessionSelectModelRequest) => Promise<SessionSelectModelValue>, ): Promise<SessionCreateValue>
+
+/**
+ * The continuation serializes selection with image admission; defaults save unless explicitly disabled.
+ * @param request - requested model selection.
+ * @param next - canonical selection continuing the controller's own logic.
+ * @returns the normalized selection.
+ */
+selectModel?( request: SessionSelectModelRequest, next: (request: SessionSelectModelRequest, persistDefault?: boolean) => Promise<SessionSelectModelValue>, ): Promise<SessionSelectModelValue>
+
+/**
+ * Transform or refuse one prompt; the continuation rechecks cancellation before admission.
+ * @param request - submitted prompt.
+ * @param signal - turn cancellation.
+ * @param next - canonical submission continuing the controller's own logic.
+ * @returns the admitted prompt result.
+ */
+prompt?( request: SessionPromptRequest, signal: AbortSignal, next: (request: SessionPromptRequest) => Promise<SessionPromptValue>, ): Promise<SessionPromptValue>
+
+/**
+ * Decorate the catalog without replacing model resolution or validation.
+ * @param catalog - resolved model catalog.
+ * @returns the decorated catalog.
+ */
+modelCatalog?(catalog: ModelCatalog): ModelCatalog | Promise<ModelCatalog>
+```
+
+Source: [`packages/api/session-controller/src/index.ts`](../../packages/api/session-controller/src/index.ts)
+
 <a id="ctxsessioncontroller--sessioncontroller"></a>
 
 ### `ctx.sessionController` — `SessionController`
@@ -861,6 +911,42 @@ Host service backing the generated `ctx.remote.session` namespace.
  * @returns the live Agent or the stable Session-domain failure.
  */
 resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult>
+
+/**
+ * Observe a live draft, or read a history cut without activating an Agent.
+ * @param sessionId - Session identity.
+ * @param signal - read cancellation.
+ * @returns a read-only draft or history cut.
+ */
+async observe(sessionId: SessionId, signal?: AbortSignal): Promise<SessionObservation>
+
+/**
+ * Read saved composer choices together with the historical header.
+ * @param sessionId - Session identity.
+ * @returns saved composer choices and historical metadata, without an Agent.
+ */
+async configuration(sessionId: SessionId): Promise<SessionConfiguration & { blank: boolean }>
+
+/**
+ * Discover live-only commands without activating a draft or historical Agent.
+ * @param sessionId - retained Session identity, validated through the cold reader.
+ * @returns scoped descriptors for a live Agent; otherwise only client contributions apply.
+ */
+@Remote('commandCatalog') async commandCatalog(sessionId: SessionId): Promise<readonly CommandDescriptor[]>
+
+/**
+ * Save composer choices on a draft, or start a separate draft for an executed Session.
+ * @param request - draft identity and next choices.
+ * @returns the draft identity with the choices it kept.
+ */
+@Remote('configure') async configure(request: SessionCreateRequest): Promise<SessionCreateValue>
+
+/**
+ * Save a pending permission preset without activating an Agent.
+ * @param request - Session identity and pending permission preset.
+ * @returns acceptance after the choices are saved.
+ */
+@Remote('selectPermission') async selectPermission(request: { readonly sessionId: SessionId; readonly preset: string }): Promise<{ accepted: true }>
 
 /**
  * Read all visible Session rows without resuming an Agent.
@@ -888,7 +974,7 @@ resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult>
 @Remote('create') create(request: SessionCreateRequest): Promise<SessionCreateValue>
 
 /**
- * Select one Session-local model after explicitly resuming the Session; save the default in the background.
+ * Stage model choices in deferred mode; otherwise update the live Session and its default.
  * @param request - Session identity and requested model selection.
  * @returns the normalized selection installed for the Session, without waiting for default persistence.
  */
@@ -904,7 +990,7 @@ resolveAgent(sessionId: SessionId): Promise<ApiSessionAgentResult>
  * Describe every currently routable model for Host-generation selectors.
  * @returns provider-grouped models, the deployment default, and isolated provider failures.
  */
-@Remote('modelCatalog') modelCatalog(): Promise<ModelCatalog>
+@Remote('modelCatalog') async modelCatalog(): Promise<ModelCatalog>
 
 /**
  * Report whether this deployment can hand a Session workspace path to a native desktop.
@@ -982,6 +1068,13 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
 @Remote('cancel') cancel(request: SessionCancelRequest): SessionCancelValue
 
 /**
+ * Stop one running tool call while its turn continues.
+ * @param request - Session and model tool-call id.
+ * @returns whether the call was still running.
+ */
+@Remote('interruptToolCall') interruptToolCall(request: SessionInterruptToolCallRequest): SessionInterruptToolCallValue
+
+/**
  * Read one cold-safe, message-aligned Session history page.
  * @param request - durable address, optional fixed cut, backward cursor, and page budget.
  * @param signal - cancellation for persistence reads.
@@ -1044,7 +1137,7 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
  * @param signal - cancellation for the Session read.
  * @returns a sequenced baseline, cached hints when migration is deferred, or null when absent.
  */
-@Remote('projections') projections(request: SessionProjectionsRequest, signal: AbortSignal): Promise<SessionProjectionsValue>
+@Remote('projections') async projections(request: SessionProjectionsRequest, signal: AbortSignal): Promise<SessionProjectionsValue>
 
 /**
  * Stream a complete live-control baseline followed by replacement frames.
@@ -1054,7 +1147,7 @@ workspaceDesktop(): { name: string; available: boolean; fileManager: 'finder' | 
 @Remote({ mode: 'stream' }) async *control(signal: AbortSignal): AsyncIterable<SessionControlFrame>
 ```
 
-Types: [SessionId](core.md) · [SessionSearchRequest](session-query.md)
+Types: [CommandDescriptor](commands.md) · [SessionId](core.md) · [SessionObservation](session-query.md) · [SessionSearchRequest](session-query.md)
 
 Source: [`packages/api/session-controller/src/index.ts`](../../packages/api/session-controller/src/index.ts)
 

@@ -10,7 +10,9 @@ import type { SubagentAddress } from '@deepseek-ai/dsh-subagent/client'
 import type {
   IWorkspaces, WorkspaceId, WorkspaceSnapshot, WorkspaceView,
 } from '@deepseek-ai/dsh-api-workspace-controller/client'
-import type { ClientRemote, DirectoryListing } from '@deepseek-ai/dsh-api-remotes/client'
+import type { DirectoryListing } from '@deepseek-ai/dsh-api-remotes/client'
+// The generated namespaces merge into this map; the remotes facade re-exports only the bare interface.
+import type { TypertRemoteNamespace } from '@deepseek-ai/dsh-typert-protocol'
 import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { RemoteResult } from '@deepseek-ai/dsh-api-remotes/client'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -137,6 +139,7 @@ interface RetainedSession {
 }
 
 class FakeSessions implements ISessions {
+  declare readonly deferredActivation: ISessions['deferredActivation']
   readonly list: MutableSource<SessionListState>
   readonly create: ReturnType<typeof vi.fn<ISessions['create']>>
   readonly fork = vi.fn<ISessions['fork']>(async () => sid('forked'))
@@ -254,7 +257,7 @@ class FakeDirectoryPicker {
   onCreateDirectory: () => Promise<RemoteResult<string>> =
     () => Promise.resolve({ ok: true, value: '/home/u/new' })
 
-  readonly remote: ClientRemote['directoryPicker'] = {
+  readonly remote: TypertRemoteNamespace<'directoryPicker'> = {
     pick: () => this.record('pick', {}, this.onPick()),
     list: (path?: string) => this.record('list', { path }, this.onList()),
     createDirectory: (path: string, name: string) =>
@@ -292,7 +295,8 @@ function bench(options: BenchOptions = {}) {
   if (options.conversation !== false) ctx.provide('conversation', { input: { requestDraftInitialization } })
   const layout = new LayoutController({
     selectPanel: vi.fn(), retainMainPanels: vi.fn(),
-    setSidebar: vi.fn(), toggleSidebar: vi.fn(), setViewportWidth: vi.fn(),
+    setSidebar: vi.fn(), toggleSidebar: vi.fn(), setSidebarHidden: vi.fn(),
+    setSingleColumn: vi.fn(), showSidebar: vi.fn(), setViewportWidth: vi.fn(),
     setRightbar: vi.fn(), openRightbar: vi.fn(), closeRightbar: vi.fn(),
   }, () => true, createSnapshotStore({ activePanelId: null }))
   const selectPanel = vi.spyOn(layout, 'selectPanel')

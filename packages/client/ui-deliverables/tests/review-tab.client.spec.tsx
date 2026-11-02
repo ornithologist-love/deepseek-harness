@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /** The review tab type: its addresses, its store, the row pairing of the split view, and the states its body draws. */
-import { renderFileActions } from './file-actions.tsx'
+import { renderFilePreviews } from './file-actions.tsx'
 import { useSyncExternalStore } from 'react'
 import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -170,7 +170,7 @@ describe('ReviewTab', () => {
     }
     const navigation = { address: options.address ?? ADDRESS, params: options.params, revision: options.revision ?? 1 }
     const runtime = {
-      renderSlot: renderFileActions,
+      renderSlot: renderFilePreviews,
       useTabInfo: () => ({
         sidebar: { expanded: true, fullscreen: false }, panel: { id: 'pane-1', isFloating: false },
         tab: { id: TAB, kind: 'changes-review', contentId: options.address ?? ADDRESS, title: 'Review', visible: true, navigation, signal: aborter.signal, actions: tabActions },

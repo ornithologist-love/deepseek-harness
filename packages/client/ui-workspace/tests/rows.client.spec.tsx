@@ -1565,7 +1565,7 @@ describe('Workspace presentation on rows', () => {
       id: sid('session'), title: 'Session', blank: false, running: false,
       runningSubagentCount: 0, completed: false, updatedAt: 0, pinned: false, archived: false,
     }
-    const renderSlot = vi.fn<RowRenderSlot>(() => null)
+    const renderSlot = vi.fn((_key: RowSlotName, _owner: object) => null)
     const view = render(<SessionNodeItem flat node={idle} currentId={undefined} now={0} onOpen={vi.fn()} renderSlot={renderSlot} t={t} />)
     // An idle flat row starts with its title: no leading cell is reserved.
     expect(renderSlot).not.toHaveBeenCalledWith('sidebar.session.row.leading', { sessionId: idle.id })

@@ -66,6 +66,9 @@ function flowProbe() {
   return { probe, renderSlot }
 }
 
+/** No reusable Factory is mounted by these tests. */
+const renderFactorySlot: WorkspacePickerProps['renderFactorySlot'] = () => null
+
 /** Manual occupancy source bound like the renderer would: flip() drives the hook like a real registration change. */
 function occupancySource(initial = true) {
   let occupied = initial
@@ -110,6 +113,7 @@ function mount(
       createWorkspace={createWorkspace}
       useDirectoryFlow={occupancy.useDirectoryFlow}
       renderSlot={renderSlot}
+      renderFactorySlot={renderFactorySlot}
       t={t}
     />
   )
@@ -236,7 +240,7 @@ describe('WorkspacePicker', () => {
         usePanelInfo={usePanelInfo} useContextMenu={contextMenuHook()} useResource={useResource}
         {...allowAllAccess}
         onPick={vi.fn()} onClose={vi.fn()} createWorkspace={vi.fn()}
-        useDirectoryFlow={occupancySource().useDirectoryFlow} renderSlot={renderSlot} t={t}
+        useDirectoryFlow={occupancySource().useDirectoryFlow} renderSlot={renderSlot} renderFactorySlot={renderFactorySlot} t={t}
       />,
     )
     expect(screen.queryByRole('menu')).toBeNull()
@@ -256,7 +260,7 @@ describe('WorkspacePicker', () => {
         usePanelInfo={usePanelInfo} useContextMenu={contextMenuHook()} useResource={useResource}
         {...allowAllAccess}
         onPick={vi.fn()} onClose={vi.fn()} createWorkspace={vi.fn()}
-        useDirectoryFlow={occupancySource().useDirectoryFlow} renderSlot={renderSlot} t={t}
+        useDirectoryFlow={occupancySource().useDirectoryFlow} renderSlot={renderSlot} renderFactorySlot={renderFactorySlot} t={t}
       />,
     )
     // An empty list is not final yet: jumping into the directory flow here

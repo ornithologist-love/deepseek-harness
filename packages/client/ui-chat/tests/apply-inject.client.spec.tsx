@@ -12,7 +12,9 @@ import {
   SlotTestRuntime, stubConfigForm, usePinnedBrowserLanguages,
 } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionBehaviorOverrides } from '@deepseek-ai/dsh-client-test-runtime'
-import type { ClientRemote } from '@deepseek-ai/dsh-api-remotes/client'
+// Declarations merge into `TypertRemoteNamespaceMap`; the client-runtime double
+// yields the bare map, so the spec names the `session` namespace explicitly.
+import type { TypertRemoteNamespace } from '@deepseek-ai/dsh-typert-protocol'
 import {
   apply as applyConversation, inject as injectConversation,
   type GroupKey,
@@ -63,7 +65,8 @@ async function bench(initialSettings?: ChatSettings, withBrowserRegistry = true,
     get: (id: string) => id === CHAT_SETTINGS_NAMESPACE ? chatSettings.scope : stubConfigForm().scope,
   } as never)
   const layout = { closeRightbar: vi.fn(), openRightbar: vi.fn() }
-  runtime.ctx.provide('connection', { state: createSnapshotStore('connected') } as never)
+  const connectionState = createSnapshotStore('connected')
+  runtime.ctx.provide('connection', { state: connectionState })
   runtime.ctx.provide('fileDrag', { actions: fileDrag, read: () => undefined })
   runtime.ctx.provide('layout', layout as never)
   const sidebarRight = {
@@ -79,7 +82,7 @@ async function bench(initialSettings?: ChatSettings, withBrowserRegistry = true,
   }
   if (withBrowserRegistry) runtime.ctx.provide('sidebarRightTabs', sidebarRightTabs as never)
   runtime.ctx.provide('resources', { register: vi.fn(() => () => {}) } as never)
-  const openWorkspacePath = vi.fn<ClientRemote['session']['openWorkspacePath']>(
+  const openWorkspacePath = vi.fn<TypertRemoteNamespace<'session'>['openWorkspacePath']>(
     () => Promise.resolve({ ok: true, value: { opened: true } }),
   )
   runtime.remote.provideNamespaces({ session: { openWorkspacePath } })
@@ -139,6 +142,7 @@ async function bench(initialSettings?: ChatSettings, withBrowserRegistry = true,
     },
     runtime, chat, chatSettings, browserAvailable,
     layout, openWorkspacePath, sidebarRight, sidebarRightTabs, session, chatViewApi, chatFlowApi, rootReference, openSession,
+    connectionState,
   }
 }
 
@@ -522,7 +526,8 @@ describe('Chat inject API', () => {
     expect(flow.injected.keyedHooks.chatNode('missing')).toBe(injected.keyedHooks.chatNode('missing'))
     expect(flow.injected.keyedHooks.chatNodeProcess('missing')).toBe(injected.keyedHooks.chatNodeProcess('missing'))
     expect(flow.injected.keyedHooks.chatNodeBottom('missing')).toBe(injected.keyedHooks.chatNodeBottom('missing'))
-    expect(flow.injected.hooks.connectionState).toBe(b.runtime.ctx.get('connection')!.state)
+    // The Connection service is provided by name only; the hook must be the service's own state source.
+    expect(flow.injected.hooks.connectionState).toBe(b.connectionState)
     expect(flow.injected.hooks.presentation).toBe(injected.hooks.presentation)
 
     const entry = b.runtime.slots.entries('conversation.chat.node').find(entry => entry.options.key === 'assistant-step')!

@@ -316,6 +316,13 @@ Host service owning upload storage and receipts keyed by each receiving Agent's 
 
 ```ts cordis-catalog
 /**
+ * Accept uploads without resolving an Agent; receipts wait for the Session's first Agent.
+ * @param validate - authenticated Session metadata check, run before and after storage.
+ * @returns registration disposer.
+ */
+registerSessionValidator(validate: SessionUploadValidator): () => void
+
+/**
  * Register the ordinary-Session resolver used when a raw upload addresses a cold Session.
  * @param resolve - resolver that returns the exact live Agent or throws a Remote error.
  * @returns disposer removing this resolver.

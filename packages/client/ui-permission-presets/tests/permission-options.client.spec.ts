@@ -1,6 +1,6 @@
 /** The permission-surface Host configuration and its page-bootstrap payload. */
-import type { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
+import type { Context } from '@deepseek-ai/cordis'
 import type { IndexInjection } from '@deepseek-ai/dsh-host-webserver'
 import { apply, Config } from '../src/index.ts'
 import { PERMISSION_OPTIONS_GLOBAL } from '../src/permission-options.ts'
@@ -9,13 +9,6 @@ type PublishListener = (table: IndexInjection[]) => void
 
 /** Settings presentation options one mount passed to `settings.configure`. */
 type SettingsPresentation = Record<string, unknown>
-
-/** The Host context members this apply touches. */
-interface PublisherContext {
-  fiber: object
-  on(event: string, listener: PublishListener): void
-  inject(deps: string[], callback: (child: SettingsChild) => void): void
-}
 
 /** The injected child that serves the volatile settings form. */
 interface SettingsChild {
@@ -30,25 +23,31 @@ function publisher(): {
 } {
   const listeners: PublishListener[] = []
   const configured: { presentation: SettingsPresentation; fiber: object }[] = []
-  const context: PublisherContext = {
+  /**
+   * The members the plugin reads: it uses only `on`, `inject`, and `fiber`,
+   * and the injected child only `effect` and `settings.configure`.
+   */
+  /** The context the plugin receives: it reads only `on` and `inject`, plus `ctx.fiber` for the settings form. */
+  const context = {} as Context
+  Object.assign(context, <Record<keyof Pick<Context, 'fiber' | 'on' | 'inject'>, unknown>>{
     fiber: {},
-    on: (_event, listener) => { listeners.push(listener) },
-    inject: (_deps, callback) => {
+    on: (_event: string, listener: PublishListener) => { listeners.push(listener) },
+    inject: (_deps: string[], callback: (child: SettingsChild) => void) => {
       callback({
-        effect: (effect) => { effect() },
+        effect: (effect: () => () => void) => { effect() },
         settings: {
-          configure: (presentation, fiber) => {
+          configure: (presentation: SettingsPresentation, fiber: object) => {
             configured.push({ presentation, fiber })
             return () => {}
           },
         },
       })
     },
-  }
+  })
   return {
     configured,
     publish(config) {
-      apply(context as Context, config)
+      apply(context, config)
       const table: IndexInjection[] = []
       for (const listener of listeners) listener(table)
       return table

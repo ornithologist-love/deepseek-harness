@@ -4,6 +4,8 @@ import { SettingsSchemaService } from '@deepseek-ai/dsh-client-ui-settings/src/c
 import { SettingsDescribeMirror } from '@deepseek-ai/dsh-client-ui-settings/src/client/settings-mirror.ts'
 import { ConfigFormController } from '@deepseek-ai/dsh-client-ui-settings/src/client/config-form.ts'
 import { RemoteError, TestRemote } from '@deepseek-ai/dsh-client-test-runtime'
+// Namespace declarations every fake Remote is read through in this program.
+import type {} from './remote-namespaces.client.ts'
 import { apply as applySettings, inject as settingsInject } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { decodeWelcomeSection, WelcomeNoticeStore, type WelcomeSection } from '../src/client/welcome-store.ts'
 import {

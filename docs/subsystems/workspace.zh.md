@@ -228,6 +228,24 @@ Host service backing the generated `ctx.remote.directoryPicker` namespace. The s
 
 Source: [`packages/api/workspace-controller/src/directory-picker.ts`](../../packages/api/workspace-controller/src/directory-picker.ts)
 
+<a id="ctxsessionnavigationinput--sessionnavigationinput"></a>
+
+### `ctx.sessionNavigationInput` — `SessionNavigationInput`
+
+Main view a deployment selects for each new page.
+
+```ts cordis-catalog
+/**
+ * Read the main view a page should open on.
+ * @returns the Session the next page opens on; an empty object selects none.
+ */
+current(): { sessionId?: SessionId }
+```
+
+Types: [SessionId](core.zh.md)
+
+Source: [`packages/client/ui-workspace/src/workspace-options.ts`](../../packages/client/ui-workspace/src/workspace-options.ts)
+
 <a id="ctxterminalcontroller--terminalcontroller"></a>
 
 ### `ctx.terminalController` — `TerminalController`
@@ -587,6 +605,38 @@ unpinSession(sessionId: SessionId): Promise<void>
  * @returns the workspace owning the canonical path, when one exists.
  */
 async resolveByPath(path: string): Promise<Workspace | undefined>
+
+/**
+ * Register a source of multi-folder workspace members. The first source that
+ * owns a workspace decides its members; a workspace no source owns keeps its
+ * single directory.
+ * @param source - canonical member directories, primary first, or `undefined` when this source does not own the workspace.
+ * @param historical - directories the source selected earlier; sessions
+ *   already accounted under one of them stay members, but they authorize no
+ *   new attachment.
+ * @returns disposer removing the source.
+ */
+registerDirectories(source: WorkspaceDirectorySource, historical?: WorkspaceHistoricalDirectorySource): () => void
+
+/**
+ * Read a workspace's current member directories.
+ * @param id - Workspace identity.
+ * @returns canonical member directories, primary first: the owning source's
+ *   list, `[workspace.path]` when no source owns it, or empty for an unknown id.
+ */
+directoriesOf(id: WorkspaceId): readonly string[]
+
+/**
+ * Register headers of addressable sessions that have no Session log yet,
+ * such as unsent drafts. Membership validation treats them like stored
+ * headers from the next {@link refreshSessionHeaders} on.
+ * @param source - reader of the additional headers.
+ * @returns disposer removing the source.
+ */
+registerSessionSource(source: WorkspaceSessionSource): () => void
+
+/** Re-read stored, contributed, and live session headers after their cwd or member directories change. */
+async refreshSessionHeaders(): Promise<void>
 ```
 
 Types: [SessionId](core.zh.md)

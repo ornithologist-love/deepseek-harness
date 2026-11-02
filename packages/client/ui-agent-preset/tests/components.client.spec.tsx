@@ -8,8 +8,11 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
+import {
+  allowAllAccess, bindSnapshotSelector, contextMenuHook, conversationSnapshot,
+} from '@deepseek-ai/dsh-client-test-runtime'
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { GlobalStandardProps, SessionStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionRetainInfo } from '@deepseek-ai/dsh-api-session-controller/client'
 import { SessionId } from '@deepseek-ai/dsh-session/types'
 import { AgentPresetLabel } from '../src/client/AgentPresetLabel.tsx'
@@ -39,7 +42,40 @@ const SEAT_READY: AgentPresetSeatState = {
   introduce: false,
 }
 
-const useSessionRetainInfo = <Selected,>(selector: (value: undefined) => Selected): Selected => selector(undefined)
+const useSessionRetainInfo = (<Selected,>(selector: (value: undefined) => Selected): Selected =>
+  selector(undefined)) as GlobalStandardProps['useSessionRetainInfo']
+
+/** The outlet's standard kit over neutral fixtures; each case overrides what it reads. */
+const standard: GlobalStandardProps & SessionStandardProps = {
+  sessionId: SessionId('s1'),
+  useSession: selector => selector(undefined as never),
+  useProjection: () => undefined,
+  usePanelInfo: selector => selector({ activePanelId: null }),
+  useSessions: () => { throw new Error('A case supplies useSessions') },
+  useSessionStatus: selector => selector(new Map()),
+  useSessionRetainInfo,
+  useResource: () => ({ status: 'none', value: undefined, failure: undefined }),
+  useWorkspaces: selector => selector({
+    items: [], archivedSessionIds: [], pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null,
+  }),
+  useConversation: selector => selector(conversationSnapshot()),
+  useInput: selector => selector(undefined as never),
+  useChat: selector => selector(undefined as never),
+  useTrajectory: selector => selector(undefined as never),
+  inputActions: {
+    insertQuote: () => false,
+    captureInsertion: () => ({ start: 0, end: 0, draftRev: 0 }),
+    insertText: () => false,
+    setDraft: () => {},
+    persistDraft: () => {},
+    addAttachments: () => false,
+    removeAttachment: () => {},
+    pruneAttachments: () => {},
+    submit: () => {},
+  },
+  ...allowAllAccess,
+  useContextMenu: contextMenuHook(),
+}
 
 /** The runtime's own `{name}` substitution, so a test reads the shown text. */
 function translate(key: keyof typeof en, params?: Record<string, unknown>): string {
@@ -93,17 +129,14 @@ function renderLabel(
   })
   const sessions = createSnapshotStore({ byId: summary === undefined ? {} : { s1: summary } })
   const load = vi.fn(() => Promise.resolve())
-  // The caller supplies the binding and copy seats the label reads; the
-  // framework's own session-scope seats are unused here.
+  // Only useSessions and the roster carry the values the label renders; the
+  // rest are the outlet's standard kit, which it never reads here.
   const seats = {
-    load,
-    hiddenPrefixes,
-    sessionId: 's1',
-    useSessions: bindSnapshotSelector(sessions),
-    useAgentPresets: bindSnapshotSelector(store),
-    t: (key: keyof typeof en) => en[key],
-  } satisfies AgentPresetLabelInjected & Pick<AgentPresetLabelProps, 'sessionId' | 'useSessions' | 'useAgentPresets' | 't'>
-  const view = render(<AgentPresetLabel {...seats as Omit<AgentPresetLabelProps, 'useSessionRetainInfo' | 'useResource' | 'usePanelInfo' | 'useSessions' | 'useWorkspaces' | 'useSessionStatus'>} />)
+    ...standard, load, hiddenPrefixes,
+    useSessions: bindSnapshotSelector(sessions), useAgentPresets: bindSnapshotSelector(store), t: translate,
+  }
+  const label: AgentPresetLabelProps = seats as never
+  const view = render(<AgentPresetLabel {...label} />)
   return { load, view }
 }
 

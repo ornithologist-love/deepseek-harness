@@ -1176,6 +1176,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     description: 'Host service owning upload storage and receipts keyed by each receiving Agent\'s exact Session.',
     methods: [
       {
+        signature: 'registerSessionValidator(validate: SessionUploadValidator): () => void',
+        description: 'Accept uploads without resolving an Agent; receipts wait for the Session\'s first Agent.',
+        parameters: [{ name: 'validate', description: 'authenticated Session metadata check, run before and after storage.' }],
+        returns: 'registration disposer.',
+      },
+      {
         signature: 'registerAgentResolver(resolve: AgentResolver): () => void',
         description: 'Register the ordinary-Session resolver used when a raw upload addresses a cold Session.',
         parameters: [{ name: 'resolve', description: 'resolver that returns the exact live Agent or throws a Remote error.' }],
@@ -2566,9 +2572,15 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy',
-        description: 'Resolve the complete policy for one capability call. An approved explicit mode outranks the session\'s last `sandbox/mode` event, which outranks the deployment default. A session cwd is its workspace-write boundary; the configured root is the fallback for agentless calls and sessions without a cwd.',
+        description: 'Resolve the complete policy for one capability call. An approved explicit mode outranks the session\'s last `sandbox/mode` event, which outranks the deployment default. A session cwd is its workspace-write boundary; the configured root is the fallback for agentless calls and sessions without a cwd. A registered workspace-root source that owns the session replaces that boundary with its primary member and adds the other members to the explicit writable directories.',
         parameters: [{ name: 'request', description: 'optional session and approved mode override.' }],
-        returns: 'the fully resolved per-call mode and absolute workspace root.',
+        returns: 'the fully resolved per-call mode, absolute workspace root, and extra directories.',
+      },
+      {
+        signature: 'registerWorkspaceRoots(resolver: WorkspaceRootResolver): () => void',
+        description: 'Register a source of multi-folder workspace members. Agentless calls stay single-root; at most one source may own a session.',
+        parameters: [{ name: 'resolver', description: 'synchronous reader of the calling session\'s member directories.' }],
+        returns: 'disposer removing this source from future resolutions.',
       },
       {
         signature: 'overrideOf(session: Session): SandboxMode | undefined',
@@ -2664,6 +2676,42 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'sessionCommandPolicy',
+    summary: 'Host policy around commands; continuation retains canonical validation and admission.',
+    description: 'Host policy around commands; continuation retains canonical validation and admission.',
+    methods: [
+      {
+        signature: 'configurePermission?(session: Session, preset: string): void',
+        description: 'Validate and record permission choices without constructing an Agent.',
+        parameters: [{ name: 'session', description: 'Session whose permission preset changes.' }, { name: 'preset', description: 'preset id to validate and record.' }],
+      },
+      {
+        signature: 'create?( request: SessionCreateRequest, next: (request: SessionCreateRequest) => Promise<SessionCreateValue>, selectInitialModel: (request: SessionSelectModelRequest) => Promise<SessionSelectModelValue>, ): Promise<SessionCreateValue>',
+        description: 'Apply creation defaults; initial selection validates without saving a global default.',
+        parameters: [{ name: 'request', description: 'requested creation defaults.' }, { name: 'next', description: 'canonical creation continuing the controller\'s own logic.' }, { name: 'selectInitialModel', description: 'initial selection applied without saving a global default.' }],
+        returns: 'the created Session choices.',
+      },
+      {
+        signature: 'selectModel?( request: SessionSelectModelRequest, next: (request: SessionSelectModelRequest, persistDefault?: boolean) => Promise<SessionSelectModelValue>, ): Promise<SessionSelectModelValue>',
+        description: 'The continuation serializes selection with image admission; defaults save unless explicitly disabled.',
+        parameters: [{ name: 'request', description: 'requested model selection.' }, { name: 'next', description: 'canonical selection continuing the controller\'s own logic.' }],
+        returns: 'the normalized selection.',
+      },
+      {
+        signature: 'prompt?( request: SessionPromptRequest, signal: AbortSignal, next: (request: SessionPromptRequest) => Promise<SessionPromptValue>, ): Promise<SessionPromptValue>',
+        description: 'Transform or refuse one prompt; the continuation rechecks cancellation before admission.',
+        parameters: [{ name: 'request', description: 'submitted prompt.' }, { name: 'signal', description: 'turn cancellation.' }, { name: 'next', description: 'canonical submission continuing the controller\'s own logic.' }],
+        returns: 'the admitted prompt result.',
+      },
+      {
+        signature: 'modelCatalog?(catalog: ModelCatalog): ModelCatalog | Promise<ModelCatalog>',
+        description: 'Decorate the catalog without replacing model resolution or validation.',
+        parameters: [{ name: 'catalog', description: 'resolved model catalog.' }],
+        returns: 'the decorated catalog.',
+      },
+    ],
+  },
+  {
     key: 'sessionController',
     summary: 'Host service backing the generated `ctx.remote.session` namespace.',
     description: 'Host service backing the generated `ctx.remote.session` namespace.',
@@ -2673,6 +2721,36 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Resolve or resume one ordinary Session for another Host API domain.',
         parameters: [{ name: 'sessionId', description: 'Session identity whose Agent owns the operation.' }],
         returns: 'the live Agent or the stable Session-domain failure.',
+      },
+      {
+        signature: 'async observe(sessionId: SessionId, signal?: AbortSignal): Promise<SessionObservation>',
+        description: 'Observe a live draft, or read a history cut without activating an Agent.',
+        parameters: [{ name: 'sessionId', description: 'Session identity.' }, { name: 'signal', description: 'read cancellation.' }],
+        returns: 'a read-only draft or history cut.',
+      },
+      {
+        signature: 'async configuration(sessionId: SessionId): Promise<SessionConfiguration & { blank: boolean }>',
+        description: 'Read saved composer choices together with the historical header.',
+        parameters: [{ name: 'sessionId', description: 'Session identity.' }],
+        returns: 'saved composer choices and historical metadata, without an Agent.',
+      },
+      {
+        signature: '@Remote(\'commandCatalog\') async commandCatalog(sessionId: SessionId): Promise<readonly CommandDescriptor[]>',
+        description: 'Discover live-only commands without activating a draft or historical Agent.',
+        parameters: [{ name: 'sessionId', description: 'retained Session identity, validated through the cold reader.' }],
+        returns: 'scoped descriptors for a live Agent; otherwise only client contributions apply.',
+      },
+      {
+        signature: '@Remote(\'configure\') async configure(request: SessionCreateRequest): Promise<SessionCreateValue>',
+        description: 'Save composer choices on a draft, or start a separate draft for an executed Session.',
+        parameters: [{ name: 'request', description: 'draft identity and next choices.' }],
+        returns: 'the draft identity with the choices it kept.',
+      },
+      {
+        signature: '@Remote(\'selectPermission\') async selectPermission(request: { readonly sessionId: SessionId; readonly preset: string }): Promise<{ accepted: true }>',
+        description: 'Save a pending permission preset without activating an Agent.',
+        parameters: [{ name: 'request', description: 'Session identity and pending permission preset.' }],
+        returns: 'acceptance after the choices are saved.',
       },
       {
         signature: '@Remote(\'list\') async list(_request: SessionListRequest, signal: AbortSignal): Promise<SessionListValue>',
@@ -2694,7 +2772,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: '@Remote(\'selectModel\') selectModel(request: SessionSelectModelRequest): Promise<SessionSelectModelValue>',
-        description: 'Select one Session-local model after explicitly resuming the Session; save the default in the background.',
+        description: 'Stage model choices in deferred mode; otherwise update the live Session and its default.',
         parameters: [{ name: 'request', description: 'Session identity and requested model selection.' }],
         returns: 'the normalized selection installed for the Session, without waiting for default persistence.',
       },
@@ -2705,7 +2783,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'after saving the first available model or retaining the existing default.',
       },
       {
-        signature: '@Remote(\'modelCatalog\') modelCatalog(): Promise<ModelCatalog>',
+        signature: '@Remote(\'modelCatalog\') async modelCatalog(): Promise<ModelCatalog>',
         description: 'Describe every currently routable model for Host-generation selectors.',
         parameters: [],
         returns: 'provider-grouped models, the deployment default, and isolated provider failures.',
@@ -2773,6 +2851,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'acknowledgement that cancellation was requested.',
       },
       {
+        signature: '@Remote(\'interruptToolCall\') interruptToolCall(request: SessionInterruptToolCallRequest): SessionInterruptToolCallValue',
+        description: 'Stop one running tool call while its turn continues.',
+        parameters: [{ name: 'request', description: 'Session and model tool-call id.' }],
+        returns: 'whether the call was still running.',
+      },
+      {
         signature: '@Remote events(request: SessionPageRequest, signal: AbortSignal): Promise<SessionEventsPage>',
         description: 'Read one cold-safe, message-aligned Session history page.',
         parameters: [{ name: 'request', description: 'durable address, optional fixed cut, backward cursor, and page budget.' }, { name: 'signal', description: 'cancellation for persistence reads.' }],
@@ -2815,7 +2899,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'a complete opening snapshot followed by gap-free durable event frames and optional cursorless assistant-stream frames.',
       },
       {
-        signature: '@Remote(\'projections\') projections(request: SessionProjectionsRequest, signal: AbortSignal): Promise<SessionProjectionsValue>',
+        signature: '@Remote(\'projections\') async projections(request: SessionProjectionsRequest, signal: AbortSignal): Promise<SessionProjectionsValue>',
         description: 'Read exact projections, returning cached hints only when migration is required.',
         parameters: [{ name: 'request', description: 'Session whose current values are required.' }, { name: 'signal', description: 'cancellation for the Session read.' }],
         returns: 'a sequenced baseline, cached hints when migration is deferred, or null when absent.',
@@ -2864,6 +2948,19 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Exclude matching requests before reading or preparing their log contribution. Any matching rule suppresses both the field and its acceptance callback. With no matching rules, normal upload eligibility applies. A throwing rule fails this contribution; the request-extension registry omits it and reports the error.',
         parameters: [{ name: 'exclude', description: 'synchronous, side-effect-free predicate; `true` skips this upload.' }],
         returns: 'effect disposer that removes this registration when called or when the caller unloads.',
+      },
+    ],
+  },
+  {
+    key: 'sessionNavigationInput',
+    summary: 'Main view a deployment selects for each new page.',
+    description: 'Main view a deployment selects for each new page.',
+    methods: [
+      {
+        signature: 'current(): { sessionId?: SessionId }',
+        description: 'Read the main view a page should open on.',
+        parameters: [],
+        returns: 'the Session the next page opens on; an empty object selects none.',
       },
     ],
   },
@@ -4123,6 +4220,24 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the effect disposer that removes this guard.',
       },
       {
+        signature: 'trackCall(exec: Pick<ToolExecution, \'token\' | \'callId\' | \'agent\'>, unbounded: boolean): TrackedToolCall',
+        description: 'Register one dispatched call so `interrupt` can stop it, and arm the registry-wide budget unless the tool declares `unbounded`. Dispose the handle when the dispatch settles.',
+        parameters: [{ name: 'exec', description: 'the dispatched execution.' }, { name: 'unbounded', description: 'whether the tool is exempt from `maxCallMs`.' }],
+        returns: 'the running-call handle.',
+      },
+      {
+        signature: 'interrupt(exec: Pick<ToolExecution, \'token\'>, reason: ToolCallInterruptReason): boolean',
+        description: 'Stop one running call: abort its body signal, then let its scheduler settle it with `TOOL_TIMEOUT` or `TOOL_CANCELLED_BY_USER` once the body returns or `interruptGraceMs` elapses. Sibling calls continue. Work the body already did is not rolled back.',
+        parameters: [{ name: 'exec', description: 'the execution to stop, as seen by a `tools/execute` wrapper.' }, { name: 'reason', description: 'why the call stops; later requests keep the first reason.' }],
+        returns: 'whether the call was still running.',
+      },
+      {
+        signature: 'interruptCall(agent: Agent, callId: ToolExecution[\'callId\'], reason: ToolCallInterruptReason): boolean',
+        description: 'interrupt a running call by the model tool-call id an Agent issued.',
+        parameters: [{ name: 'agent', description: 'the Agent whose call to stop.' }, { name: 'callId', description: 'model tool-call id.' }, { name: 'reason', description: 'why the call stops.' }],
+        returns: 'whether a matching call was still running.',
+      },
+      {
         signature: 'checkGuards(exec: ToolExecution): string | undefined',
         description: 'Check global and inherited guards after pre-execute policy and approval resolve.',
         parameters: [{ name: 'exec', description: 'invocation whose guards are checked before dispatch.' }],
@@ -4665,6 +4780,29 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Resolve by canonical directory path without creating or mutating a workspace. A missing path rejects during `realpath`; an existing unowned directory returns `undefined`.',
         parameters: [{ name: 'path', description: 'Existing directory path in a fully qualified spelling.' }],
         returns: 'the workspace owning the canonical path, when one exists.',
+      },
+      {
+        signature: 'registerDirectories(source: WorkspaceDirectorySource, historical?: WorkspaceHistoricalDirectorySource): () => void',
+        description: 'Register a source of multi-folder workspace members. The first source that owns a workspace decides its members; a workspace no source owns keeps its single directory.',
+        parameters: [{ name: 'source', description: 'canonical member directories, primary first, or `undefined` when this source does not own the workspace.' }, { name: 'historical', description: 'directories the source selected earlier; sessions already accounted under one of them stay members, but they authorize no new attachment.' }],
+        returns: 'disposer removing the source.',
+      },
+      {
+        signature: 'directoriesOf(id: WorkspaceId): readonly string[]',
+        description: 'Read a workspace\'s current member directories.',
+        parameters: [{ name: 'id', description: 'Workspace identity.' }],
+        returns: 'canonical member directories, primary first: the owning source\'s list, `[workspace.path]` when no source owns it, or empty for an unknown id.',
+      },
+      {
+        signature: 'registerSessionSource(source: WorkspaceSessionSource): () => void',
+        description: 'Register headers of addressable sessions that have no Session log yet, such as unsent drafts. Membership validation treats them like stored headers from the next refreshSessionHeaders on.',
+        parameters: [{ name: 'source', description: 'reader of the additional headers.' }],
+        returns: 'disposer removing the source.',
+      },
+      {
+        signature: 'async refreshSessionHeaders(): Promise<void>',
+        description: 'Re-read stored, contributed, and live session headers after their cwd or member directories change.',
+        parameters: [],
       },
     ],
   },
@@ -7249,7 +7387,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ModelCatalogModel',
-    declaration: 'export interface ModelCatalogModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly reasoning?: ModelReasoning;\n    readonly badge?: LlmModelBadge;\n}',
+    declaration: 'export interface ModelCatalogModel {\n    readonly id: string;\n    readonly name: string;\n    readonly description?: string;\n    readonly reasoning?: ModelReasoning;\n    readonly badge?: LlmModelBadge;\n    readonly recommended?: boolean;\n    readonly metadata?: Readonly<Record<string, JsonValue>>;\n}',
   },
   {
     name: 'ModelMessageSource',
@@ -8256,6 +8394,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type SessionChangeRequestsListener = (changeRequests: readonly SessionChangeRequest[]) => void;',
   },
   {
+    name: 'SessionConfiguration',
+    declaration: 'export interface SessionConfiguration {\n    readonly sessionId: SessionId;\n    readonly cwd: string;\n    readonly createdAt: number;\n    readonly agentPreset?: string | undefined;\n    readonly draft: boolean;\n    readonly model?: ModelSelection | undefined;\n    readonly events?: readonly SessionEvent[] | undefined;\n    readonly permissionPreset?: string | undefined;\n    readonly revision?: number | undefined;\n}',
+  },
+  {
     name: 'SessionControlBaseline',
     declaration: 'export interface SessionControlBaseline {\n    readonly projections: Readonly<Record<SessionId, SessionProjectionBaseline>>;\n}',
   },
@@ -8426,6 +8568,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionInspection',
     declaration: 'export interface SessionInspection extends SessionStorageMetadata {\n    readonly events: readonly SessionEvent[];\n}',
+  },
+  {
+    name: 'SessionInterruptToolCallRequest',
+    declaration: 'export interface SessionInterruptToolCallRequest {\n    readonly sessionId: SessionId;\n    readonly callId: ToolCallId;\n}',
+  },
+  {
+    name: 'SessionInterruptToolCallValue',
+    declaration: 'export interface SessionInterruptToolCallValue {\n    readonly accepted: boolean;\n}',
   },
   {
     name: 'SessionLineageNode',
@@ -8725,7 +8875,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SessionSummary',
-    declaration: 'export interface SessionSummary {\n    readonly agentAvailable: boolean;\n    readonly formatStatus?: \'current\' | \'migration-required\';\n    readonly sessionId: SessionId;\n    readonly updatedAt: number;\n    readonly running: boolean;\n    readonly blank: boolean;\n    readonly parentSessionId?: SessionId;\n    readonly origin?: \'subagent\';\n    readonly cwd?: string;\n    readonly projections?: SessionProjectionHints;\n}',
+    declaration: 'export interface SessionSummary {\n    readonly agentAvailable: boolean;\n    readonly formatStatus?: \'current\' | \'migration-required\';\n    readonly sessionId: SessionId;\n    readonly updatedAt: number;\n    readonly running: boolean;\n    readonly blank: boolean;\n    readonly parentSessionId?: SessionId;\n    readonly origin?: \'subagent\';\n    readonly cwd?: string;\n    readonly projections?: SessionProjectionHints;\n    readonly configuration?: {\n        readonly revision: number;\n        readonly values: SessionProjectionValues;\n    };\n}',
   },
   {
     name: 'SessionSurface',
@@ -8798,6 +8948,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'SessionUpdateQueueValue',
     declaration: 'export interface SessionUpdateQueueValue {\n    readonly accepted: true;\n}',
+  },
+  {
+    name: 'SessionUploadValidator',
+    declaration: 'export type SessionUploadValidator = (sessionId: SessionId) => Promise<void>;',
   },
   {
     name: 'SessionWaitOutput',
@@ -9540,6 +9694,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ToolCallInput {\n    tool: string;\n    tool_use_id: string;\n    agentId?: string;\n    [argument: string]: unknown;\n}',
   },
   {
+    name: 'ToolCallInterruptReason',
+    declaration: 'export type ToolCallInterruptReason = {\n    readonly kind: \'user\';\n} | {\n    readonly kind: \'timeout\';\n    readonly timeoutMs: number;\n};',
+  },
+  {
     name: 'ToolCallKind',
     declaration: 'export type ToolCallKind = \'read\' | \'edit\' | \'delete\' | \'move\' | \'search\' | \'execute\' | \'fetch\' | \'other\';',
   },
@@ -9549,7 +9707,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'ToolDefinition',
-    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly output: ToolOutputDefinition;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    projectContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
+    declaration: 'export interface ToolDefinition extends ToolSchema {\n    readonly output: ToolOutputDefinition;\n    execute(args: unknown, exec: ToolRunContext): Promise<unknown>;\n    projectContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    finalizeContent?(exec: Readonly<ToolExecution>, result: Readonly<ToolExecutionResult>): ContentBlock[] | undefined;\n    timeoutMs?: number;\n    unbounded?: boolean;\n    isConcurrencySafe?(args: unknown): boolean;\n    presentCall?(args: unknown): ToolCallView | undefined;\n    presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined;\n}',
   },
   {
     name: 'ToolDispatchExecution',
@@ -9656,12 +9814,16 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface ToolSchema {\n    deferLoading?: true;\n    name: string;\n    description: string;\n    parameters: Record<string, unknown>;\n}',
   },
   {
+    name: 'ToolsConfig',
+    declaration: 'export interface ToolsConfig {\n    mode?: never;\n    maxParallelSubCalls?: never;\n    maxCallMs?: number;\n    interruptGraceMs?: number;\n}',
+  },
+  {
     name: 'ToolSpec',
     declaration: 'export interface ToolSpec {\n    name: string;\n    description: string;\n    inputSchema?: Record<string, unknown>;\n}',
   },
   {
     name: 'ToolsService',
-    declaration: 'export class ToolsService extends Service {\n    static inject;\n    static Config;\n    constructor(ctx: Context);\n    register(definition: ToolDefinition, options: ToolRegistrationOptions = {}): () => void;\n    restrict(filter: ToolRestriction): () => void;\n    get(name: string, scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolDefinition | undefined;\n    executable(name: string, scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolDefinition | undefined;\n    async resolve(context: ToolActivationContext): Promise<ResolvedToolSet>;\n    definitions(scope?: ScopeKey, toolSet?: ResolvedToolSet): readonly ToolDefinition[];\n    schemas(scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolSchema[];\n    setExecutor(executor: ToolExecutor): () => void;\n    async execute(input: ToolBatchInput): Promise<ToolBatchResult>;\n    guard(guard: ToolGuard): () => void;\n    checkGuards(exec: ToolExecution): string | undefined;\n}',
+    declaration: 'export class ToolsService extends Service {\n    static inject;\n    static Config: z<ToolsConfig>;\n    constructor(ctx: Context, config: ToolsConfig = {});\n    register(definition: ToolDefinition, options: ToolRegistrationOptions = {}): () => void;\n    restrict(filter: ToolRestriction): () => void;\n    get(name: string, scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolDefinition | undefined;\n    executable(name: string, scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolDefinition | undefined;\n    async resolve(context: ToolActivationContext): Promise<ResolvedToolSet>;\n    definitions(scope?: ScopeKey, toolSet?: ResolvedToolSet): readonly ToolDefinition[];\n    schemas(scope?: ScopeKey, toolSet?: ResolvedToolSet): ToolSchema[];\n    setExecutor(executor: ToolExecutor): () => void;\n    async execute(input: ToolBatchInput): Promise<ToolBatchResult>;\n    guard(guard: ToolGuard): () => void;\n    trackCall(exec: Pick<ToolExecution, \'token\' | \'callId\' | \'agent\'>, unbounded: boolean): TrackedToolCall;\n    interrupt(exec: Pick<ToolExecution, \'token\'>, reason: ToolCallInterruptReason): boolean;\n    interruptCall(agent: Agent, callId: ToolExecution[\'callId\'], reason: ToolCallInterruptReason): boolean;\n    checkGuards(exec: ToolExecution): string | undefined;\n}',
   },
   {
     name: 'ToolUpdate',
@@ -9670,6 +9832,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ToolUseSummary',
     declaration: 'export interface ToolUseSummary {\n    tool_use_id: string;\n    tool: string;\n    input: Record<string, unknown>;\n}',
+  },
+  {
+    name: 'TrackedToolCall',
+    declaration: 'export interface TrackedToolCall extends Disposable {\n    readonly signal: AbortSignal;\n    readonly abandoned: Promise<undefined>;\n    reason(): ToolCallInterruptReason | undefined;\n}',
   },
   {
     name: 'Transcript',
@@ -10144,6 +10310,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface WorkspaceDirectoryListing {\n    readonly path: string;\n    readonly entries: readonly WorkspaceDirectoryEntry[];\n    readonly truncated: boolean;\n}',
   },
   {
+    name: 'WorkspaceDirectorySource',
+    declaration: 'export type WorkspaceDirectorySource = (workspace: Workspace) => readonly string[] | undefined;',
+  },
+  {
     name: 'WorkspaceFileBytes',
     declaration: 'export interface WorkspaceFileBytes<Data extends Uint8Array = Uint8Array> extends WorkspaceFileStat {\n    readonly offset: number;\n    readonly data: Data;\n    readonly eof: boolean;\n}',
   },
@@ -10184,6 +10354,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type WorkspaceFollowIncrement = {\n    readonly type: \'replace\';\n    readonly value: WorkspaceBaseline;\n} | {\n    readonly type: \'upsert\';\n    readonly workspace: WorkspaceView;\n} | {\n    readonly type: \'remove\';\n    readonly workspaceId: WorkspaceId;\n} | {\n    readonly type: \'order\';\n    readonly workspaceIds: readonly WorkspaceId[];\n} | {\n    readonly type: \'archived\';\n    readonly archivedSessionIds: readonly SessionId[];\n} | {\n    readonly type: \'pinned\';\n    readonly pinnedSessionIds: readonly SessionId[];\n};',
   },
   {
+    name: 'WorkspaceHistoricalDirectorySource',
+    declaration: 'export type WorkspaceHistoricalDirectorySource = (workspace: Workspace) => readonly string[];',
+  },
+  {
     name: 'WorkspaceInsertBeforeRequest',
     declaration: 'export interface WorkspaceInsertBeforeRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly beforeWorkspaceId?: WorkspaceId;\n}',
   },
@@ -10206,6 +10380,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkspaceRenameRequest',
     declaration: 'export interface WorkspaceRenameRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly title: string;\n}',
+  },
+  {
+    name: 'WorkspaceRootResolver',
+    declaration: 'export type WorkspaceRootResolver = (session: Session) => readonly string[] | undefined;',
+  },
+  {
+    name: 'WorkspaceSessionSource',
+    declaration: 'export type WorkspaceSessionSource = () => Promise<readonly SessionHeader[]>;',
   },
   {
     name: 'WorkspaceUnarchiveSessionRequest',

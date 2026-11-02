@@ -8,6 +8,7 @@ import type {
 } from '@deepseek-ai/dsh-api-session-controller/client'
 import { SessionForkError } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId, WorkspaceSnapshot, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { RemoteEndpoint } from '@deepseek-ai/dsh-api-remote-access/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { HostObservable, PropsRenderSlots, StoredEntry } from '@deepseek-ai/dsh-client-ui-slots'
@@ -56,6 +57,8 @@ const workspaceState = (
 })
 
 const ALLOWED: HostObservable<boolean> = createSnapshotStore(true)
+// Access endpoints are a compile-time contract: an undeclared action fails to type-check.
+const FOLLOW = 'workspace/follow' satisfies RemoteEndpoint
 
 async function bench(access: 'fake' | 'static' = 'fake') {
   const ctx = new Context()
@@ -292,13 +295,13 @@ describe('ui-workspace apply', () => {
     await b.ctx.plugin({ inject: [...inject], apply }).await()
     const keyed = provideRoot.mock.calls.map(([contribution]) => contribution.keyedHooks?.['workspaceAccess']).find(Boolean)
     // `useWorkspaceAccess(workspaceId, action)` reads the Workspace resource's answer; a call without an action names no source.
-    expect(keyed?.('w1', 'workspace/follow')).toBe(ALLOWED)
-    expect(b.accessSource).toHaveBeenCalledWith('workspace', 'w1', 'workspace/follow')
+    expect(keyed?.('w1', FOLLOW)).toBe(ALLOWED)
+    expect(b.accessSource).toHaveBeenCalledWith('workspace', 'w1', FOLLOW)
     expect(keyed?.('w1')).toBeUndefined()
     // `whenAccess` follows the same Workspace resource through the service's resource form.
     const guarded = vi.fn(() => () => {})
-    expect(b.ctx.uiWorkspace.whenAccess('w1' as WorkspaceId, 'workspace/follow', guarded)).toBe(b.stopGuard)
-    expect(b.whenResourceAccess).toHaveBeenCalledWith('workspace', 'w1', 'workspace/follow', guarded)
+    expect(b.ctx.uiWorkspace.whenAccess('w1' as WorkspaceId, FOLLOW, guarded)).toBe(b.stopGuard)
+    expect(b.whenResourceAccess).toHaveBeenCalledWith('workspace', 'w1', FOLLOW, guarded)
   })
 
   it('hangs Workspace-guarded effects on the calling plugin, so they leave when it unloads', async () => {
@@ -308,7 +311,7 @@ describe('ui-workspace apply', () => {
     const dispose = vi.fn()
     const caller = b.ctx.plugin({
       inject: ['uiWorkspace'],
-      apply: (callerCtx: Context) => { callerCtx.uiWorkspace.whenAccess('w1' as WorkspaceId, 'workspace/follow', () => dispose) },
+      apply: (callerCtx: Context) => { callerCtx.uiWorkspace.whenAccess('w1' as WorkspaceId, FOLLOW, () => dispose) },
     })
     await caller.await()
     expect(dispose).not.toHaveBeenCalled()

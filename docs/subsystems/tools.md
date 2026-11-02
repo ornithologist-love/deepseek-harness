@@ -731,6 +731,36 @@ async execute(input: ToolBatchInput): Promise<ToolBatchResult>
 guard(guard: ToolGuard): () => void
 
 /**
+ * Register one dispatched call so `interrupt` can stop it, and arm the
+ * registry-wide budget unless the tool declares `unbounded`. Dispose the
+ * handle when the dispatch settles.
+ * @param exec - the dispatched execution.
+ * @param unbounded - whether the tool is exempt from `maxCallMs`.
+ * @returns the running-call handle.
+ */
+trackCall(exec: Pick<ToolExecution, 'token' | 'callId' | 'agent'>, unbounded: boolean): TrackedToolCall
+
+/**
+ * Stop one running call: abort its body signal, then let its scheduler settle
+ * it with `TOOL_TIMEOUT` or `TOOL_CANCELLED_BY_USER` once the body returns or
+ * `interruptGraceMs` elapses. Sibling calls continue. Work the body already
+ * did is not rolled back.
+ * @param exec - the execution to stop, as seen by a `tools/execute` wrapper.
+ * @param reason - why the call stops; later requests keep the first reason.
+ * @returns whether the call was still running.
+ */
+interrupt(exec: Pick<ToolExecution, 'token'>, reason: ToolCallInterruptReason): boolean
+
+/**
+ * {@link interrupt} a running call by the model tool-call id an Agent issued.
+ * @param agent - the Agent whose call to stop.
+ * @param callId - model tool-call id.
+ * @param reason - why the call stops.
+ * @returns whether a matching call was still running.
+ */
+interruptCall(agent: Agent, callId: ToolExecution['callId'], reason: ToolCallInterruptReason): boolean
+
+/**
  * Check global and inherited guards after pre-execute policy and approval resolve.
  * @param exec - invocation whose guards are checked before dispatch.
  * @returns the first denial reason, or undefined when no guard denies.
@@ -738,7 +768,7 @@ guard(guard: ToolGuard): () => void
 checkGuards(exec: ToolExecution): string | undefined
 ```
 
-Types: [ScopeKey](scope.md)
+Types: [Agent](core.md) · [ScopeKey](scope.md)
 
 Source: [`packages/core/tools/src/index.ts`](../../packages/core/tools/src/index.ts)
 
