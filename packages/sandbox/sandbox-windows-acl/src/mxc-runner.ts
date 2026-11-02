@@ -109,7 +109,11 @@ export async function runMxc(args: string[]): Promise<number> {
     const configuration = {
       version: SDK_CONTRACT_VERSION, containment: 'processcontainer', containerId: randomUUID().replaceAll('-', ''),
       lifecycle: { destroyOnExit: true, preservePolicy: false },
-      process: { commandLine: request.command, cwd: request.workingDirectory, env: request.environment },
+      process: {
+        commandLine: request.command, cwd: request.workingDirectory,
+        env: Object.entries(request.environment ?? {}).filter((entry): entry is [string, string] => entry[1] !== undefined)
+          .map(([key, value]) => `${key}=${value}`),
+      },
       filesystem: request.filesystem, network: request.network,
       processContainer: request.containment?.type === 'processcontainer' ? request.containment.config : undefined,
       ui: { disable: false, clipboard: 'none', injection: false },
@@ -121,7 +125,10 @@ export async function runMxc(args: string[]): Promise<number> {
     const api = loadWin32ProcessBindings()
     const child = spawnCurrentTokenJobProcess(api, {
       command: executable, applicationName: executable, args: [configFile], cwd: process.cwd(),
-      env: Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
+      env: Object.fromEntries(Object.entries({
+        ...process.env, SystemDrive: policy.host.systemDrive, LOCALAPPDATA: policy.host.localAppData,
+      })
+        .filter((entry): entry is [string, string] => entry[1] !== undefined)),
       stdio: { stdin: 0, stdout: 1, stderr: 2 },
     })
     try {

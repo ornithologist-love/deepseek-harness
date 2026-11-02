@@ -44,6 +44,7 @@ export interface MxcControlBridge {
 /**
  * Bridge the inherited fd 7 to a target spawned inside PSEC. No host pipe handle is exposed to MXC.
  * @param argv - exact target argv, unchanged for the contained bootstrap's spawn.
+ * @param hasControl - whether fd 7 must be forwarded; absent control leaves only the authenticated startup acknowledgement.
  * @returns a runner-owned bridge; dispose after the MXC process and streams have settled.
  */
 export async function createMxcControlBridge(argv: string[], hasControl: boolean): Promise<MxcControlBridge> {
