@@ -46,6 +46,8 @@ import type {
   SessionAttachmentValue,
   SessionCancelRequest,
   SessionCancelValue,
+  SessionInterruptToolCallRequest,
+  SessionInterruptToolCallValue,
   SessionControlFrame,
   SessionCreateRequest,
   SessionCreateValue,
@@ -742,6 +744,16 @@ export class SessionController extends TypertRemoteService {
   @Remote('cancel')
   cancel(request: SessionCancelRequest): SessionCancelValue {
     return this.commands.cancel(request)
+  }
+
+  /**
+   * Stop one running tool call while its turn continues.
+   * @param request - Session and model tool-call id.
+   * @returns whether the call was still running.
+   */
+  @Remote('interruptToolCall')
+  interruptToolCall(request: SessionInterruptToolCallRequest): SessionInterruptToolCallValue {
+    return this.commands.interruptToolCall(request)
   }
 
   /**

@@ -263,8 +263,17 @@ export interface ToolDefinition extends ToolSchema {
    * is NEVER sent to the model — `schemas()` whitelists only name/description/
    * parameters. Declaring it asserts this tool forwards `exec.signal` to a
    * cooperative implementation that can reach quiescence when the signal aborts.
+   * The registry's own per-call budget ({@link Config.maxCallMs}) applies
+   * independently and settles the call even when the body does not cooperate.
    */
   timeoutMs?: number
+  /**
+   * Exempt this tool from the registry-wide per-call budget
+   * ({@link Config.maxCallMs}). Declare it only for a tool whose normal call
+   * waits on a person, a child Agent, or a background job for an open-ended
+   * time. A user can still interrupt the call.
+   */
+  unbounded?: boolean
   /**
    * Pure synchronous classifier for overlap with sibling tool calls. Only
    * `true` opts in; omission, exceptions, non-`true` returns, and invalid
@@ -486,6 +495,17 @@ export const TOOL_ABORTED = 'ABORTED'
 /** Canonical error code for cancellation before a tool body was invoked. */
 export const TOOL_ABORTED_BEFORE_DISPATCH = 'ABORTED_BEFORE_DISPATCH'
 
+/** Error code for a call the registry settled because it reached its time budget. */
+export const TOOL_TIMEOUT = 'TOOL_TIMEOUT'
+
+/** Error code for a call the registry settled because the user interrupted it. */
+export const TOOL_CANCELLED_BY_USER = 'TOOL_CANCELLED_BY_USER'
+
+/** Why the registry stops one running call; the first requested reason wins. */
+export type ToolCallInterruptReason =
+  | { readonly kind: 'user' }
+  | { readonly kind: 'timeout'; readonly timeoutMs: number }
+
 /** Structured error metadata for a failed tool call (alongside the model-facing text). */
 export interface ToolErrorInfo {
   name: string
@@ -692,6 +712,18 @@ export interface Config {
    * restores strictly serial dispatch. Must be a positive integer.
    */
   maxParallelSubCalls?: number
+  /**
+   * Per-call time budget in milliseconds for every tool that does not declare
+   * {@link ToolDefinition.unbounded} (default `0`, no budget). On
+   * expiry the call is interrupted with a `TOOL_TIMEOUT` result.
+   */
+  maxCallMs?: number
+  /**
+   * How long an interrupted call may take to observe its aborted signal
+   * before the registry settles it without waiting for the body (default 1000).
+   * A late body outcome is discarded.
+   */
+  interruptGraceMs?: number
 }
 
 /**
@@ -784,6 +816,12 @@ interface ToolAskResolution {
 interface ToolCancellationState {
   readonly callerSignal: AbortSignal
   bodyInvoked: boolean
+  /** Per-call cancellation fused into the body signal by {@link ToolRuntime.interrupt}. */
+  readonly interrupt: AbortController
+  /** First interrupt request; set once. */
+  interruptReason?: ToolCallInterruptReason
+  /** Releases the dispatch from waiting on the body; present while the dispatch runs. */
+  abandon?: () => void
 }
 
 /** One dispatch-scoped fused signal plus listener cleanup after the body settles. */
@@ -811,6 +849,8 @@ export class ToolRuntime extends Service {
   static Config: z<Config> = z.object({
     mode: z.union(['native', 'ptc'] as const).default('native'),
     maxParallelSubCalls: z.natural().min(1).default(10),
+    maxCallMs: z.natural().default(0),
+    interruptGraceMs: z.natural().default(1000),
   })
 
   /** Internal staged view consumed by `dsh-agent-loop`'s parallel scheduler. */
@@ -838,6 +878,10 @@ export class ToolRuntime extends Service {
   /** Presentation for scopes that declare none; {@link presentAs} shadows it per scope. */
   private readonly defaultMode: ToolPresentationMode
   private readonly maxParallelSubCalls: number
+  private readonly maxCallMs: number
+  private readonly interruptGraceMs: number
+  /** Executions between dispatch start and settlement, for {@link interruptCall}. */
+  private readonly runningExecutions = new Set<MutableToolRunContext>()
   /**
    * Reserved presentation transport, kept outside the filterable registration
    * layers. Built on first need rather than at construction: which agents run
@@ -854,6 +898,8 @@ export class ToolRuntime extends Service {
     // optional-input type for direct (non-Loader) construction in tests.
     this.defaultMode = config.mode ?? 'native'
     this.maxParallelSubCalls = resolveMaxParallelSubCalls(config.maxParallelSubCalls)
+    this.maxCallMs = config.maxCallMs ?? 0
+    this.interruptGraceMs = config.interruptGraceMs ?? 1000
     ctx.systemPrompt.tools(context => this.wireSchemas(context.scope))
     if (this.defaultMode !== 'native') {
       ctx.systemPrompt.section(this.collapseSection())
@@ -1457,6 +1503,7 @@ export class ToolRuntime extends Service {
       this.cancellationStates.set(execution, {
         callerSignal: signal,
         bodyInvoked: false,
+        interrupt: new AbortController(),
       })
       if (collapsed) {
         // The collapse denies the call before the policy pipeline, but a
@@ -1574,7 +1621,7 @@ export class ToolRuntime extends Service {
     /* v8 ignore next -- only registry-minted executions reach the staged scheduler methods */
     if (state === undefined) throw new Error('tool registry scheduler invariant violated: missing cancellation state')
     const wrapperSignal = exec.signal
-    const fused = fuseToolSignals(state.callerSignal, wrapperSignal)
+    const fused = fuseToolSignals(state.callerSignal, wrapperSignal, state.interrupt.signal)
     const signal = fused.signal
 
     if (isAborted(signal)) {
@@ -1607,14 +1654,37 @@ export class ToolRuntime extends Service {
    * @internal
    */
   private async dispatchScheduledExecution(exec: ToolRunContext): Promise<ScheduledToolDispatch> {
+    const mutableExec = exec as MutableToolRunContext
+    const state = this.cancellationStates.get(exec)
+    /* v8 ignore next -- only registry-minted executions reach the staged scheduler methods */
+    if (state === undefined) throw new Error('tool registry scheduler invariant violated: missing cancellation state')
+    const startedAt = Date.now()
+    const abandoned = new Promise<undefined>((resolve) => { state.abandon = () => { resolve(undefined) } })
+    const budget = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined)?.unbounded === true
+      ? 0
+      : this.maxCallMs
+    const budgetTimer = budget > 0
+      ? setTimeout(() => { this.interrupt(exec, { kind: 'timeout', timeoutMs: budget }) }, budget)
+      : undefined
+    this.runningExecutions.add(mutableExec)
     try {
-      const mutableExec = exec as MutableToolRunContext
       const carrier = scopeTarget(this, exec.agent)
-      const result = await this.ctx.waterfall(
-        carrier, 'tools/execute', mutableExec,
-        () => this.dispatchToolBody(mutableExec),
-      )
-      const normalized = this.normalizeDispatchResult(exec, result)
+      // An interrupted body that ignores its signal is abandoned after the
+      // grace period; its late outcome is never committed.
+      const raced = await Promise.race([
+        this.ctx.waterfall(
+          carrier, 'tools/execute', mutableExec,
+          () => this.dispatchToolBody(mutableExec),
+        ),
+        abandoned,
+      ])
+      const reason = state.interruptReason
+      if (reason !== undefined || raced === undefined) {
+        /* v8 ignore next -- `abandoned` resolves only after an interrupt reason is set */
+        if (reason === undefined) throw new Error('tool registry invariant violated: abandoned without a reason')
+        return { kind: 'post-result', result: this.markCanonical(exec, toolInterruptedResult(reason, Date.now() - startedAt)) }
+      }
+      const normalized = this.normalizeDispatchResult(exec, raced)
       const deferredContexts = this.deferredContexts.get(exec)
       /* v8 ignore next -- dispatch only receives executions minted by this registry's prepare stage */
       if (deferredContexts === undefined) throw new Error('tool registry scheduler invariant violated: unprepared execution')
@@ -1635,7 +1705,44 @@ export class ToolRuntime extends Service {
       }
     } catch (error: unknown) {
       return { kind: 'final-result', result: toolErrorResult(error) }
+    } finally {
+      clearTimeout(budgetTimer)
+      this.runningExecutions.delete(mutableExec)
+      delete state.abandon
     }
+  }
+
+  /**
+   * Stop one running call: abort its body signal, then settle it with a
+   * `TOOL_TIMEOUT` or `TOOL_CANCELLED_BY_USER` result once the body returns or
+   * {@link Config.interruptGraceMs} elapses, whichever comes first. Sibling
+   * calls continue, and the turn proceeds with the interrupted result. Work the
+   * body already did is not rolled back.
+   * @param exec - the execution to stop, as seen by a `tools/execute` wrapper.
+   * @param reason - why the call stops; later requests keep the first reason.
+   * @returns whether the call was still running.
+   */
+  interrupt(exec: Pick<ToolExecution, 'token'>, reason: ToolCallInterruptReason): boolean {
+    const running = [...this.runningExecutions].find(candidate => candidate.token === exec.token)
+    const state = running === undefined ? undefined : this.cancellationStates.get(running)
+    if (state?.abandon === undefined) return false
+    if (state.interruptReason !== undefined) return true
+    state.interruptReason = reason
+    setTimeout(state.abandon, this.interruptGraceMs)
+    state.interrupt.abort(new ToolInterruptedError(reason))
+    return true
+  }
+
+  /**
+   * {@link interrupt} a running call by the model tool-call id an Agent issued.
+   * @param agent - the Agent whose call to stop.
+   * @param callId - model tool-call id.
+   * @param reason - why the call stops.
+   * @returns whether a matching call was still running.
+   */
+  interruptCall(agent: Agent, callId: ToolCallId, reason: ToolCallInterruptReason): boolean {
+    const running = [...this.runningExecutions].find(candidate => candidate.agent === agent && candidate.callId === callId)
+    return running !== undefined && this.interrupt(running, reason)
   }
 
   /**
@@ -1933,33 +2040,61 @@ function isAborted(signal: AbortSignal): boolean {
  * Fuse caller and wrapper cancellation without nesting `AbortSignal.any`.
  * Keeping the relay dispatch-scoped also removes listeners when work settles.
  */
-function fuseToolSignals(caller: AbortSignal, wrapper: AbortSignal): FusedToolSignal {
-  if (caller === wrapper) return { signal: caller, dispose() {} }
+function fuseToolSignals(...signals: [AbortSignal, ...AbortSignal[]]): FusedToolSignal {
+  const sources = [...new Set(signals)]
+  if (sources.length === 1) return { signal: signals[0], dispose() {} }
 
   const controller = new AbortController()
   let listening = false
+  const listeners = sources.map(source => [source, (): void => { abortFrom(source) }] as const)
   const dispose = (): void => {
     if (!listening) return
     listening = false
-    caller.removeEventListener('abort', abortFromCaller)
-    wrapper.removeEventListener('abort', abortFromWrapper)
+    for (const [source, listener] of listeners) source.removeEventListener('abort', listener)
   }
   const abortFrom = (source: AbortSignal): void => {
     const reason: unknown = source.reason
     controller.abort(reason)
     dispose()
   }
-  const abortFromCaller = (): void => { abortFrom(caller) }
-  const abortFromWrapper = (): void => { abortFrom(wrapper) }
 
-  if (wrapper.aborted) abortFromWrapper()
-  else if (caller.aborted) abortFromCaller()
+  // When several are already aborted the last one wins (wrapper over caller).
+  const already = sources.findLast(source => source.aborted)
+  if (already !== undefined) abortFrom(already)
   else {
     listening = true
-    caller.addEventListener('abort', abortFromCaller, { once: true })
-    wrapper.addEventListener('abort', abortFromWrapper, { once: true })
+    for (const [source, listener] of listeners) source.addEventListener('abort', listener, { once: true })
   }
   return { signal: controller.signal, dispose }
+}
+
+/** Abort reason carried by a body signal stopped through {@link ToolRuntime.interrupt}. */
+export class ToolInterruptedError extends Error {
+  override readonly name = 'ToolInterruptedError'
+
+  /** @param reason - why the call was interrupted. */
+  constructor(readonly reason: ToolCallInterruptReason) {
+    super(reason.kind === 'user' ? 'tool call interrupted by the user' : `tool call timed out after ${reason.timeoutMs}ms`)
+  }
+}
+
+/**
+ * Model-facing result for an interrupted call. It names the cause and points
+ * the model at running long work in the background instead of retrying it.
+ */
+function toolInterruptedResult(reason: ToolCallInterruptReason, elapsedMs: number): ToolExecutionResult {
+  const seconds = Math.round(elapsedMs / 1000)
+  const [message, code] = reason.kind === 'user'
+    ? [`tool call stopped by the user after ${seconds}s because it was taking too long`, TOOL_CANCELLED_BY_USER]
+    : [`tool call stopped after reaching its ${Math.round(reason.timeoutMs / 1000)}s time limit`, TOOL_TIMEOUT]
+  const advice = 'Changes it already made are kept. Do not rerun it the same way in the foreground: '
+    + 'if the work is expected to take long, run it in the background (for example a shell command with run_in_background) '
+    + 'and check on it later, or narrow its scope.'
+  return {
+    content: [{ type: 'text', text: `Error: ${message}. ${advice}` }],
+    isError: true,
+    error: { message, info: { name: 'ToolInterruptedError', code } },
+  }
 }
 
 /** Canonical result when cancellation supersedes success after body invocation. */

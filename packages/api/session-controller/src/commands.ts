@@ -39,6 +39,8 @@ import type {
   SessionAttachmentValue,
   SessionCancelRequest,
   SessionCancelValue,
+  SessionInterruptToolCallRequest,
+  SessionInterruptToolCallValue,
   SessionCreateRequest,
   SessionCreateValue,
   SessionForkRequest,
@@ -511,6 +513,19 @@ export class SessionCommandController {
     }
     agent.cancel({ kind: 'user' }, { keepInbox: true })
     return { accepted: true }
+  }
+
+  /**
+   * Stop one running tool call of a live Agent; its turn continues with a
+   * `TOOL_CANCELLED_BY_USER` result.
+   * @param request - Session and model tool-call id.
+   * @returns whether the call was still running.
+   */
+  interruptToolCall(request: SessionInterruptToolCallRequest): SessionInterruptToolCallValue {
+    const agent = this.ctx.agents.get(request.sessionId)
+    const tools = this.ctx.get('tools')
+    if (agent === undefined || tools === undefined) return { accepted: false }
+    return { accepted: tools.interruptCall(agent, request.callId, { kind: 'user' }) }
   }
 
   private async resolveAgent(sessionId: SessionId): Promise<Agent> {

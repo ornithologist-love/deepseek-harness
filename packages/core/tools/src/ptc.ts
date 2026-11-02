@@ -333,6 +333,7 @@ export function createRunCodeTool(registry: ToolRuntime, options: RunCodeBridgeO
   const calls = new PtcCalls(ctx)
   const definition = defineTool({
     name: RUN_CODE_NAME,
+    unbounded: true,
     // The description and `code` parameter description are placeholders here:
     // the language-aware getters installed below replace both, resolving the
     // loaded runtime's flavor at schema-emission time so the schema the MODEL

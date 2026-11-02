@@ -211,6 +211,7 @@ export async function apply(ctx: Context, config: Config, session?: Session): Pr
             : '')
       const definition = defineTool({
         name: toolName,
+        unbounded: true,
         description: wording.description
           + ' This tool starts an independently managed subagent and immediately returns its id. The runtime notifies you when it finishes.'
           + (subagentProvider.prepareContinuable !== undefined

@@ -37,6 +37,7 @@ export function apply(ctx: Context, config: Config = {}): void {
   }
   ctx.tools.register(defineTool({
     name: 'ask_user_question',
+    unbounded: true,
     description,
     parameters: {
       questions: {

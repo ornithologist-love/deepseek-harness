@@ -150,8 +150,17 @@ export type ToolHostInfoInjected = {
   }
 }
 
+/** Session-bound action that stops one running call while its turn continues. */
+export type ToolInterruptInjected = {
+  /**
+   * Ask the Host to stop one running call of this Session.
+   * @param callId - model tool-call id.
+   */
+  interruptCall: (callId: string) => void
+}
+
 /** Full props of the Tool call-tree renderer registered as a tool-call Chat Node. */
 export type ToolTreeProps = PropsRuntime<'conversation.chat.node', 'tool-call'>
   & PropsRenderSlots<'tool.call.toolview'>
   & PropsLocale<'conversation'>
-  & InjectFace<ToolHostInfoInjected>
+  & InjectFace<ToolHostInfoInjected & ToolInterruptInjected>

@@ -6,6 +6,8 @@ import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import { ToolCallTree } from './tool/ToolCallTree.tsx'
 import { CONVERSATION_NS as NS } from './locale.ts'
 import { askQuestionToolview } from './tool/toolviews/ask-question-row.tsx'
@@ -18,8 +20,8 @@ import { detailsToolview } from './tool/toolviews/details-row.tsx'
 import { todoToolview } from './tool/toolviews/todo-row.tsx'
 import { webToolview } from './tool/toolviews/web-row.tsx'
 
-/** Required services: the slot registry and the Remote face carrying the Host home used for POSIX `~`. */
-export const inject = ['slots', 'remote']
+/** Required services: slots, the Remote face with the Host home for POSIX `~`, and the Session face that interrupts a call. */
+export const inject = ['slots', 'remote', 'remote.session']
 
 /**
  * Mount the whole-Tool renderers and built-in atomic Tool registrations.
@@ -30,7 +32,13 @@ export function apply(ctx: ClientContext): void {
     getSnapshot: () => ctx.remote.$host,
     subscribe: listener => ctx.on('connection/reset', listener),
   }
-  const toolInject = () => ({ hooks: { hostInfo } })
+  const toolInject = (sessionId: SessionId) => ({
+    hooks: { hostInfo },
+    interruptCall: (callId: string): void => {
+      // A call that already settled reports accepted: false; its result is on the way.
+      void ctx.remote.session.interruptToolCall({ sessionId, callId: callId as ToolCallId })
+    },
+  })
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
     key: 'tool-call',
