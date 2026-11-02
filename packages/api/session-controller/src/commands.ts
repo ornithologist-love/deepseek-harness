@@ -121,7 +121,9 @@ export class SessionCommandController {
         })
       }
     }
-    const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd
+    // A multi-folder Workspace starts new Sessions in its primary member.
+    const primary = workspace === undefined ? undefined : this.ctx.workspaceRegistry.directoriesOf(workspace.id)[0]
+    const cwd = primary ?? request.cwd ?? this.defaultCwd
     let created: ApiSessionCreated
     try {
       created = await this.agents.createSession({

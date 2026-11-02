@@ -72,6 +72,8 @@ kind: "package-reference"
 
 ### 平台 profile
 
+存在 `workspaceRoots` 时，每个规范化成员都参与写入策略：bwrap 将每个成员绑定为可写，Landlock 授予每个成员，Seatbelt 使用 `writableRoots`，Windows runner 接收重复的 `--workspace` 参数。其常驻授权以排序后的成员集合为键；修改成员会使后续进程使用新的写 SID。已有进程保留原有权限。
+
 bwrap profile 组合只读宿主根目录、全新 `/dev` 与私有 PID 命名空间中的 `/proc`——命令可管理其后代，但看不到宿主进程，因此 procfs 魔法链接无法绕过挂载；`workspace-write` 另加临时的 `/tmp` 与可写工作区绑定挂载。[历史私有 PID 笔记](../../../.agents/notes/archived/bug-fix/2026-08-06-bwrap-private-pid-namespace.md)记录该边界。
 
 `@deepseek-ai/node-addon-system/landlock-run` API 提供平台 launcher、功能探测与授权词汇；此提供方只做模式到授权的映射，把路径解析与探测解析保留在带版本的 binary 中。

@@ -44,6 +44,9 @@ function renderPolicyContext(policy: SandboxExecutionPolicy): string {
     case 'read-only':
       return 'Current DSH file policy: read-only. Any available operation enforced by the DSH file sandbox cannot modify files in the standing mode. Do not refuse a required modification from this policy alone: try an available tool normally and follow any denial and escalation guidance it returns.'
     case 'workspace-write':
+      if (policy.workspaceRoots !== undefined) {
+        return `Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under these workspace member directories: ${JSON.stringify(policy.workspaceRoots)}. A single command may write across these members. Some platform temporary areas may also be writable.`
+      }
       return `Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: ${JSON.stringify(policy.workspaceRoot)}. Some platform temporary areas may also be writable.`
     case 'danger-full-access':
       return 'Current DSH file policy: danger-full-access. The DSH file sandbox does not restrict file modifications by available operations.'
@@ -86,6 +89,12 @@ export interface SandboxPolicyRequest {
   mode?: SandboxMode
 }
 
+/**
+ * Report the member directories of the workspace that owns a session, primary
+ * first, or `undefined` when this source does not own it.
+ */
+export type WorkspaceRootResolver = (session: Session) => readonly string[] | undefined
+
 /** The sandbox-mode projection's state schema (state equals the public shape). */
 const sandboxModeStateSchema = zod.union([
   zod.literal('read-only'),
@@ -122,6 +131,7 @@ export class SandboxPolicyService extends Service {
   readonly defaultMode: SandboxMode
   /** The absolute `workspace-write` fallback root for calls without a session cwd. */
   readonly workspaceRoot: string
+  private readonly workspaceRootResolvers = new Set<WorkspaceRootResolver>()
   constructor(ctx: Context, config: Config) {
     super(ctx, 'sandboxPolicy')
     // schemastery (static Config) already filled `mode`; the cast records that
@@ -157,17 +167,43 @@ export class SandboxPolicyService extends Service {
    * mode outranks the session's last `sandbox/mode` event, which outranks the
    * deployment default. A session cwd is its workspace-write boundary; the
    * configured root is the fallback for agentless calls and sessions without a
-   * cwd.
+   * cwd. A registered workspace-root source that owns the session replaces
+   * that boundary with its member directories, primary first.
    * @param request - optional session and approved mode override.
-   * @returns the fully resolved per-call mode and absolute workspace root.
+   * @returns the fully resolved per-call mode and absolute workspace root(s).
    */
   resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy {
     const { session } = request
+    const workspaceRoots = session === undefined ? undefined : this.membersOf(session)
     return {
       mode: request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode,
-      workspaceRoot: resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
+      workspaceRoot: workspaceRoots?.[0] ?? resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
+      ...workspaceRoots === undefined ? {} : { workspaceRoots },
       ...session === undefined ? {} : { sessionId: session.id },
     }
+  }
+
+  /**
+   * Register a source of multi-folder workspace members. Agentless calls stay
+   * single-root; at most one source may own a session.
+   * @param resolver - synchronous reader of the calling session's member directories.
+   * @returns disposer removing this source from future resolutions.
+   */
+  registerWorkspaceRoots(resolver: WorkspaceRootResolver): () => void {
+    this.workspaceRootResolvers.add(resolver)
+    return () => { this.workspaceRootResolvers.delete(resolver) }
+  }
+
+  private membersOf(session: Session): string[] | undefined {
+    let members: string[] | undefined
+    for (const resolve of this.workspaceRootResolvers) {
+      const roots = resolve(session)
+      if (roots === undefined) continue
+      if (members !== undefined) throw new Error('sandbox-policy: more than one source owns this workspace')
+      if (roots.length === 0) throw new Error('sandbox-policy: a workspace must contain at least one directory')
+      members = [...new Set(roots.map(resolveWorkspaceRoot))]
+    }
+    return members
   }
 
   /**

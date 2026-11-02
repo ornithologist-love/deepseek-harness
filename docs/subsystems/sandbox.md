@@ -54,6 +54,12 @@ interface SandboxExecutionPolicy {
   /** Absolute root directory `workspace-write` may write under. */
   workspaceRoot: string
   /**
+   * Every member directory of a multi-folder workspace, primary first. When
+   * present, `workspace-write` may write under each member; omission keeps the
+   * single-root policy formed by {@link workspaceRoot}.
+   */
+  workspaceRoots?: readonly string[]
+  /**
    * Opaque identity of the calling session (the branded `dsh-session`
    * SessionId). Backends key per-session state off it (e.g. windows-acl gives
    * each live session/workspace pair a random private temp directory and SID,
@@ -74,6 +80,16 @@ interface SandboxPolicyRequest {
   /** Explicit approved mode override, which outranks session policy. */
   mode?: SandboxMode
 }
+```
+
+Compositions can register a source of workspace member directories. The [sandbox policy package](../../packages/sandbox/sandbox-policy/README.md) owns resolution and source-ownership rules.
+
+```ts type-equiv
+/**
+ * Report the member directories of the workspace that owns a session, primary
+ * first, or `undefined` when this source does not own it.
+ */
+type WorkspaceRootResolver = (session: Session) => readonly string[] | undefined
 ```
 
 Only a confined execution reaches `ctx.sandbox`; its provider policy narrows the mode while retaining the same root. This permits concurrent sessions, consumers, and one-shot escalated retries to ask the same provider for different boundaries without mutating provider state.
@@ -201,11 +217,20 @@ The sandbox-policy service (`ctx.sandboxPolicy`). Owns the deployment default mo
  * mode outranks the session's last `sandbox/mode` event, which outranks the
  * deployment default. A session cwd is its workspace-write boundary; the
  * configured root is the fallback for agentless calls and sessions without a
- * cwd.
+ * cwd. A registered workspace-root source that owns the session replaces
+ * that boundary with its member directories, primary first.
  * @param request - optional session and approved mode override.
- * @returns the fully resolved per-call mode and absolute workspace root.
+ * @returns the fully resolved per-call mode and absolute workspace root(s).
  */
 resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy
+
+/**
+ * Register a source of multi-folder workspace members. Agentless calls stay
+ * single-root; at most one source may own a session.
+ * @param resolver - synchronous reader of the calling session's member directories.
+ * @returns disposer removing this source from future resolutions.
+ */
+registerWorkspaceRoots(resolver: WorkspaceRootResolver): () => void
 
 /**
  * Read the session override without applying the deployment default.

@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for 2026-11-02-multi-folder-workspaces.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-11-02-multi-folder-workspaces.md
+/agent-note-multi-folder-workspace-execution:
+  en: b69926c2175147fe
+  zh: b529fcdf395fe599
+/agent-note-multi-folder-workspace-execution/problem:
+  en: 11a29afcaefa57a8
+  zh: 126819f50184cc50
+/agent-note-multi-folder-workspace-execution/decision:
+  en: c50be0c564f66955
+  zh: eaa8770a81ab9c80
+/agent-note-multi-folder-workspace-execution/alternatives-considered:
+  en: 9477f1b02de71263
+  zh: 4c69641ad6503064
+/agent-note-multi-folder-workspace-execution/consequences:
+  en: 892367f59a978ecb
+  zh: 5b082569d5f050d4

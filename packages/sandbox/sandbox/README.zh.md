@@ -100,7 +100,7 @@ kind: "package-reference"
 
 ### 可写根目录
 
-`workspace-write` 意味着「工作区根目录加宿主临时区域」：`writableRoots` 以规范化方式推导该白名单，解析符号链接并去重，使 Seatbelt profile 与进程内 fs 栅栏授予完全相同的根目录。
+`workspace-write` 允许写入工作区根目录、`workspaceRoots` 中的成员目录和宿主临时区域。`writableRoots` 将允许列表规范化并去重，因此 Seatbelt profile 与进程内 fs 栅栏授予相同的根目录。省略 `workspaceRoots` 时保持单根行为。
 
 </details>
 

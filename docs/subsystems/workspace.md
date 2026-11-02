@@ -121,6 +121,23 @@ Ownership truth is the record's ordered `sessionIds`, never derived from session
 
 ## The registry: `ctx.workspaceRegistry`
 
+The [workspace package](../../packages/workspace/workspace/README.md) defines member registration and historical-directory semantics. Compositions provide the following source functions:
+
+```ts type-equiv
+/** Reports a workspace's canonical member directories, primary first, or `undefined` when the source does not own it. */
+type WorkspaceDirectorySource = (workspace: Workspace) => readonly string[] | undefined
+```
+
+```ts type-equiv
+/** Reports directories a source selected earlier for a workspace it owns. */
+type WorkspaceHistoricalDirectorySource = (workspace: Workspace) => readonly string[]
+```
+
+```ts type-equiv
+/** Reads headers of addressable sessions that have no Session log yet. */
+type WorkspaceSessionSource = () => Promise<readonly SessionHeader[]>
+```
+
 `WorkspaceRegistry` ([signatures](#ctxworkspaceregistry--workspaceregistry)) owns registration and resolution. `create(path, title?)` requires a fully qualified path, canonicalizes it, rejects a nonexistent path (the original `ENOENT`) or a non-directory, returns the existing entity unchanged when the canonical path is already owned, and otherwise creates a record with `title ?? defaultWorkspaceTitle(path)` prepended to the durable registry order (different canonical paths may share a display title, and a path with no final segment uses its root spelling). `get(id)` and the ordered `list()` are synchronous cache reads; `resolveByPath(path)` applies the same fully qualified realpath canon without creating. `delete(id)` removes only the registration, order entry, and session account — the directory, user files, live sessions, and persisted logs are never touched, so those sessions become Ungrouped ([reference](../../packages/workspace/workspace/README.md)); unknown ids return `false`. Create and delete persist a pending-mutation marker before their two writes (record + order) can diverge; startup resolves exactly the marked mutation — by deleting the marked table row, which completes an interrupted delete and rolls back an interrupted create (the registration is re-creatable, so rollback is the safe direction) — and an unmarked order/table mismatch fails loud as corruption.
 
 Sessions get their cwd at create time from whoever creates them, not from this registry — the API gateway resolves a new session's cwd from the chosen workspace's `path` (falling back to an explicit or default cwd), creates the session so the cwd lands in its immutable [`SessionHeader`](persistence.md#sessionheader--metadata-beside-the-log), then calls `attachSession`, which re-validates that stored header cwd against the workspace path. On the first successful start, the registry bootstraps history from persisted headers alone (`id`, `cwd`, `createdAt` — never event bodies), grouping sessions with a valid canonical cwd into per-directory workspaces, newest first; the initialized marker is written last so an interrupted bootstrap resumes safely. The bootstrap is one-time: cwd-less legacy sessions stay Ungrouped, and sessions created afterwards join a workspace only through `attachSession`.
@@ -587,6 +604,38 @@ unpinSession(sessionId: SessionId): Promise<void>
  * @returns the workspace owning the canonical path, when one exists.
  */
 async resolveByPath(path: string): Promise<Workspace | undefined>
+
+/**
+ * Register a source of multi-folder workspace members. The first source that
+ * owns a workspace decides its members; a workspace no source owns keeps its
+ * single directory.
+ * @param source - canonical member directories, primary first, or `undefined` when this source does not own the workspace.
+ * @param historical - directories the source selected earlier; sessions
+ *   already accounted under one of them stay members, but they authorize no
+ *   new attachment.
+ * @returns disposer removing the source.
+ */
+registerDirectories(source: WorkspaceDirectorySource, historical?: WorkspaceHistoricalDirectorySource): () => void
+
+/**
+ * Read a workspace's current member directories.
+ * @param id - Workspace identity.
+ * @returns canonical member directories, primary first: the owning source's
+ *   list, `[workspace.path]` when no source owns it, or empty for an unknown id.
+ */
+directoriesOf(id: WorkspaceId): readonly string[]
+
+/**
+ * Register headers of addressable sessions that have no Session log yet,
+ * such as unsent drafts. Membership validation treats them like stored
+ * headers from the next {@link refreshSessionHeaders} on.
+ * @param source - reader of the additional headers.
+ * @returns disposer removing the source.
+ */
+registerSessionSource(source: WorkspaceSessionSource): () => void
+
+/** Re-read stored, contributed, and live session headers after their cwd or member directories change. */
+async refreshSessionHeaders(): Promise<void>
 ```
 
 Types: [SessionId](core.md)

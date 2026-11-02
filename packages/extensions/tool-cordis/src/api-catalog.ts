@@ -1997,9 +1997,15 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy',
-        description: 'Resolve the complete policy for one capability call. An approved explicit mode outranks the session\'s last `sandbox/mode` event, which outranks the deployment default. A session cwd is its workspace-write boundary; the configured root is the fallback for agentless calls and sessions without a cwd.',
+        description: 'Resolve the complete policy for one capability call. An approved explicit mode outranks the session\'s last `sandbox/mode` event, which outranks the deployment default. A session cwd is its workspace-write boundary; the configured root is the fallback for agentless calls and sessions without a cwd. A registered workspace-root source that owns the session replaces that boundary with its member directories, primary first.',
         parameters: [{ name: 'request', description: 'optional session and approved mode override.' }],
-        returns: 'the fully resolved per-call mode and absolute workspace root.',
+        returns: 'the fully resolved per-call mode and absolute workspace root(s).',
+      },
+      {
+        signature: 'registerWorkspaceRoots(resolver: WorkspaceRootResolver): () => void',
+        description: 'Register a source of multi-folder workspace members. Agentless calls stay single-root; at most one source may own a session.',
+        parameters: [{ name: 'resolver', description: 'synchronous reader of the calling session\'s member directories.' }],
+        returns: 'disposer removing this source from future resolutions.',
       },
       {
         signature: 'overrideOf(session: Session): SandboxMode | undefined',
@@ -3977,6 +3983,29 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         description: 'Resolve by canonical directory path without creating or mutating a workspace. A missing path rejects during `realpath`; an existing unowned directory returns `undefined`.',
         parameters: [{ name: 'path', description: 'Existing directory path in a fully qualified spelling.' }],
         returns: 'the workspace owning the canonical path, when one exists.',
+      },
+      {
+        signature: 'registerDirectories(source: WorkspaceDirectorySource, historical?: WorkspaceHistoricalDirectorySource): () => void',
+        description: 'Register a source of multi-folder workspace members. The first source that owns a workspace decides its members; a workspace no source owns keeps its single directory.',
+        parameters: [{ name: 'source', description: 'canonical member directories, primary first, or `undefined` when this source does not own the workspace.' }, { name: 'historical', description: 'directories the source selected earlier; sessions already accounted under one of them stay members, but they authorize no new attachment.' }],
+        returns: 'disposer removing the source.',
+      },
+      {
+        signature: 'directoriesOf(id: WorkspaceId): readonly string[]',
+        description: 'Read a workspace\'s current member directories.',
+        parameters: [{ name: 'id', description: 'Workspace identity.' }],
+        returns: 'canonical member directories, primary first: the owning source\'s list, `[workspace.path]` when no source owns it, or empty for an unknown id.',
+      },
+      {
+        signature: 'registerSessionSource(source: WorkspaceSessionSource): () => void',
+        description: 'Register headers of addressable sessions that have no Session log yet, such as unsent drafts. Membership validation treats them like stored headers from the next refreshSessionHeaders on.',
+        parameters: [{ name: 'source', description: 'reader of the additional headers.' }],
+        returns: 'disposer removing the source.',
+      },
+      {
+        signature: 'async refreshSessionHeaders(): Promise<void>',
+        description: 'Re-read stored, contributed, and live session headers after their cwd or member directories change.',
+        parameters: [],
       },
     ],
   },
@@ -6839,7 +6868,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'SandboxExecutionPolicy',
-    declaration: 'export interface SandboxExecutionPolicy {\n    mode: SandboxMode;\n    workspaceRoot: string;\n    sessionId?: SessionId;\n}',
+    declaration: 'export interface SandboxExecutionPolicy {\n    mode: SandboxMode;\n    workspaceRoot: string;\n    workspaceRoots?: readonly string[];\n    sessionId?: SessionId;\n}',
   },
   {
     name: 'SandboxMode',
@@ -8790,6 +8819,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface WorkspaceDirectoryListing {\n    readonly path: string;\n    readonly entries: readonly WorkspaceDirectoryEntry[];\n    readonly truncated: boolean;\n}',
   },
   {
+    name: 'WorkspaceDirectorySource',
+    declaration: 'export type WorkspaceDirectorySource = (workspace: Workspace) => readonly string[] | undefined;',
+  },
+  {
     name: 'WorkspaceFileBytes',
     declaration: 'export interface WorkspaceFileBytes<Data extends Uint8Array = Uint8Array> extends WorkspaceFileStat {\n    readonly offset: number;\n    readonly data: Data;\n    readonly eof: boolean;\n}',
   },
@@ -8830,6 +8863,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export type WorkspaceFollowIncrement = {\n    readonly type: \'replace\';\n    readonly value: WorkspaceBaseline;\n} | {\n    readonly type: \'upsert\';\n    readonly workspace: WorkspaceView;\n} | {\n    readonly type: \'remove\';\n    readonly workspaceId: WorkspaceId;\n} | {\n    readonly type: \'order\';\n    readonly workspaceIds: readonly WorkspaceId[];\n} | {\n    readonly type: \'archived\';\n    readonly archivedSessionIds: readonly SessionId[];\n} | {\n    readonly type: \'pinned\';\n    readonly pinnedSessionIds: readonly SessionId[];\n};',
   },
   {
+    name: 'WorkspaceHistoricalDirectorySource',
+    declaration: 'export type WorkspaceHistoricalDirectorySource = (workspace: Workspace) => readonly string[];',
+  },
+  {
     name: 'WorkspaceInsertBeforeRequest',
     declaration: 'export interface WorkspaceInsertBeforeRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly beforeWorkspaceId?: WorkspaceId;\n}',
   },
@@ -8852,6 +8889,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkspaceRenameRequest',
     declaration: 'export interface WorkspaceRenameRequest {\n    readonly workspaceId: WorkspaceId;\n    readonly title: string;\n}',
+  },
+  {
+    name: 'WorkspaceRootResolver',
+    declaration: 'export type WorkspaceRootResolver = (session: Session) => readonly string[] | undefined;',
+  },
+  {
+    name: 'WorkspaceSessionSource',
+    declaration: 'export type WorkspaceSessionSource = () => Promise<readonly SessionHeader[]>;',
   },
   {
     name: 'WorkspaceUnarchiveSessionRequest',
