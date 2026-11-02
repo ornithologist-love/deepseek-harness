@@ -1,6 +1,6 @@
 /**
  * Local sandbox backend. It selects the platform runner chain (Linux bwrap then
- * Landlock; macOS Seatbelt; Windows the ACL restricted-token runner), functionally probes
+ * Landlock; macOS Seatbelt; Windows native MXC then the ACL restricted-token runner), functionally probes
  * competing candidates once, and reports each wrap's enforcement and stderr
  * classification facts. Missing or unusable confinement fails closed rather
  * than returning the original argv.
@@ -137,7 +137,7 @@ export interface SandboxInternals {
 }
 
 /** The chain's verdict: which runner confines, and how completely it enforces. */
-type SelectedRunner = { runner: 'bwrap' | 'landlock' | 'seatbelt' | 'windows-acl'; enforcement: SandboxEnforcement }
+type SelectedRunner = { runner: 'bwrap' | 'landlock' | 'seatbelt' | 'windows-mxc' | 'windows-acl'; enforcement: SandboxEnforcement }
 
 /** One live session/workspace pair's private temp directory and capability. */
 interface AclTempCapability {
@@ -158,10 +158,8 @@ interface AclTempCapability {
 const PLATFORM_CHAINS: Record<string, readonly SelectedRunner['runner'][]> = {
   linux: ['bwrap', 'landlock'],
   darwin: ['seatbelt'],
-  // The Windows restricted-token runner (@deepseek-ai/dsh-sandbox-windows-acl):
-  // a sole candidate, selected without a probe — its execution-time refusal
-  // fails closed through its stderr signature (windows-acl-run:) and exit 127.
-  win32: ['windows-acl'],
+  // Only a native-unavailable MXC probe permits the legacy ACL fallback.
+  win32: ['windows-mxc', 'windows-acl'],
 }
 
 /**
@@ -177,6 +175,7 @@ const STATIC_ENFORCEMENT: Record<SelectedRunner['runner'], SandboxEnforcement> =
   bwrap: 'full',
   landlock: 'full',
   seatbelt: 'full',
+  'windows-mxc': 'partial',
   // Everyone stays in both restricting lists for process initialization, but
   // the Low label denies the write authority it used to confer. NTFS hard
   // links still alias a granted workspace file to a path outside it, reads
@@ -209,6 +208,7 @@ const DENIAL_SIGNATURES = {
   // pwsh/.NET: "Access to the path '...' is denied."; cmd: "Access is denied.";
   // Node EACCES: "permission denied"; EPERM: "operation not permitted".
   'windows-acl': ['access is denied', 'access to the path', 'permission denied', 'operation not permitted'],
+  'windows-mxc': ['access is denied', 'access to the path', 'permission denied', 'operation not permitted'],
   runnerCommand: ['read-only file system', 'permission denied'],
 } as const satisfies Record<SelectedRunner['runner'] | 'runnerCommand', readonly string[]>
 
@@ -237,6 +237,7 @@ const RUNNER_FAILURE_RULES = {
   }],
   seatbelt: [{ fatalSignatures: ['sandbox-exec: '] }],
   'windows-acl': [{ allowedExitCodes: [WINDOWS_ACL_RUNNER_FAILURE_EXIT], fatalSignatures: ['windows-acl-run: '] }],
+  'windows-mxc': [{ allowedExitCodes: [WINDOWS_ACL_RUNNER_FAILURE_EXIT], fatalSignatures: ['windows-mxc-run: '] }],
 } as const satisfies Record<SelectedRunner['runner'], readonly RunnerFailureRule[]>
 
 /**
@@ -268,7 +269,7 @@ export class LocalSandboxProvider extends SandboxProvider {
    * belong to the runner's invocation lease.
    */
   private readonly tempCapabilities = new Map<string, AclTempCapability>()
-  private readonly workspaceRecovery: Promise<void>
+  private workspaceRecovery: Promise<void> | undefined
   private aclGrantWork: Promise<void> = Promise.resolve()
   private aclGrantsDisposed = false
 
@@ -289,9 +290,6 @@ export class LocalSandboxProvider extends SandboxProvider {
       throw new Error('sandbox-local: runnerFailureSignatures entries must be non-empty single-line strings')
     }
     this.runnerCommand = runner.length > 0 ? runner : undefined
-    this.workspaceRecovery = process.platform === 'win32' && runner.length === 0
-      ? WorkspaceWriteLease.recover() : Promise.resolve()
-    void this.workspaceRecovery.catch(error => ctx.logger.warn('Windows workspace-grant recovery failed', error))
     this.configuredRunnerFailureSignatures = runnerFailureSignatures
     this.probeTimeoutMs = config.probeTimeoutMs as number
     assertPositiveFinite('probeTimeoutMs', this.probeTimeoutMs)
@@ -354,6 +352,13 @@ export class LocalSandboxProvider extends SandboxProvider {
       case 'bwrap': return ['bwrap', ...bwrapProfileArgs(policy)]
       case 'landlock': return [this.landlockLauncher(), ...landlockProfileArgs(policy)]
       case 'seatbelt': return [this.seatbeltExec(), ...seatbeltProfileArgs(policy)]
+      case 'windows-mxc': return [
+        ...this.windowsAclRunnerInvocation(), '--mxc',
+        JSON.stringify({
+          mode: policy.mode, roots: policy.workspaceRoots ?? [policy.workspaceRoot],
+          host: { systemDrive: process.env['SystemDrive'], localAppData: process.env['LOCALAPPDATA'] },
+        }),
+      ]
       case 'windows-acl': return this.windowsAclRunnerArgv(policy)
       default: return assertNever(runner)
     }
@@ -371,7 +376,7 @@ export class LocalSandboxProvider extends SandboxProvider {
    * @returns the runner invocation.
    */
   private async windowsAclRunnerArgv(policy: SandboxPolicy): Promise<string[]> {
-    await this.workspaceRecovery
+    await (this.workspaceRecovery ??= WorkspaceWriteLease.recover())
     const roots = policy.workspaceRoots ?? [policy.workspaceRoot]
     const workspaceArgs = roots.flatMap(root => ['--workspace', root])
     const sessionId = policy.sessionId
@@ -495,27 +500,32 @@ export class LocalSandboxProvider extends SandboxProvider {
    * chain or no candidate passes — the command never runs.
    */
   private selectRunner(mode: ConfinedSandboxMode): SelectedRunner {
-    this.selectedRunner ??= this.chainVerdict()
+    if (this.selectedRunner === undefined) {
+      this.selectedRunner = this.chainVerdict(mode)
+      if (this.selectedRunner !== 'unavailable' && this.selectedRunner.runner === 'windows-mxc') {
+        this.ctx.logger.info('Windows sandbox: native MXC/PSEC; host workspace permissions remain unchanged')
+      }
+    }
     if (this.selectedRunner === 'unavailable') throw new SandboxUnavailableError(mode)
     return this.selectedRunner
   }
 
   /** Walk this platform's chain: sole candidate unprobed, several probed in order, none usable → unavailable. */
-  private chainVerdict(): SelectedRunner | 'unavailable' {
+  private chainVerdict(mode: ConfinedSandboxMode): SelectedRunner | 'unavailable' {
     const chain = this.internals.chain ?? PLATFORM_CHAINS[this.internals.platform ?? process.platform] ?? []
     const [first, ...rest] = chain
     if (first === undefined) return 'unavailable'
     // A sole candidate needs no arbitration; its execution-time refusal still fails closed.
     if (rest.length === 0) return { runner: first, enforcement: STATIC_ENFORCEMENT[first] }
     for (const runner of chain) {
-      const enforcement = this.probeRunner(runner)
+      const enforcement = this.probeRunner(runner, mode)
       if (enforcement !== 'unusable') return { runner, enforcement }
     }
     return 'unavailable'
   }
 
   /** One rung's functional probe (each at most once, via the chain walk). */
-  private probeRunner(runner: SelectedRunner['runner']): SandboxEnforcement | 'unusable' {
+  private probeRunner(runner: SelectedRunner['runner'], mode: ConfinedSandboxMode): SandboxEnforcement | 'unusable' {
     // bwrap's mount profile and Seatbelt's deny-file-write* profile govern
     // every promised file effect by construction, so their passing probes
     // are always full enforcement; the Landlock launcher's probe report
@@ -539,6 +549,16 @@ export class LocalSandboxProvider extends SandboxProvider {
         const probe = this.internals.probeWindowsAcl
           ?? (() => defaultProbeWindowsAcl(this.windowsAclRunnerInvocation(), this.probeTimeoutMs))
         return probe() ? 'partial' : 'unusable'
+      }
+      case 'windows-mxc': {
+        const [program, ...args] = this.windowsAclRunnerInvocation()
+        if (program === undefined) return 'unusable'
+        const result = spawnSync(program, [...args, '--mxc', '--probe'], {
+          timeout: this.probeTimeoutMs, stdio: 'ignore',
+        })
+        if (result.status === 0) return 'partial'
+        if (result.status === 1) return 'unusable'
+        throw new SandboxUnavailableError(mode, 'native MXC probe failed; refusing to switch to the ACL backend')
       }
       default: return assertNever(runner)
     }

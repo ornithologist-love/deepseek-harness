@@ -68,7 +68,7 @@ This section explains runner selection, the per-platform profiles, and the failu
 
 ### Runner selection
 
-Selection is by platform first, probes second: each platform has a runner chain (`linux`: `bwrap` then Landlock; `darwin`: Seatbelt; `win32`: the ACL restricted-token runner). A sole candidate is selected without a probe; competing candidates are functionally probed once in chain order, and the first usable verdict is cached for the provider's lifetime. A platform with no chain, or a chain where every probe fails, is unavailable and fails closed at `confine()`.
+Selection is by platform first, probes second: each platform has a runner chain (`linux`: `bwrap` then Landlock; `darwin`: Seatbelt; `win32`: native MXC/PSEC then the ACL restricted-token runner). A sole candidate is selected without a probe; competing candidates are functionally probed once in chain order, and the first usable verdict is cached for the provider's lifetime. Windows falls back to ACL only when native PSEC is unavailable; a broken MXC probe or a failed command does not trigger fallback. A platform with no usable runner fails closed at `confine()`.
 
 ### Platform profiles
 
@@ -78,7 +78,9 @@ The `@deepseek-ai/node-addon-system/landlock-run` API supplies the platform laun
 
 The Seatbelt profile is allow-default with `(deny file-write*)` plus write allow-lists derived from the shared `writableRoots` helper, so exactly the mode's promised file effects are governed; every root is canonicalized because Seatbelt matches resolved paths (`/tmp` IS `/private/tmp`).
 
-The Windows rung keeps a deterministic workspace write SID, while the runner leases and restores workspace permissions per invocation. Overlapping invocations share grants; the last one restores the original integrity label and unchanged DACL. Provider startup recovers journaled grants from terminated runners. Each live session/workspace pair still receives a separate private temp directory and revocable capability, so sessions cannot enter one another's temp trees. Enforcement remains `partial` because of hard links, unconfined reads and foreign AppContainer ACLs.
+The native Windows MXC rung uses the bundled Microsoft SDK's `processcontainer` backend with a request-specific PSEC probe. It leaves host ACLs and integrity labels unchanged, permits writes only to workspace members and a private invocation temp directory under `workspace-write`, and keeps host reads and networking available. Its process tree is terminated when the foreground process exits. The inherited PTC control pipe crosses the native standard-stream API through an authenticated host-loopback bridge; the bootstrap runs inside PSEC. Enforcement is `partial`: hard-link names retain independent path permissions and can alias one file object. This policy follows [Codex's MXC backend](https://github.com/openai/codex/tree/main/codex-rs/mxc-sandbox); Codex installation is not required.
+
+The legacy Windows ACL rung keeps a deterministic workspace write SID, while the runner leases and restores workspace permissions per invocation. Overlapping invocations share grants; the last one restores the original integrity label and unchanged DACL. Before its first ACL invocation, the provider recovers journaled grants from terminated runners. Each live session/workspace pair still receives a separate private temp directory and revocable capability, so sessions cannot enter one another's temp trees. Enforcement remains `partial` because of hard links, unconfined reads and foreign AppContainer ACLs.
 
 Windows grant materialization is serialized per provider and awaited before returning a runner invocation. Native permission propagation and lock contention leave the Host event loop available for other sessions and connections. Provider disposal drains pending grants before revoking private-temp permissions and freeing their resources.
 

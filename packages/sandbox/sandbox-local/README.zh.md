@@ -68,7 +68,7 @@ kind: "package-reference"
 
 ### runner 选择
 
-选择按平台优先、探测其次：每个平台都有 runner 链（`linux`：`bwrap` 再 Landlock；`darwin`：Seatbelt；`win32`：ACL 受限令牌 runner）。唯一候选直接选择、不探测；竞争候选按链序各执行一次功能探测，首个可用结论在提供方生命周期内缓存。没有链的平台、或链上所有探测都失败时，平台不可用，`confine()` 会拒绝执行。
+选择按平台优先、探测其次：每个平台都有 runner 链（`linux`：`bwrap` 再 Landlock；`darwin`：Seatbelt；`win32`：原生 MXC/PSEC 再 ACL 受限令牌 runner）。唯一候选直接选择、不探测；竞争候选按链序探测，首个可用结论在提供方生命周期内缓存。Windows 仅在原生 PSEC 不可用时回退 ACL；MXC 探测异常或命令执行失败均不会触发回退。没有可用 runner 时，`confine()` 拒绝执行。
 
 ### 平台 profile
 
@@ -78,7 +78,9 @@ bwrap profile 组合只读宿主根目录、全新 `/dev` 与私有 PID 命名�
 
 Seatbelt profile 默认允许，带 `(deny file-write*)` 与来自共享 `writableRoots` 辅助函数的写入 allow-list，因此恰好管辖模式承诺的文件操作；每个根目录都经过规范化，因为 Seatbelt 匹配解析后的路径（`/tmp` 就是 `/private/tmp`）。
 
-Windows 档保留确定性的工作区写入 SID，但工作区权限由 runner 按调用持有并恢复。重叠调用共享授权，最后一个退出后恢复原完整性标签和未被修改的 DACL。提供方启动时回收恢复记录中已退出 runner 的授权。每个活跃会话/工作区对仍有独立私有临时目录和可撤销能力，彼此不能进入对方的临时目录。由于硬链接、未受限的读取与外部 AppContainer 权限项，强制执行仍为 `partial`。
+Windows 原生 MXC 档使用随包微软 SDK 的 `processcontainer` 后端，并按请求探测 PSEC 能力。它不修改宿主 ACL 和完整性标签；`workspace-write` 仅允许写入工作区成员目录和本次调用的私有临时目录，保留宿主读取和网络访问。前台进程退出时终止整个派生进程树。PTC 控制管道通过带随机凭据的宿主回环桥跨越原生标准流 API，引导程序运行在 PSEC 内。由于硬链接的不同路径仍可指向同一个文件对象，强制执行报告为 `partial`。策略参考 [Codex 的 MXC 后端](https://github.com/openai/codex/tree/main/codex-rs/mxc-sandbox)，不要求安装 Codex。
+
+Windows 旧版 ACL 档保留确定性的工作区写入 SID，但工作区权限由 runner 按调用持有并恢复。重叠调用共享授权，最后一个退出后恢复原完整性标签和未被修改的 DACL。首次 ACL 调用前回收恢复记录中已退出 runner 的授权。每个活跃会话/工作区对仍有独立私有临时目录和可撤销能力，彼此不能进入对方的临时目录。由于硬链接、未受限的读取与外部 AppContainer 权限项，强制执行仍为 `partial`。
 
 Windows 授权物化在每个提供方内串行执行，返回 runner 调用前须等待完成。原生权限传播和锁竞争会让出 Host 事件循环，其他会话和连接仍可响应。提供方销毁时先等待在途授权，再撤销私有临时目录权限并释放资源。
 

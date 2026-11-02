@@ -9,6 +9,8 @@ English | [中文](README.zh.md)
 
 ## Summary
 
+The runner also accepts `--mxc <policy-json> -- <argv...>` for native PSEC execution through the bundled Microsoft MXC SDK. `dsh-sandbox-local` prefers this backend after a successful native probe. It never modifies host workspace ACLs or integrity labels; `AclSandbox` remains the explicit legacy restricted-token API. See the [local provider's platform profiles](../sandbox-local/README.md#platform-profiles) for mode mapping, process lifetime, control transport, and fallback behavior.
+
 On Windows, this package confines child-process writes and deletes to the workspace and a private temporary directory: `workspace-write` grants both, `read-only` grants neither. Mounting `dsh-sandbox-local` selects this for confined bash and PowerShell commands, or callers use the public `AclSandbox` API directly; any failed Win32 operation prevents an unrestricted spawn. Each grant combines a capability-SID allow ACE, a deny of the ambient parent-directory delete right, and a Low integrity label the lowered token must match, so one granted root cannot reach another. The guarantee stays partial: hard links alias file objects and files ACL'd by another AppContainer tool stay unreadable.
 
 ## Table of Contents

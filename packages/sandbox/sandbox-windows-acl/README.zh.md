@@ -9,6 +9,8 @@ kind: "package-library"
 
 ## 概述
 
+runner 也接受 `--mxc <policy-json> -- <argv...>`，通过随包的微软 MXC SDK 执行原生 PSEC 隔离。`dsh-sandbox-local` 在原生探测成功后优先使用此后端，不修改宿主工作区 ACL 或完整性标签；`AclSandbox` 仍是显式的旧版受限令牌 API。模式映射、进程生命周期、控制通道和回退规则见[本地提供方的平台 profile](../sandbox-local/README.zh.md#platform-profiles)。
+
 在 Windows 上，本包将子进程的写入与删除限制在工作区和私有临时目录内：`workspace-write` 授予这两处，`read-only` 均不授予。挂载 `dsh-sandbox-local` 后，受限的 bash 与 PowerShell 命令即获得此行为；调用方也可以直接使用公开 `AclSandbox` API；任何 Win32 操作失败都会阻止不受限制的 spawn。每次授权同时写入能力 SID 允许 ACE、对父目录删除权限的环境性拒绝，以及被降级令牌必须匹配的 Low 完整性标签，因此一个授权根目录无法触及另一个。该保证仍为部分强制：硬链接是文件对象别名，而被其他 AppContainer 工具 ACL 过的文件不可读。
 
 ## 目录
