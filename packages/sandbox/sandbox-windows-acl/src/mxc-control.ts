@@ -9,24 +9,26 @@ import { openInheritedControlChannel } from '@deepseek-ai/dsh-subprocess/control
 const CONTROL_CHILD = `
 import { spawn } from 'node:child_process';
 import { connect } from 'node:net';
-const { port, secret, argv } = JSON.parse(process.env.DSH_MXC_CONTROL);
+const { port, secret, argv, hasControl } = JSON.parse(process.env.DSH_MXC_CONTROL);
 delete process.env.DSH_MXC_CONTROL;
 const socket = connect({ host: '127.0.0.1', port });
 socket.once('error', error => { console.error(error.message); process.exit(127); });
 socket.once('connect', () => {
   socket.write(secret);
+});
+socket.once('data', acknowledgement => {
+  if (acknowledgement.toString() !== '1') { socket.destroy(); process.exitCode = 127; return; }
   const child = spawn(argv[0], argv.slice(1), {
-    stdio: ['inherit', 'inherit', 'inherit', 'ignore', 'ignore', 'ignore', 'ignore', 'pipe'],
-    env: { ...process.env, DSH_SUBPROCESS_CONTROL: 'pipe' },
+    stdio: hasControl ? ['inherit', 'inherit', 'inherit', 'ignore', 'ignore', 'ignore', 'ignore', 'pipe'] : 'inherit',
+    env: hasControl ? { ...process.env, DSH_SUBPROCESS_CONTROL: 'pipe' } : process.env,
     windowsHide: true,
   });
-  child.once('error', error => { console.error(error.message); socket.destroy(); process.exitCode = 127; });
+  child.once('error', error => { console.error('windows-mxc-run: target spawn failed (' + error.code + ')'); socket.destroy(); process.exitCode = 127; });
   child.once('exit', (code, signal) => {
     process.exitCode = code ?? (signal ? 1 : 0);
-    socket.end();
+    if (!hasControl) socket.end();
   });
-  socket.pipe(child.stdio[7]);
-  child.stdio[7].pipe(socket);
+  if (hasControl) { socket.pipe(child.stdio[7]); child.stdio[7].pipe(socket); }
   socket.once('close', () => { if (child.exitCode === null) child.kill(); });
 });
 `
@@ -35,6 +37,7 @@ socket.once('connect', () => {
 export interface MxcControlBridge {
   argv: string[]
   environment: string
+  readonly started: boolean
   dispose(): void
 }
 
@@ -43,8 +46,8 @@ export interface MxcControlBridge {
  * @param argv - exact target argv, unchanged for the contained bootstrap's spawn.
  * @returns a runner-owned bridge; dispose after the MXC process and streams have settled.
  */
-export async function createMxcControlBridge(argv: string[]): Promise<MxcControlBridge> {
-  const control = openInheritedControlChannel()
+export async function createMxcControlBridge(argv: string[], hasControl: boolean): Promise<MxcControlBridge> {
+  const control = hasControl ? openInheritedControlChannel() : undefined
   const secret = randomBytes(32).toString('hex')
   const sockets = new Set<Socket>()
   let authenticated = false
@@ -62,14 +65,14 @@ export async function createMxcControlBridge(argv: string[]): Promise<MxcControl
         return
       }
       authenticated = true
-      control.pipe(socket)
-      socket.pipe(control)
+      socket.write('1')
+      if (control !== undefined) { control.pipe(socket); socket.pipe(control) }
       const remainder = received.subarray(secret.length)
-      if (remainder.length > 0) control.write(remainder)
+      if (remainder.length > 0) control?.write(remainder)
     }
     socket.on('data', authenticate)
   })
-  control.on('error', () => { for (const socket of sockets) socket.destroy() })
+  control?.on('error', () => { for (const socket of sockets) socket.destroy() })
   try {
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject)
@@ -79,16 +82,17 @@ export async function createMxcControlBridge(argv: string[]): Promise<MxcControl
     if (address === null || typeof address === 'string') throw new Error('MXC control listener has no TCP address')
     return {
       argv: [process.execPath, '--input-type=module', '--eval', CONTROL_CHILD],
-      environment: JSON.stringify({ port: address.port, secret, argv }),
+      environment: JSON.stringify({ port: address.port, secret, argv, hasControl }),
+      get started() { return authenticated },
       dispose() {
         for (const socket of sockets) socket.destroy()
         server.close()
-        control.destroy()
+        control?.destroy()
       },
     }
   } catch (error) {
     server.close()
-    control.destroy()
+    control?.destroy()
     throw error
   }
 }

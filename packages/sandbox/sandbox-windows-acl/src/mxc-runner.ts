@@ -1,13 +1,18 @@
 /** Native Windows PSEC execution; never grants workspace ACLs or integrity labels. */
 
-import { existsSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join, parse } from 'node:path'
-import { finished } from 'node:stream/promises'
-import { MxcError, probe, spawn } from '@microsoft/mxc-sdk/v1'
+import { dirname, isAbsolute, join, parse } from 'node:path'
+import { createRequire } from 'node:module'
+import { setTimeout as delay } from 'node:timers/promises'
+import { randomUUID } from 'node:crypto'
+import { MxcError, probe, SDK_CONTRACT_VERSION } from '@microsoft/mxc-sdk/v1'
 import type { ContainerRequest } from '@microsoft/mxc-sdk/v1'
 import { SUBPROCESS_CONTROL_ENV } from '@deepseek-ai/dsh-subprocess/control'
-import { quoteArg } from '@deepseek-ai/dsh-win32-process'
+import {
+  closeHandleChecked, isJobEmpty, loadWin32ProcessBindings, pollProcessExit,
+  quoteArg, spawnCurrentTokenJobProcess, terminateJob,
+} from '@deepseek-ai/dsh-win32-process'
 import { createMxcControlBridge } from './mxc-control.ts'
 import type { MxcControlBridge } from './mxc-control.ts'
 
@@ -43,7 +48,7 @@ function policyFromJson(raw: string | undefined): Policy {
 function readRoots(roots: string[]): string[] {
   const volumes = Array.from({ length: 26 }, (_, index) => `${String.fromCharCode(65 + index)}:\\`)
     .filter(root => existsSync(root))
-  return [...new Set([...volumes, ...roots, process.cwd(), process.execPath])]
+  return [...new Set([...volumes, ...[...roots, process.cwd(), process.execPath].map(root => parse(root).root)])]
 }
 
 function requestFor(argv: string[], policy: Policy, temp?: string): ContainerRequest {
@@ -93,31 +98,47 @@ export async function runMxc(args: string[]): Promise<number> {
       if (probing) return 1
       throw new Error('native Windows PSEC is unavailable; refusing an ACL-based fallback')
     }
-    if (policy.mode === 'workspace-write') temp = mkdtempSync(join(tmpdir(), 'dsh-mxc-'))
-    if (!probing && process.env[SUBPROCESS_CONTROL_ENV] === 'pipe') bridge = await createMxcControlBridge(argv)
-    const request = requestFor(bridge?.argv ?? argv, policy, temp)
-    if (bridge !== undefined) request.environment = { ...request.environment, DSH_MXC_CONTROL: bridge.environment }
+    temp = mkdtempSync(join(tmpdir(), 'dsh-mxc-'))
+    bridge = await createMxcControlBridge(argv, !probing && process.env[SUBPROCESS_CONTROL_ENV] === 'pipe')
+    const request = requestFor(bridge.argv, policy, temp)
+    request.environment = { ...request.environment, DSH_MXC_CONTROL: bridge.environment }
     const requestSupport = probe(request)
     if (requestSupport.tier !== 'base-container' || requestSupport.needsDaclAugmentation !== false) {
       throw new Error('native Windows PSEC cannot enforce the requested policy')
     }
-    const child = await spawn(request)
-    const input = child.standardInput
-    const output = child.standardOutput
-    const error = child.standardError
-    if (input !== null) {
-      input.on('error', () => { input.destroy() })
-      process.stdin.pipe(input)
+    const configuration = {
+      version: SDK_CONTRACT_VERSION, containment: 'processcontainer', containerId: randomUUID().replaceAll('-', ''),
+      lifecycle: { destroyOnExit: true, preservePolicy: false },
+      process: { commandLine: request.command, cwd: request.workingDirectory, env: request.environment },
+      filesystem: request.filesystem, network: request.network,
+      processContainer: request.containment?.type === 'processcontainer' ? request.containment.config : undefined,
+      ui: { disable: false, clipboard: 'none', injection: false },
     }
-    const drains: Promise<void>[] = []
-    if (output !== null) { output.pipe(process.stdout, { end: false }); drains.push(finished(output, { cleanup: true })) }
-    if (error !== null) { error.pipe(process.stderr, { end: false }); drains.push(finished(error, { cleanup: true })) }
+    const configFile = join(temp, 'policy.json')
+    writeFileSync(configFile, JSON.stringify(configuration), { flag: 'wx' })
+    const sdk = dirname(createRequire(import.meta.url).resolve('@microsoft/mxc-sdk/package.json'))
+    const executable = join(sdk, 'bin', process.arch, 'wxc-exec.exe')
+    const api = loadWin32ProcessBindings()
+    const child = spawnCurrentTokenJobProcess(api, {
+      command: executable, applicationName: executable, args: [configFile], cwd: process.cwd(),
+      env: Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
+      stdio: { stdin: 0, stdout: 1, stderr: 2 },
+    })
     try {
-      const [result] = await Promise.all([child.wait(), ...drains])
-      return result.exitCode
+      let exitCode: number | undefined
+      while ((exitCode = pollProcessExit(api, child.process)) === undefined) await delay(25)
+      if (!bridge.started) throw new Error('native MXC executor failed before contained command startup')
+      return exitCode
     } finally {
-      if (input !== null) { process.stdin.unpipe(input); input.destroy() }
-      child.dispose()
+      try {
+        if (!isJobEmpty(api, child.job)) {
+          terminateJob(api, child.job, 1)
+          while (!isJobEmpty(api, child.job)) await delay(25)
+        }
+      } finally {
+        closeHandleChecked(api, child.process, 'MXC executor process')
+        closeHandleChecked(api, child.job, 'MXC executor job')
+      }
     }
   } catch (error) {
     // Native diagnostic buffers can contain the command or environment.
