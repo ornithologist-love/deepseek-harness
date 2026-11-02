@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/windows-mxc-sandbox/guide.md
+/:
+  en: 427ca591b9d5c742
+  zh: 1ec4ecabd08a07e1
+/native-windows-mxc-process-lifetime:
+  en: 743046984cf4dd01
+  zh: 56f35aa61edfd78d
+/native-windows-mxc-process-lifetime/change:
+  en: e7d90cfe15b26e2b
+  zh: 91f7495387e2fbb2
+/native-windows-mxc-process-lifetime/migration:
+  en: c3de07326bde1d39
+  zh: 2f73b94beb01d45e

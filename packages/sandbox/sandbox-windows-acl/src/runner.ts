@@ -207,7 +207,12 @@ async function main(): Promise<number> {
   }
 }
 
-main().then(
+const useMxc = process.argv[2] === '--mxc'
+const execution = useMxc
+  ? import('./mxc-runner.ts').then(module => module.runMxc(process.argv.slice(3)))
+  : main()
+
+execution.then(
   (exitCode) => {
     // Exit-code mirroring is full-width on Windows, verified empirically on
     // this machine (Windows 11 build 26200, Node 24): a child that exits
@@ -222,7 +227,7 @@ main().then(
   },
   (error: unknown) => {
     if (!(error instanceof RunnerFailure)) {
-      process.stderr.write(`${RUNNER_SIGNATURE}: ${error instanceof Error ? error.message : String(error)}\n`)
+      process.stderr.write(`${useMxc ? 'windows-mxc-run' : RUNNER_SIGNATURE}: ${error instanceof Error ? error.message : String(error)}\n`)
     }
     process.exitCode = RUNNER_FAILURE_EXIT
   },
