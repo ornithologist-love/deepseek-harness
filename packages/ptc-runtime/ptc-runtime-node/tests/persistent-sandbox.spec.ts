@@ -49,8 +49,7 @@ it('refuses reuse under another policy until the owner has been released', async
   expect((await runtime.run(spec)).value).toBe('undefined')
 })
 
-// Windows ACL rejects additional roots; its refusal is covered by sandbox-local's runner tests.
-it.skipIf(process.platform === 'win32')('requires release before changing a retained environment\'s additional writable roots', async () => {
+it('requires release before changing a retained environment\'s additional writable roots', async () => {
   const { root, cwd, runtime, owner, run } = await setup('workspace-write')
   const extra = join(root, 'extra')
   await mkdir(extra)

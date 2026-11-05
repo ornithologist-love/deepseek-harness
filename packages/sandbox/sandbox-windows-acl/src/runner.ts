@@ -3,15 +3,19 @@
  * seam spawns in place of the caller's command. It creates the
  * WRITE_RESTRICTED token with the workspace write-SID allowlist, spawns the
  * wrapped argv under it with the CALLER'S stdio inherited (bytes flow
- * straight through), mirrors the child's exit code, and revokes its temp
- * grant on exit (workspace ACEs stay standing as the reuse cache).
+ * straight through), mirrors the child's exit code, and releases its
+ * workspace lease after the complete confined process range has exited.
  *
  * Stable argv contract (the seam builds it; a native-exe replacement would
  * keep the same contract):
- *   [node, runner.js, '--workspace', <dir>, '--temp', <dir>,
+ *   [node, runner.js, '--workspace', <dir>, ['--workspace', <dir>, …], '--temp', <dir>,
  *    '--mode', <read-only|workspace-write>,
  *    ['--write-sid', <S-1-4-…>,
  *     '--temp-write-sid', <S-1-4-…>], '--', <argv...>]
+ *
+ * Repeated `--workspace` values are the members of one multi-folder
+ * workspace; their write SID is derived from the whole member set
+ * (`memberSetWriteSid`), which equals the single-root identity for one member.
  *
  * Modes:
  *  - workspace-write: the workspace and temp directories carry distinct
@@ -25,9 +29,9 @@
  *    (logon SID, EVERYONE) and differ only by the capabilities.
  *
  * `--write-sid` + `--temp-write-sid`: the seam's grant contract — the
- * CALLER has already materialized distinct workspace and private-temp ACEs
- * and owns their revocation, so the runner neither grants nor revokes
- * (`manageDacls: false`). Both values are checked against their owning paths.
+ * CALLER materializes and owns the private-temp ACE. The runner leases the
+ * workspace ACE and label independently (`manageWorkspaceDacls: true`). Both
+ * values are checked against their owning paths.
  * Without the pair (standalone/agentless use), workspace-write treats
  * `--temp` as a ROOT, creates a random private child directory, derives its
  * own temp SID, and removes that directory after the child exits. In both
@@ -50,7 +54,7 @@ import { join } from 'node:path'
 
 import { win32 } from './ffi.ts'
 import { AclSandbox, assertTempRootOutsideWorkspace } from './index.ts'
-import { tempWriteSid, workspaceWriteSid } from './workspace-sid.ts'
+import { memberSetWriteSid, tempWriteSid } from './workspace-sid.ts'
 
 const RUNNER_SIGNATURE = 'windows-acl-run'
 const RUNNER_FAILURE_EXIT = 127
@@ -64,7 +68,7 @@ function fail(detail: string): never {
 }
 
 interface ParsedArgs {
-  workspace: string
+  workspaces: string[]
   temp: string
   mode: 'read-only' | 'workspace-write'
   writeSid: string | undefined
@@ -74,7 +78,7 @@ interface ParsedArgs {
 }
 
 function parseArgs(raw: string[]): ParsedArgs {
-  let workspace: string | undefined
+  const workspaces: string[] = []
   let temp: string | undefined
   let mode: string | undefined
   let writeSid: string | undefined
@@ -90,7 +94,7 @@ function parseArgs(raw: string[]): ParsedArgs {
     const value = raw[index]
     if (value === undefined) fail(`missing value after ${token}`)
     switch (token) {
-      case '--workspace': workspace = value; break
+      case '--workspace': workspaces.push(value); break
       case '--temp': temp = value; break
       case '--mode': mode = value; break
       case '--write-sid': writeSid = value; break
@@ -98,13 +102,13 @@ function parseArgs(raw: string[]): ParsedArgs {
       default: fail(`unknown argument: ${token}`)
     }
   }
-  if (workspace === undefined) fail('missing --workspace')
+  if (workspaces.length === 0) fail('missing --workspace')
   if (temp === undefined) fail('missing --temp')
   if (mode !== 'read-only' && mode !== 'workspace-write') fail(`unknown mode: ${String(mode)}`)
   const argv = raw.slice(index)
   const command = argv[0]
   if (command === undefined) fail('missing command after --')
-  return { workspace, temp, mode, writeSid, tempWriteSid: parsedTempWriteSid, command, args: argv.slice(1) }
+  return { workspaces: [...new Set(workspaces)], temp, mode, writeSid, tempWriteSid: parsedTempWriteSid, command, args: argv.slice(1) }
 }
 
 function requireDirectory(label: string, path: string): void {
@@ -117,7 +121,7 @@ async function main(): Promise<number> {
   const parsed = parseArgs(process.argv.slice(2))
   // Both directories are validated in both modes: a provider bug that passes
   // a bogus root must fail loudly at the runner boundary, never mid-child.
-  requireDirectory('--workspace', parsed.workspace)
+  for (const workspace of parsed.workspaces) requireDirectory('--workspace', workspace)
   requireDirectory('--temp', parsed.temp)
 
   const seamManaged = parsed.writeSid !== undefined || parsed.tempWriteSid !== undefined
@@ -128,7 +132,7 @@ async function main(): Promise<number> {
     fail('workspace-write requires --write-sid and --temp-write-sid together')
   }
   if (parsed.mode === 'workspace-write') {
-    assertTempRootOutsideWorkspace(parsed.workspace, parsed.temp)
+    for (const workspace of parsed.workspaces) assertTempRootOutsideWorkspace(workspace, parsed.temp)
   }
 
   const api = await win32()
@@ -147,7 +151,7 @@ async function main(): Promise<number> {
     let writeSid: string | undefined
     let privateTempSid: string | undefined
     if (parsed.mode === 'workspace-write') {
-      writeSid = workspaceWriteSid(parsed.workspace)
+      writeSid = memberSetWriteSid(parsed.workspaces)
       if (seamManaged) {
         if (parsed.writeSid !== writeSid) fail('--write-sid does not match --workspace')
         privateTempDir = parsed.temp
@@ -160,12 +164,13 @@ async function main(): Promise<number> {
       }
     }
     sandbox = new AclSandbox({
-      writableDirs: parsed.mode === 'workspace-write' ? [parsed.workspace] : [],
+      writableDirs: parsed.mode === 'workspace-write' ? parsed.workspaces : [],
       tempDir: privateTempDir,
       mode: parsed.mode,
       ...writeSid === undefined ? {} : { writeSid },
       ...privateTempSid === undefined ? {} : { tempWriteSid: privateTempSid },
       manageDacls: !seamManaged,
+      manageWorkspaceDacls: true,
     })
     await sandbox.init()
     initialized = true
@@ -192,7 +197,7 @@ async function main(): Promise<number> {
     // Cleanup failures must not mask the child's exit code: report and keep going.
     if (initialized) {
       try {
-        sandbox?.dispose()
+        await sandbox?.dispose()
       } catch (error) {
         process.stderr.write(`${RUNNER_SIGNATURE}: cleanup: ${error instanceof Error ? error.message : String(error)}\n`)
       }
@@ -207,7 +212,12 @@ async function main(): Promise<number> {
   }
 }
 
-main().then(
+const useMxc = process.argv[2] === '--mxc'
+const execution = useMxc
+  ? import('./mxc-runner.ts').then(module => module.runMxc(process.argv.slice(3)))
+  : main()
+
+execution.then(
   (exitCode) => {
     // Exit-code mirroring is full-width on Windows, verified empirically on
     // this machine (Windows 11 build 26200, Node 24): a child that exits
@@ -222,7 +232,7 @@ main().then(
   },
   (error: unknown) => {
     if (!(error instanceof RunnerFailure)) {
-      process.stderr.write(`${RUNNER_SIGNATURE}: ${error instanceof Error ? error.message : String(error)}\n`)
+      process.stderr.write(`${useMxc ? 'windows-mxc-run' : RUNNER_SIGNATURE}: ${error instanceof Error ? error.message : String(error)}\n`)
     }
     process.exitCode = RUNNER_FAILURE_EXIT
   },

@@ -22,6 +22,7 @@ const mockState = vi.hoisted(() => ({
   addFailureStanding: undefined as boolean | undefined,
   createTempFailure: undefined as Error | undefined,
   disposeFailure: undefined as Error | undefined,
+  addGate: undefined as ((standing: boolean) => Promise<void>) | undefined,
 }))
 
 vi.mock('@deepseek-ai/dsh-sandbox-windows-acl', () => {
@@ -37,8 +38,9 @@ vi.mock('@deepseek-ai/dsh-sandbox-windows-acl', () => {
       if (writeSid.startsWith('TEMP:') && mockState.createTempFailure !== undefined) throw mockState.createTempFailure
       return new MockAclWriteGrant(writeSid)
     }
-    add(path: string, standing = false): void {
+    async add(path: string, standing = false): Promise<void> {
       this.added.push({ path, standing })
+      await mockState.addGate?.(standing)
       if (mockState.addFailure !== undefined
         && (mockState.addFailureStanding === undefined || mockState.addFailureStanding === standing)) {
         throw mockState.addFailure
@@ -59,7 +61,7 @@ vi.mock('@deepseek-ai/dsh-sandbox-windows-acl', () => {
         throw new Error(`Windows ACL temp root must be outside the workspace: workspace=${workspaceRoot}; temp=${tempRoot}`)
       }
     },
-    workspaceWriteSid: () => 'S-1-4-42-42',
+    memberSetWriteSid: () => 'S-1-4-42-42',
     tempWriteSid: (path: string) => `TEMP:${path}`,
   }
 })
@@ -92,6 +94,7 @@ describe('windows-acl write grants (LocalSandboxProvider)', () => {
     mockState.addFailureStanding = undefined
     mockState.createTempFailure = undefined
     mockState.disposeFailure = undefined
+    mockState.addGate = undefined
   })
 
   const cleanup = () => {
@@ -102,6 +105,94 @@ describe('windows-acl write grants (LocalSandboxProvider)', () => {
     }
     for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true })
   }
+
+  it('coalesces concurrent requests while a workspace grant is pending', async () => {
+    const { sandbox, fiber } = await setup()
+    const started = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    mockState.addGate = (standing) => {
+      if (standing) { started.resolve(undefined); return release.promise }
+      return Promise.resolve()
+    }
+    const ws = workspaceRoot()
+    scratch.push(ws)
+    const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: ws, sessionId: SessionId('concurrent') }
+    const first = sandbox.confine(['true'], policy)
+    const second = sandbox.confine(['true'], policy)
+    const both = Promise.all([first, second])
+    try {
+      await started.promise
+      expect(mockState.grants).toHaveLength(1)
+      release.resolve(undefined)
+      const results = await both
+      expect(results[0]?.argv).toEqual(results[1]?.argv)
+      expect(mockState.grants).toHaveLength(2)
+    } finally {
+      release.resolve(undefined)
+      await both.catch(() => {})
+      await fiber.dispose()
+      cleanup()
+    }
+  })
+
+  it('does not return runnable argv after cancellation during a grant', async () => {
+    const { sandbox, fiber } = await setup()
+    const started = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const controller = new AbortController()
+    const reason = new Error('cancel during propagation')
+    mockState.addGate = (standing) => {
+      if (standing) { started.resolve(undefined); return release.promise }
+      return Promise.resolve()
+    }
+    const ws = workspaceRoot()
+    scratch.push(ws)
+    const operation = sandbox.confine(['true'], {
+      mode: 'workspace-write', workspaceRoot: ws, sessionId: SessionId('inflight-cancel'),
+    }, controller.signal)
+    const rejected = expect(operation).rejects.toBe(reason)
+    try {
+      await started.promise
+      controller.abort(reason)
+      release.resolve(undefined)
+      await rejected
+    } finally {
+      release.resolve(undefined)
+      await rejected
+      await fiber.dispose()
+      cleanup()
+    }
+  })
+
+  it('drains an in-flight grant before provider cleanup and rejects the pending invocation', async () => {
+    const { sandbox, fiber } = await setup()
+    const started = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    mockState.addGate = (standing) => {
+      if (standing) { started.resolve(undefined); return release.promise }
+      return Promise.resolve()
+    }
+    const ws = workspaceRoot()
+    scratch.push(ws)
+    const operation = sandbox.confine(['true'], {
+      mode: 'workspace-write', workspaceRoot: ws, sessionId: SessionId('inflight-dispose'),
+    })
+    const rejected = expect(operation).rejects.toThrow('provider is disposed')
+    await started.promise
+    const disposal = fiber.dispose()
+    try {
+      await new Promise<void>((resolve) => { setImmediate(resolve) })
+      expect(mockState.grants.every(grant => !grant.disposed)).toBe(true)
+      release.resolve(undefined)
+      await rejected
+      await disposal
+      expect(mockState.grants.every(grant => grant.disposed)).toBe(true)
+    } finally {
+      release.resolve(undefined)
+      await disposal
+      cleanup()
+    }
+  })
 
   it('does not create grants for a cancelled confinement request', async () => {
     const { sandbox, fiber } = await setup()
@@ -230,6 +321,28 @@ describe('windows-acl write grants (LocalSandboxProvider)', () => {
       expect(flag(moved.argv, '--temp')).not.toBe(flag(parent.argv, '--temp'))
       expect(mockState.grants).toHaveLength(5) // workspace A + two temps + workspace B + one temp
 
+      await fiber.dispose()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('a multi-folder workspace passes every member and grants them under one standing capability', async () => {
+    try {
+      const { sandbox, fiber } = await setup()
+      const primary = workspaceRoot()
+      const member = workspaceRoot()
+      scratch.push(primary, member)
+      const policy: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: primary, additionalWritableRoots: [member], sessionId: SessionId('members') }
+      const confined = await sandbox.confine(['true'], policy)
+      expect(confined.argv.slice(2, 6)).toEqual(['--workspace', primary, '--workspace', member])
+      expect(flag(confined.argv, '--write-sid')).toBe(WORKSPACE_SID)
+      expect(mockState.grants[0]).toEqual(expect.objectContaining({
+        writeSid: WORKSPACE_SID,
+        added: [{ path: primary, standing: true }, { path: member, standing: true }],
+      }))
+      await sandbox.confine(['true'], { ...policy, workspaceRoot: member, additionalWritableRoots: [primary], sessionId: SessionId('other') })
+      expect(mockState.grants.filter(grant => grant.added.some(added => added.standing))).toHaveLength(1)
       await fiber.dispose()
     } finally {
       cleanup()

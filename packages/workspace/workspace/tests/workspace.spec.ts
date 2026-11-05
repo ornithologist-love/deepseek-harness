@@ -765,6 +765,60 @@ describe('Workspace session ordering', () => {
 
 })
 
+describe('multi-folder member directories', () => {
+  it('lets a directory source decide members, attachment, and path lookup', async () => {
+    const game = await makeDir('game')
+    const engine = await makeDir('engine')
+    const result = await harness()
+    onTestFinished(() => result.ctx.fiber.dispose())
+    result.setSessions([header('in-engine', engine)])
+    const workspace = await result.registry.create(game)
+    expect(result.registry.directoriesOf(workspace.id)).toEqual([game])
+    expect(result.registry.directoriesOf(WorkspaceId('unknown'))).toEqual([])
+    await expect(workspace.attachSession(SessionId('in-engine'))).rejects.toThrow(/resolves to/)
+    expect(await result.registry.resolveByPath(engine)).toBeUndefined()
+
+    const dispose = result.registry.registerDirectories(current => current.id === workspace.id ? [engine, game] : undefined)
+    expect(result.registry.directoriesOf(workspace.id)).toEqual([engine, game])
+    expect((await result.registry.resolveByPath(engine))?.id).toBe(workspace.id)
+    await workspace.attachSession(SessionId('in-engine'))
+    expect(workspace.sessionIds).toEqual(['in-engine'])
+
+    dispose()
+    expect(result.registry.directoriesOf(workspace.id)).toEqual([game])
+    expect(workspace.sessionIds).toEqual([])
+  })
+
+  it('keeps sessions under historical directories as members without authorizing new attachments', async () => {
+    const game = await makeDir('game')
+    const tools = await makeDir('tools')
+    const result = await harness()
+    onTestFinished(() => result.ctx.fiber.dispose())
+    result.setSessions([header('old', tools), header('new', tools)])
+    const workspace = await result.registry.create(game)
+    let members = [game, tools]
+    result.registry.registerDirectories(current => current.id === workspace.id ? members : undefined, () => [tools])
+    await workspace.attachSession(SessionId('old'))
+    members = [game]
+    expect(workspace.sessionIds).toEqual(['old'])
+    await expect(workspace.attachSession(SessionId('new'))).rejects.toThrow(/resolves to/)
+  })
+
+  it('validates contributed session headers after a refresh', async () => {
+    const dir = await makeDir('drafts')
+    const result = await harness()
+    onTestFinished(() => result.ctx.fiber.dispose())
+    const workspace = await result.registry.create(dir)
+    const dispose = result.registry.registerSessionSource(async () => [header('draft', dir)])
+    await result.registry.refreshSessionHeaders()
+    await workspace.attachSession(SessionId('draft'))
+    expect(workspace.sessionIds).toEqual(['draft'])
+    dispose()
+    await result.registry.refreshSessionHeaders()
+    expect(workspace.sessionIds).toEqual([])
+  })
+})
+
 describe('header-validated membership projection', () => {
   it('preserves owned sessions and manual order after directory removal and restart', async () => {
     const dir = await makeDir('removed-owned')

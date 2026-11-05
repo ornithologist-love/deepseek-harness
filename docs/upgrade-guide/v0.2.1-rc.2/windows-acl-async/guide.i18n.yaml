@@ -1,0 +1,16 @@
+# Bilingual-pair consistency record for guide.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/upgrade-guide/v0.2.1-rc.2/windows-acl-async/guide.md
+/:
+  en: 579f90c5452d338a
+  zh: c0f2d883c2496f8d
+/await-windows-acl-grants-and-cleanup:
+  en: 96eb75d2421b5cd9
+  zh: f7b8aa903bd5fa14
+/await-windows-acl-grants-and-cleanup/change:
+  en: cd2e82527755983c
+  zh: d25bc1908f0852aa
+/await-windows-acl-grants-and-cleanup/migration:
+  en: 24f8b1243dd1e621
+  zh: 301eba511311292a

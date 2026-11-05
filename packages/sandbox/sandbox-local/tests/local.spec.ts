@@ -430,7 +430,7 @@ describe('the default seatbelt probe (sandbox-exec contract)', () => {
 })
 
 describe('the windows-acl probe (runner invocation contract)', () => {
-  it('refuses unsupported extra grants before a Windows runner or ACL mutation', async () => {
+  it('refuses invalid extra grants before a Windows runner or ACL mutation', async () => {
     const { ctx, sandbox } = await setup({}, {
       chain: ['windows-acl'],
       probeWindowsAcl: () => true,
@@ -438,7 +438,7 @@ describe('the windows-acl probe (runner invocation contract)', () => {
     })
     try {
       await expect(sandbox.confine(['true'], { ...WW, additionalWritableRoots: ['/extra'] }))
-        .rejects.toThrow('Windows ACL confinement does not support additional writable directories')
+        .rejects.toThrow('Invalid additional writable directory')
       await expect(sandbox.confine(['true'], { ...RO, additionalWritableRoots: ['/extra'] })).resolves.toBeDefined()
     } finally {
       await ctx.fiber.dispose()

@@ -118,6 +118,12 @@ export interface SandboxPolicyRequest {
   mode?: SandboxMode
 }
 
+/**
+ * Report the member directories of the workspace that owns a session, primary
+ * first, or `undefined` when this source does not own it.
+ */
+export type WorkspaceRootResolver = (session: Session) => readonly string[] | undefined
+
 /** The sandbox-mode projection's state schema (state equals the public shape). */
 const sandboxModeStateSchema = zod.union([
   zod.literal('read-only'),
@@ -150,6 +156,7 @@ export class SandboxPolicyService extends Service {
   /** The frozen extra writable directories shared by every resolved policy, or `undefined` for none. */
   readonly additionalWritableRoots: readonly string[] | undefined
   private sandboxModeProjectionHandle!: ProjectionHandle<SandboxMode | null>
+  private readonly workspaceRootResolvers = new Set<WorkspaceRootResolver>()
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'sandboxPolicy')
@@ -190,18 +197,47 @@ export class SandboxPolicyService extends Service {
    * mode outranks the session's last `sandbox/mode` event, which outranks the
    * deployment default. A session cwd is its workspace-write boundary; the
    * configured root is the fallback for agentless calls and sessions without a
-   * cwd.
+   * cwd. A registered workspace-root source that owns the session replaces that
+   * boundary with its primary member and adds the other members to the explicit
+   * writable directories.
    * @param request - optional session and approved mode override.
-   * @returns the fully resolved per-call mode and absolute workspace root.
+   * @returns the fully resolved per-call mode, absolute workspace root, and extra directories.
    */
   resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy {
     const { session } = request
+    const members = session === undefined ? undefined : this.membersOf(session)
+    const additionalWritableRoots = members === undefined
+      ? this.additionalWritableRoots
+      : resolveAdditionalWritableRoots([...members.slice(1), ...this.additionalWritableRoots ?? []])
     return {
       mode: request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode,
-      workspaceRoot: resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
-      ...this.additionalWritableRoots === undefined ? {} : { additionalWritableRoots: this.additionalWritableRoots },
+      workspaceRoot: members?.[0] ?? resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
+      ...additionalWritableRoots === undefined ? {} : { additionalWritableRoots },
       ...session === undefined ? {} : { sessionId: session.id },
     }
+  }
+
+  /**
+   * Register a source of multi-folder workspace members. Agentless calls stay
+   * single-root; at most one source may own a session.
+   * @param resolver - synchronous reader of the calling session's member directories.
+   * @returns disposer removing this source from future resolutions.
+   */
+  registerWorkspaceRoots(resolver: WorkspaceRootResolver): () => void {
+    this.workspaceRootResolvers.add(resolver)
+    return () => { this.workspaceRootResolvers.delete(resolver) }
+  }
+
+  private membersOf(session: Session): string[] | undefined {
+    let members: string[] | undefined
+    for (const resolve of this.workspaceRootResolvers) {
+      const roots = resolve(session)
+      if (roots === undefined) continue
+      if (members !== undefined) throw new Error('sandbox-policy: more than one source owns this workspace')
+      if (roots.length === 0) throw new Error('sandbox-policy: a workspace must contain at least one directory')
+      members = [...new Set(roots.map(resolveWorkspaceRoot))]
+    }
+    return members
   }
 
   /**
