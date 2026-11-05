@@ -62,6 +62,8 @@ export interface HmrConfig extends ChokidarOptions {
   debounce: number
   /** Glob patterns excluded from module watching. */
   ignored: string[]
+  /** Follow installed-package dependencies when replacing watched plugin modules. */
+  includeNodeModules?: boolean
 }
 
 /**
@@ -222,6 +224,7 @@ class Hmr extends Service {
       'data',
     ]),
     debounce: z.natural().role('ms').default(100),
+    includeNodeModules: z.boolean().default(false),
   })
 
   /** Absolute base directory used to resolve module watch roots. */
@@ -421,7 +424,7 @@ class Hmr extends Service {
     // Collect externals before opening the watcher so every post-ready change
     // is observed by listeners that already have their classification state.
     if (mainJob) {
-      this.externals = await loadDependencies(mainJob)
+      this.externals = await loadDependencies(mainJob, new Set(), this.config.includeNodeModules)
     } else {
       this.externals = new Set()
     }
@@ -531,7 +534,7 @@ class Hmr extends Service {
     this.accepted = new Set(this.stashed)
     this.declined = new Set(this.externals)
 
-    const isExcluded = (url: string) => url.startsWith('node:') || url.includes('/node_modules/')
+    const isExcluded = (url: string) => url.startsWith('node:') || (!this.config.includeNodeModules && url.includes('/node_modules/'))
 
     await Promise.all([...this.stashed].map(async (url) => {
       const children = await this.getLinked(url)
@@ -618,7 +621,7 @@ class Hmr extends Service {
     // Check each pending plugin's dependency tree for accepted files
     for (const [job, plugin] of pending) {
       this.declined.delete(job.url)
-      const dependencies = [...await loadDependencies(job, this.declined)]
+      const dependencies = [...await loadDependencies(job, this.declined, this.config.includeNodeModules)]
       this.declined.add(job.url)
 
       if (dependencies.length === 0) {

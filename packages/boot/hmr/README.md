@@ -43,6 +43,7 @@ Existing configurations replace the module name `@deepseek-ai/cordis-plugin-hmr`
 | `root` | `["."]` | Module watch roots; `[]` retains only explicit configuration watches. |
 | `ignored` | `["**/node_modules", "**/.*", "cache", "data"]` | Excluded module paths. |
 | `debounce` | `100` | Milliseconds for combining module changes. |
+| `includeNodeModules` | `false` | Follow installed-package dependencies during module replacement. Configure `root` and `ignored` to watch those files. |
 
 Chokidar options, including polling, retain their existing meaning. Exact configuration watches also observe additions, removals and initially missing parent directories. They default to `awaitWriteFinish: true`: edits wait for Chokidar's 2-second write-stability window, avoiding its lossy change-event throttle. Configure `awaitWriteFinish` to adjust that window; disabling it can miss rapid consecutive edits. Direct Plugin Manager operations apply without waiting for file events.
 
