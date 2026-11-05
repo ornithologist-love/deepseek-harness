@@ -64,6 +64,8 @@ export interface HmrConfig extends ChokidarOptions {
   ignored: string[]
   /** Follow installed-package dependencies when replacing watched plugin modules. */
   includeNodeModules?: boolean
+  /** Subscribe to filesystem changes; disable for explicit profile reconciliation only. */
+  watch?: boolean
 }
 
 /**
@@ -225,6 +227,7 @@ class Hmr extends Service {
     ]),
     debounce: z.natural().role('ms').default(100),
     includeNodeModules: z.boolean().default(false),
+    watch: z.boolean().default(true),
   })
 
   /** Absolute base directory used to resolve module watch roots. */
@@ -355,6 +358,12 @@ class Hmr extends Service {
     return this.esmJob(pathToFileURL(canonicalPath(resolve(entry))).href)
   }
 
+  /** Profile packages and an explicitly configured application code root. */
+  private profileRoots(dir: string): string[] {
+    return [...new Set([...profileRoots(dir), ...(this.config.base
+      ? realSpellings(this.baseDir).map(root => root + sep) : [])])]
+  }
+
   async* [Service.init](): AsyncGenerator<() => Promise<void>, void, unknown> {
     const mainJob = this.mainJob()
     let host: Promise<Set<string>> | undefined
@@ -376,7 +385,7 @@ class Hmr extends Service {
       const unsubscribe = ready.onReady(() => {
         // Plugins started with the application are recorded; modules loaded later are compared by modification time.
         try {
-          this.files.observe(this.profileModules(profileRoots(profile.dir)))
+          this.files.observe(this.profileModules(this.profileRoots(profile.dir)))
         } catch (error) {
           // Without a first record, modules are compared by modification time against this HMR instance’s creation time.
           this.ctx.logger.warn(error)
@@ -406,9 +415,13 @@ class Hmr extends Service {
         lastBundles = bundles
         for (const diagnostic of warnings) this.ctx.logger.warn(diagnostic)
       }
-      for (const filename of patchFiles) await this.watchConfig(filename, () => refresh(false))
-      await this.watchConfig(manifestPath, () => refresh(true))
+      if (this.config.watch !== false) {
+        for (const filename of patchFiles) await this.watchConfig(filename, () => refresh(false))
+        await this.watchConfig(manifestPath, () => refresh(true))
+      }
     }
+
+    if (this.config.watch === false) return
 
     const { loader } = this.ctx
     const { root, ignored } = this.config
@@ -946,7 +959,7 @@ class Hmr extends Service {
       comparedAt = this.files.now()
       // A failed comparison keeps every record, so the next recomposition compares the same modules again.
       comparison = await this.contained('comparing loaded modules with disk', () => {
-        const roots = profileRoots(profile.dir)
+        const roots = this.profileRoots(profile.dir)
         return Promise.resolve({ roots, ...this.files.compare(this.profileModules(roots)) })
       }, undefined)
       // Changed modules stay stale until replaced, including when the generation cannot be applied.

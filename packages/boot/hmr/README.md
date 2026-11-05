@@ -44,6 +44,7 @@ Existing configurations replace the module name `@deepseek-ai/cordis-plugin-hmr`
 | `ignored` | `["**/node_modules", "**/.*", "cache", "data"]` | Excluded module paths. |
 | `debounce` | `100` | Milliseconds for combining module changes. |
 | `includeNodeModules` | `false` | Follow installed-package dependencies during module replacement. Configure `root` and `ignored` to watch those files. |
+| `watch` | `true` | Subscribe to module and profile filesystem changes. Set `false` to keep explicit `runExclusive(() => reconcileProfile())` available without automatic watching. |
 
 Chokidar options, including polling, retain their existing meaning. Exact configuration watches also observe additions, removals and initially missing parent directories. They default to `awaitWriteFinish: true`: edits wait for Chokidar's 2-second write-stability window, avoiding its lossy change-event throttle. Configure `awaitWriteFinish` to adjust that window; disabling it can miss rapid consecutive edits. Direct Plugin Manager operations apply without waiting for file events.
 
@@ -61,7 +62,7 @@ Profile recompositions run by HMR's profile watches and by Plugin Manager also r
 
 App-boot owns profile parsing and patch precedence. HMR reads the launcher’s data-only `profileContext`, registers the profile manifest and both user patch watches during initialization, and waits for application readiness before processing changes. Its disposal closes the watchers and cancels reloads waiting for startup. Configuration watchers start outside the active transaction context so later notifications can enter the queue.
 
-`reconcileProfile()` is shared by HMR’s profile watches and Plugin Manager; callers hold `runExclusive()`. Config Editor recomposes through app-boot without replacing modules. App-boot prepares and preflights the generation before caches or running entries change.
+`reconcileProfile()` is shared by HMR’s profile watches and Plugin Manager; callers hold `runExclusive()`. With `watch: false`, the service still records loaded files at readiness and supports explicit reconciliation, but starts no automatic module or profile watchers. An explicit `base` also includes that application code root in file comparison, so installed carriers can reconcile modules resolved outside the profile directory. Config Editor recomposes through app-boot without replacing modules. App-boot prepares and preflights the generation before caches or running entries change.
 
 File comparison covers the profile directory and linked package targets, recorded when the application becomes ready. [ModuleFiles](src/module-files.ts) records inode, size and modification time; adding a hard link alone does not invalidate a module. Existing modules retain the identities read before replacement, preserving later writes. Newly loaded modules are recorded at settlement so a subsequent installation does not restart them merely because they are recent.
 
