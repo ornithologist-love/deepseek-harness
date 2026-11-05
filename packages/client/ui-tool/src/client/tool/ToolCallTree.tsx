@@ -1,5 +1,5 @@
 /** Root/subcall Tool composition with one keyed atomic dispatch path. */
-import { memo, useCallback, useMemo, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { ToolCallBlock } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type { ToolCallOwnerProps, ToolCallPhaseProps, ToolTreeProps } from '../contract/slots.ts'
 import { toolRowModel } from './models/tool-call-model.ts'
@@ -16,10 +16,51 @@ function callName(call: ToolCallPhaseProps): string {
   return call.phase === 'result' ? call.block.call?.name ?? '' : call.block.name
 }
 
+/** Running time after which a call offers the interrupt action. */
+const INTERRUPT_OFFER_MS = 10_000
+
+/**
+ * Elapsed time and an interrupt button for a dispatched call that has been
+ * running for a while; renders nothing before {@link INTERRUPT_OFFER_MS}.
+ */
+function InterruptControl({ startedAt, onInterrupt, t }: {
+  startedAt: number
+  onInterrupt: () => void
+  t: ToolTreeProps['t']
+}) {
+  const [now, setNow] = useState(() => Date.now())
+  const [requested, setRequested] = useState(false)
+  useEffect(() => {
+    const timer = setInterval(() => { setNow(Date.now()) }, 1000)
+    return () => { clearInterval(timer) }
+  }, [])
+  const elapsedMs = now - startedAt
+  if (elapsedMs < INTERRUPT_OFFER_MS) return null
+  return (
+    <div className={css.interrupt}>
+      <span>{t('row.elapsed', { seconds: Math.floor(elapsedMs / 1000) })}</span>
+      <button
+        type="button"
+        className={css.interruptButton}
+        disabled={requested}
+        title={t('row.interruptHint')}
+        onClick={(event) => {
+          event.stopPropagation()
+          setRequested(true)
+          onInterrupt()
+        }}
+      >
+        {t('row.interrupt')}
+      </button>
+    </div>
+  )
+}
+
 /** One atomic call dispatched through the Tool-owned keyed slot. */
 const ToolCall = memo(function ToolCall({
-  renderSlot, callId, toolName, call, openFile, renderFallback, cwd, home, inspectCall, loadImage, useDisclosure, children,
-}: Pick<ToolTreeProps, 'renderSlot' | 'openFile' | 'cwd' | 'inspectCall' | 'loadImage' | 'useDisclosure'> & {
+  renderSlot, callId, toolName, call, openFile, renderFallback, cwd, home, inspectCall, interruptCall, loadImage, useDisclosure, t,
+  children,
+}: Pick<ToolTreeProps, 'renderSlot' | 'openFile' | 'cwd' | 'inspectCall' | 'interruptCall' | 'loadImage' | 'useDisclosure' | 't'> & {
   renderFallback: (owner: ToolCallOwnerProps) => ReactNode
   callId: string
   toolName: string
@@ -54,14 +95,17 @@ const ToolCall = memo(function ToolCall({
           entryKey: toolName,
           fallback: renderFallback(owner),
         })}
+      {call.phase === 'start' && (
+        <InterruptControl startedAt={call.block.time} onInterrupt={() => { interruptCall(callId) }} t={t} />
+      )}
       {children}
     </div>
   )
 })
 
 const ToolCallBranch = memo(function ToolCallBranch({
-  renderSlot, block, cwd, home, openFile, renderFallback, inspectCall, loadImage, useDisclosure,
-}: Pick<ToolTreeProps, 'renderSlot' | 'cwd' | 'openFile' | 'inspectCall' | 'loadImage' | 'useDisclosure'> & {
+  renderSlot, block, cwd, home, openFile, renderFallback, inspectCall, interruptCall, loadImage, useDisclosure, t,
+}: Pick<ToolTreeProps, 'renderSlot' | 'cwd' | 'openFile' | 'inspectCall' | 'interruptCall' | 'loadImage' | 'useDisclosure' | 't'> & {
   renderFallback: (owner: ToolCallOwnerProps) => ReactNode
   block: ToolCallBlock
   home?: string | undefined
@@ -78,6 +122,8 @@ const ToolCallBranch = memo(function ToolCallBranch({
       cwd={cwd}
       home={home}
       inspectCall={inspectCall}
+      interruptCall={interruptCall}
+      t={t}
       useDisclosure={useDisclosure}
       loadImage={loadImage}
     >
@@ -93,6 +139,8 @@ const ToolCallBranch = memo(function ToolCallBranch({
               openFile={openFile}
               renderFallback={renderFallback}
               inspectCall={inspectCall}
+              interruptCall={interruptCall}
+              t={t}
               useDisclosure={useDisclosure}
               loadImage={loadImage}
             />
@@ -110,7 +158,8 @@ const ToolCallBranch = memo(function ToolCallBranch({
  * @returns the Tool call tree.
  */
 export function ToolCallTree({
-  renderSlot, node, cwd, openFile, inspectCall, loadImage, useDisclosure, useHostInfo, t, useContextMenu, sessionId, resolveFilePath,
+  renderSlot, node, cwd, openFile, inspectCall, interruptCall, loadImage, useDisclosure, useHostInfo, t, useContextMenu, sessionId,
+  resolveFilePath,
 }: ToolTreeProps) {
   const { getTriggerProps } = useContextMenu()
   const getFileTriggerProps = useCallback((path: string) => getTriggerProps(() => ({
@@ -128,6 +177,8 @@ export function ToolCallTree({
       openFile={openFile}
       renderFallback={renderFallback}
       inspectCall={inspectCall}
+      interruptCall={interruptCall}
+      t={t}
       useDisclosure={useDisclosure}
       loadImage={loadImage}
     />

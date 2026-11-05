@@ -109,6 +109,7 @@ export function registerTimedAskUser(ctx: Context, timeout = 120): void {
   /* jscpd:ignore-start -- The timed schema intentionally shares question fields with the legacy tool. */
   ctx.tools.register(defineTool({
     name: 'ask_user_question',
+    unbounded: true,
     description,
     parameters: {
       questions: {

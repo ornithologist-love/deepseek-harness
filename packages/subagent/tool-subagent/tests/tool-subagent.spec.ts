@@ -811,6 +811,7 @@ describe('dsh-tool-subagent local activation', () => {
         preparationCount += 1
         if (preparationCount === 2) bothPreparing.resolve(undefined)
         await releasePreparations.promise
+        // The registry fuses its per-call interrupt in, so the sibling is told apart by its abort state.
         if (request.signal.aborted) cancelledChildId = request.sessionId
         else survivingChildId = request.sessionId
         return {}

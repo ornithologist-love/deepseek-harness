@@ -299,7 +299,8 @@ describe('dsh-tool-ralph', () => {
     const result = await execute(ctx, { objective: 'Work.' }, { agent: parent, signal: controller.signal })
 
     expect(result.isError).toBe(true)
-    expect(engine.requests[0]?.signal).toBe(controller.signal)
+    expect(engine.requests[0]?.signal).toBeInstanceOf(AbortSignal)
+    expect(engine.requests[0]?.signal?.aborted).toBe(true)
     expect(engine.cancels).toEqual(['parent step aborted'])
     expect(engine.disposed).toBe(1)
   })

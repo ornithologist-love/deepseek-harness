@@ -17,6 +17,7 @@ import ToolRuntime, { TOOL_ABORTED, type ToolExecutionInput, type PostToolDecisi
 import { defineContentToolFixture } from '@deepseek-ai/dsh-tool-testkit'
 import * as timeoutPolicy from '@deepseek-ai/dsh-tool-call-timeout-policy'
 import { TOOL_TIMEOUT } from '@deepseek-ai/dsh-tool-call-timeout-policy'
+import { timeoutOf } from '@deepseek-ai/dsh-timeout'
 
 const testToolSignal = new AbortController().signal
 
@@ -58,7 +59,9 @@ describe('timeout-policy delegation (unconfigured / fast)', () => {
     const upstream = new AbortController().signal
     const result = await executeToolFixture(ctx, { callId: ToolCallId('c1'), name: 'probe', arguments: {}, signal: upstream })
     expect(result.isError).toBe(false)
-    expect(seenSignal).toBe(upstream)
+    // Without a budget no deadline is armed; the body's signal stays live with the caller's.
+    expect(seenSignal?.aborted).toBe(false)
+    expect(timeoutOf(seenSignal!, TOOL_TIMEOUT)).toBeUndefined()
   })
 
   it('a tool with a budget that returns fast keeps its own result (no timeout)', async () => {
@@ -215,10 +218,12 @@ describe('timeout-policy disposal (HMR safety)', () => {
     const fiber = await ctx.plugin(timeoutPolicy)
     const upstream = new AbortController().signal
     await executeToolFixture(ctx, { callId: ToolCallId('c1'), name: 'probe', arguments: {}, signal: upstream })
-    expect(seenSignal).not.toBe(upstream)
+    const armed = seenSignal
     await fiber.dispose()
     await executeToolFixture(ctx, { callId: ToolCallId('c2'), name: 'probe', arguments: {}, signal: upstream })
-    expect(seenSignal).toBe(upstream)
+    // After disposal no deadline wraps the call: the body no longer sees the policy's signal.
+    expect(seenSignal).not.toBe(armed)
+    expect(seenSignal?.aborted).toBe(false)
   })
 })
 

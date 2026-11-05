@@ -922,7 +922,7 @@ describe('workspace authority and lineage redaction', () => {
     'session_trace',
     'session_event_trace',
     'session_event_read',
-  ] as const)('forwards the exact signal to %s and waits for service cleanup', async (toolName) => {
+  ] as const)('forwards caller cancellation to %s and waits for service cleanup', async (toolName) => {
     const mounted = await mount()
     const target = createSession(mounted.ctx, `cancelled-${toolName}`, '/work')
     target.append(
@@ -984,7 +984,9 @@ describe('workspace authority and lineage redaction', () => {
 
     expect(settled).toBe(false)
     expect(active).toBe(true)
-    expect(observedSignal).toBe(controller.signal)
+    // The registry fuses its per-call interrupt in, so the service sees a relay that carries the caller's abort.
+    expect(observedSignal?.aborted).toBe(true)
+    expect(observedSignal?.reason).toBe(cancellation)
 
     cleanup.resolve(undefined)
     const result = await pending
@@ -1778,8 +1780,10 @@ describe('search paging, prior-history bounds, titles, and cancellation', () => 
     FakeQuery.sessionSearch = () => Promise.resolve({ items: [sessionHit(hit.id, '/work')] })
     let started!: () => void
     const batchStarted = new Promise<void>((resolve) => { started = resolve })
-    const readTitles = vi.spyOn(mounted.ctx.sessionQuery, 'readTitleSnapshots').mockImplementation((_ids, signal) => {
+    let observedTitleSignal: AbortSignal | undefined
+    vi.spyOn(mounted.ctx.sessionQuery, 'readTitleSnapshots').mockImplementation((_ids, signal) => {
       started()
+      observedTitleSignal = signal
       return new Promise((_resolve, reject) => {
         signal?.addEventListener('abort', () => { reject(cancellation) }, { once: true })
       })
@@ -1790,7 +1794,9 @@ describe('search paging, prior-history bounds, titles, and cancellation', () => 
     const result = await pending
     expect(result.isError).toBe(true)
     expect(text(result)).not.toContain('title unavailable')
-    expect(readTitles.mock.calls[0]?.[1]).toBe(controller.signal)
+    // The registry fuses its per-call interrupt in; the caller's abort still reaches the title read.
+    expect(observedTitleSignal?.aborted).toBe(true)
+    expect(observedTitleSignal?.reason).toBe(cancellation)
   })
 
   it('does not downgrade an authorization failure returned by title observation', async () => {
@@ -1827,9 +1833,11 @@ describe('search paging, prior-history bounds, titles, and cancellation', () => 
     const abortObserved = Promise.withResolvers<undefined>()
     const cleanup = Promise.withResolvers<undefined>()
     let active = false
-    const filterSessions = vi.spyOn(mounted.ctx.sessionQuery, 'filterSessions')
+    let observedSignal: AbortSignal | undefined
+    vi.spyOn(mounted.ctx.sessionQuery, 'filterSessions')
       .mockImplementation(async (_filters, signal) => {
         if (signal === undefined) throw new Error('expected authorization signal')
+        observedSignal = signal
         active = true
         const aborted = new Promise<void>((resolve) => {
           signal.addEventListener('abort', () => { resolve() }, { once: true })
@@ -1859,7 +1867,9 @@ describe('search paging, prior-history bounds, titles, and cancellation', () => 
 
     expect(settled).toBe(false)
     expect(active).toBe(true)
-    expect(filterSessions.mock.calls[0]?.[1]).toBe(controller.signal)
+    // The registry fuses its per-call interrupt in; the caller's abort and its reason still reach authorization.
+    expect(observedSignal?.aborted).toBe(true)
+    expect(observedSignal?.reason).toBe(cancellation)
     expect(controller.signal.reason).toBe(cancellation)
     expect(FakeQuery.eventRequests).toEqual([])
 

@@ -299,6 +299,7 @@ export function createRunCodeTool(
   const stateOwners = new WeakMap<object, WeakSet<PtcRuntime>>()
   const definition = defineTool({
     name: RUN_CODE_NAME,
+    unbounded: true,
     // The description and `code` parameter description are placeholders here:
     // the language-aware getters installed below replace both, resolving the
     // loaded runtime's flavor at schema-emission time so the schema the MODEL

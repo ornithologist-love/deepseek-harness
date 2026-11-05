@@ -330,6 +330,7 @@ export function apply(ctx: Context, config: Config): void {
   })
   ctx.tools.register(defineTool({
     name: toolName,
+    unbounded: true,
     description: DESCRIPTION,
     parameters: {
       script: {

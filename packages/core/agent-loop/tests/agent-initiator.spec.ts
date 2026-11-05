@@ -162,6 +162,7 @@ describe('AgentLoop initiator scope', () => {
     const agent = await ctx.agentLoop.create(SessionId('signal-owner'), { provider: 'mock', model: 'mock' })
     let signals: AbortSignal[] = []
     let preStepSignals: AbortSignal[] = []
+    let toolSignals: AbortSignal[] = []
     const capture = (signal: AbortSignal | undefined): void => {
       if (signal === undefined) throw new Error('turn seam omitted its explicit signal')
       expect(ctx.agents.requireInitiator()).toBe(agent)
@@ -191,7 +192,9 @@ describe('AgentLoop initiator scope', () => {
       description: 'observe explicit turn state',
       parameters: {},
       execute: async (_args, exec) => {
-        capture(exec.signal)
+        // The body sees the fused per-call signal, not the turn seam signal.
+        expect(ctx.agents.requireInitiator()).toBe(agent)
+        toolSignals.push(exec.signal)
         return [{ type: 'text', text: 'observed' }]
       },
     }))
@@ -204,9 +207,14 @@ describe('AgentLoop initiator scope', () => {
     expect(new Set([...signals, ...adapter.requests.slice(0, 2).map(request => request.signal!)])).toEqual(new Set([firstSignal]))
     expect(preStepSignals).toHaveLength(2)
     expect(new Set(preStepSignals)).toEqual(new Set([firstSignal]))
+    expect(toolSignals).toHaveLength(1)
+    const firstToolSignal = toolSignals[0]!
+    expect(firstToolSignal).toBeInstanceOf(AbortSignal)
+    expect(firstToolSignal.aborted).toBe(false)
 
     signals = []
     preStepSignals = []
+    toolSignals = []
     const secondIdle = waitForIdle(ctx, agent)
     send(agent, 'second')
     await secondIdle
@@ -216,6 +224,7 @@ describe('AgentLoop initiator scope', () => {
     expect(preStepSignals).toHaveLength(1)
     expect(preStepSignals[0]).toBe(secondSignal)
     expect(secondSignal).not.toBe(firstSignal)
+    expect(toolSignals).toHaveLength(0)
     expect(ctx.agents.currentInitiator()).toBeUndefined()
     await ctx.fiber.dispose()
   })
