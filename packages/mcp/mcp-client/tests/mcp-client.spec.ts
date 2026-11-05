@@ -34,14 +34,30 @@ interface MockCallResult {
   isError?: boolean
 }
 
-function createMockClient(tools: MockTool[], callResult: MockCallResult = { content: [{ type: 'text', text: 'ok' }] }) {
+/** Request options the bridge passes to `callTool`; only the cancellation field matters here. */
+interface MockCallOptions {
+  signal?: AbortSignal
+}
+
+/**
+ * Scriptable MCP client fake.
+ * @param tools - tools the listing advertises.
+ * @param callResult - settled result of a call tool.
+ * @param hold - when given, every call settles with this promise instead, so a spec can abort mid-flight.
+ * @returns the fake client bound to {@link syncTools}.
+ */
+function createMockClient(
+  tools: MockTool[],
+  callResult: MockCallResult = { content: [{ type: 'text', text: 'ok' }] },
+  hold?: Promise<Record<string, unknown>>,
+) {
   const listTools = vi.fn(async (
     _params?: Record<string, unknown>,
   ): Promise<{ tools: MockTool[]; nextCursor: string | undefined }> => ({ tools, nextCursor: undefined }))
   const callTool = vi.fn(async (
     _params?: Record<string, unknown>,
-    _options?: unknown,
-  ): Promise<Record<string, unknown>> => ({ ...callResult }))
+    _options?: MockCallOptions,
+  ): Promise<Record<string, unknown>> => await hold ?? { ...callResult })
   return {
     listTools,
     callTool,
@@ -905,18 +921,30 @@ describe('tool execution', () => {
 
   it('passes abort signal to callTool', async () => {
     const controller = new AbortController()
+    // The mocked server holds the call open so the abort lands mid-flight.
+    const held = Promise.withResolvers<Record<string, unknown>>()
     const client = createMockClient(
       [{ name: 'slow', inputSchema: { type: 'object' } }],
       { content: [{ type: 'text', text: 'done' }] },
+      held.promise,
     )
 
     await syncTools(client as never, ctx, defaultOpts, new Map())
-    await executeToolFixture(ctx, { callId: ToolCallId('c1'), name: 'mcp__srv__slow', arguments: {}, signal: controller.signal })
+    const pending = executeToolFixture(ctx, {
+      callId: ToolCallId('c1'), name: 'mcp__srv__slow', arguments: {}, signal: controller.signal,
+    })
+    await vi.waitFor(() => { expect(client.callTool).toHaveBeenCalled() })
 
-    expect(client.callTool).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ signal: controller.signal }),
-    )
+    // The bridge forwards the body signal, which fuses the per-call interrupt.
+    const forwarded = client.callTool.mock.calls[0]?.[1]?.signal
+    expect(forwarded).toBeInstanceOf(AbortSignal)
+    expect(forwarded?.aborted).toBe(false)
+
+    controller.abort()
+
+    expect(forwarded?.aborted).toBe(true)
+    held.resolve({ content: [{ type: 'text', text: 'done' }] })
+    await pending
   })
 
   it('reports unsupported audio without claiming the raw block was discarded', async () => {

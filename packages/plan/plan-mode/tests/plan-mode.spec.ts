@@ -779,15 +779,25 @@ describe('/plan', () => {
 })
 
 describe('exit_plan_mode', () => {
-  async function setupWithReview(answer?: { selected: string[]; custom?: string }) {
+  async function setupWithReview(answer?: {
+    selected: string[]
+    custom?: string
+    /** Hold the answer open so the caller can abort the execution while the review waits. */
+    hold?: (signal: AbortSignal | undefined) => void
+  }) {
     const ctx = await setup()
     await ctx.plugin(UserQuestionService)
     const asked: AskUserQuestionRequest[] = []
     if (answer !== undefined) {
+      const { hold } = answer
       registerQuestionAnswerer(ctx, {
         ask: (request) => {
           asked.push(request)
-          return Promise.resolve({ answers: [{ id: 'plan-review', ...answer }] })
+          if (hold === undefined) return Promise.resolve({ answers: [{ id: 'plan-review', ...answer }] })
+          hold(request.signal)
+          return new Promise((_resolve, reject) => {
+            request.signal?.addEventListener('abort', () => { reject(request.signal?.reason) }, { once: true })
+          })
         },
       })
     }
@@ -1114,9 +1124,14 @@ describe('exit_plan_mode', () => {
   })
 
   it('forwards the execution abort signal to the review question', async () => {
-    const { ctx, agent, asked } = await setupWithReview({ selected: ['Approve'] })
+    const { ctx, agent, asked } = await setupWithReview({
+      selected: ['Approve'],
+      hold: (signal) => { abortedBeforeAbort = signal?.aborted ?? false },
+    })
     const controller = new AbortController()
-    const result = await executeToolFixture(ctx, {
+    const cancellation = new Error('execution stopped before the review answered')
+    let abortedBeforeAbort = true
+    const pending = executeToolFixture(ctx, {
       toolSet: await ctx.tools.resolve({ agent, modelSelection: TEST_MODEL_SELECTION, signal: testToolSignal }),
       callId: ToolCallId(`call-exit-${++callCounter}`),
       name: EXIT_PLAN_MODE,
@@ -1124,8 +1139,14 @@ describe('exit_plan_mode', () => {
       agent,
       signal: controller.signal,
     })
-    expect(result.isError).toBe(false)
-    expect(asked[0]?.signal).toBe(controller.signal)
+    await vi.waitFor(() => { expect(asked).toHaveLength(1) })
+    // The registry fuses its per-call interrupt in, so the question owns a relay that carries the caller's abort.
+    expect(abortedBeforeAbort).toBe(false)
+    controller.abort(cancellation)
+    const result = await pending
+    expect(result.isError).toBe(true)
+    expect(asked[0]?.signal?.aborted).toBe(true)
+    expect(asked[0]?.signal?.reason).toBe(cancellation)
   })
 
   it('fails the call when the plugin is disposed while the review awaits (no phantom exit)', async () => {

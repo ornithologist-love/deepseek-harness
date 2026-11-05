@@ -431,6 +431,7 @@ export function apply(ctx: Context, config: Config): void {
 
   ctx.tools.register(defineTool({
     name: 'job_output',
+    unbounded: true,
     description: 'Read a background job: output since the previous read for stream jobs, or the result of a finished final-output job.',
     // A timed-out wait returns job state rather than a TOOL_TIMEOUT error, so
     // this tool owns its deadline instead of using ToolDefinition.timeoutMs.

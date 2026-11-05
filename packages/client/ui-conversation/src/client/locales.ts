@@ -320,6 +320,9 @@ export const zh = {
   'row.preparing': '正在准备调用',
   'row.failed': '失败',
   'row.stopped': '已停止',
+  'row.elapsed': '已运行 {seconds} 秒',
+  'row.interrupt': '中断',
+  'row.interruptHint': '停止这条工具调用，模型会收到原因并继续',
   'row.commandArguments': '命令参数',
   'row.input': '输入',
   'row.output': '输出',
@@ -713,6 +716,9 @@ export const en = {
   'row.preparing': 'Preparing tool call',
   'row.failed': 'Failed',
   'row.stopped': 'Stopped',
+  'row.elapsed': 'Running for {seconds}s',
+  'row.interrupt': 'Interrupt',
+  'row.interruptHint': 'Stop this tool call; the model gets the reason and continues',
   'row.commandArguments': 'Command arguments',
   'row.input': 'IN',
   'row.output': 'OUT',
@@ -1180,6 +1186,9 @@ export const ja = {
   'context.compact.hint': '古いターンは自動的に要約されます。必要なら今すぐ空き容量を確保できます',
   'context.compact.action': '今すぐ圧縮',
   'context.compact.busy': '圧縮はエージェントが待機中のときのみ実行できます',
+  'row.elapsed': '{seconds} 秒実行中',
+  'row.interrupt': '中断',
+  'row.interruptHint': 'このツール呼び出しを停止します。モデルは理由を受け取り、続行します',
 } satisfies Record<keyof typeof en, string>
 
 /** Spanish dictionary, checked against the English keys. */
@@ -1572,6 +1581,9 @@ export const es = {
   'context.compact.hint': 'Los turnos antiguos se compactan automáticamente; libera espacio ahora si lo necesitas',
   'context.compact.action': 'Compactar ahora',
   'context.compact.busy': 'La compactación solo se ejecuta mientras el agente está inactivo',
+  'row.elapsed': 'En ejecución desde hace {seconds} s',
+  'row.interrupt': 'Interrumpir',
+  'row.interruptHint': 'Detiene esta llamada de herramienta; el modelo recibe el motivo y continúa',
 } satisfies Record<keyof typeof en, string>
 
 /** French dictionary, checked against the English keys. */
@@ -1964,6 +1976,9 @@ export const fr = {
   'context.compact.hint': 'Les anciens tours sont compactés automatiquement ; libérez de l\'espace maintenant si besoin',
   'context.compact.action': 'Compacter maintenant',
   'context.compact.busy': 'La compaction ne s\'exécute que lorsque l\'agent est inactif',
+  'row.elapsed': 'En cours depuis {seconds} s',
+  'row.interrupt': 'Interrompre',
+  'row.interruptHint': 'Arrête cet appel d\'outil ; le modèle reçoit la raison et continue',
 } satisfies Record<keyof typeof en, string>
 
 /** German dictionary, checked against the English keys. */
@@ -2356,6 +2371,9 @@ export const de = {
   'context.compact.hint': 'Ältere Runden werden automatisch komprimiert; bei Bedarf jetzt Platz freigeben',
   'context.compact.action': 'Jetzt komprimieren',
   'context.compact.busy': 'Komprimierung läuft nur, wenn der Agent inaktiv ist',
+  'row.elapsed': 'Läuft seit {seconds} s',
+  'row.interrupt': 'Unterbrechen',
+  'row.interruptHint': 'Stoppt diesen Tool-Aufruf; das Modell erhält den Grund und fährt fort',
 } satisfies Record<keyof typeof en, string>
 
 /** Russian dictionary, checked against the English keys. */
@@ -2748,6 +2766,9 @@ export const ru = {
   'context.compact.hint': 'Старые ходы сжимаются автоматически; при необходимости освободите место сейчас',
   'context.compact.action': 'Сжать сейчас',
   'context.compact.busy': 'Сжатие выполняется только когда агент простаивает',
+  'row.elapsed': 'Выполняется {seconds} с',
+  'row.interrupt': 'Прервать',
+  'row.interruptHint': 'Остановить этот вызов инструмента; модель получит причину и продолжит',
 } satisfies Record<keyof typeof en, string>
 
 /** Portuguese dictionary, checked against the English keys. */
@@ -3140,4 +3161,7 @@ export const pt = {
   'context.compact.hint': 'Turnos antigos são compactados automaticamente; libere espaço agora se precisar',
   'context.compact.action': 'Compactar agora',
   'context.compact.busy': 'A compactação só é executada enquanto o agente está ocioso',
+  'row.elapsed': 'Em execução há {seconds} s',
+  'row.interrupt': 'Interromper',
+  'row.interruptHint': 'Interrompe esta chamada de ferramenta; o modelo recebe o motivo e continua',
 } satisfies Record<keyof typeof en, string>

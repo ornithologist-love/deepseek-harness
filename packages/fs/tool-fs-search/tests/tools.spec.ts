@@ -473,13 +473,21 @@ describe('workdir derivation and signal forwarding', () => {
     expect(spec?.graceMs).toBe(3_000)
   })
 
-  it('forwards exec.signal into the spawn spec', async () => {
+  it('forwards caller cancellation into the spawn spec', async () => {
     const { ctx, subprocess } = await setup()
     const controller = new AbortController()
-    subprocess.handler = () => runResult('')
+    const cancellation = new Error('caller stopped the search')
+    let observedSignal: AbortSignal | undefined
+    subprocess.handler = () => {
+      observedSignal = subprocess.spawns[0]?.signal
+      controller.abort(cancellation)
+      return runResult('', { exitCode: null, signal: 'SIGTERM' })
+    }
     const result = await call(ctx, 'grep', { pattern: 'x' }, { signal: controller.signal })
-    expect(subprocess.spawns[0]?.signal).toBe(controller.signal)
-    expect(result.isError).toBe(false)
+    // The registry fuses its per-call interrupt in, so the spawn owns a relay that carries the caller's abort.
+    expect(observedSignal?.aborted).toBe(true)
+    expect(observedSignal?.reason).toBe(cancellation)
+    expect(result.error).toMatchObject({ info: { code: 'SEARCH_ABORTED' } })
   })
 
   it('reports an abort fired during the run as SEARCH_ABORTED', async () => {

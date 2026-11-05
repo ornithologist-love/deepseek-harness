@@ -45,6 +45,8 @@ import type {
   SessionAttachmentValue,
   SessionCancelRequest,
   SessionCancelValue,
+  SessionInterruptToolCallRequest,
+  SessionInterruptToolCallValue,
   SessionControlFrame,
   SessionCreateRequest,
   SessionCreateValue,
@@ -83,26 +85,51 @@ const DEFERRED_ACTIVATION_KEY = '__DSH_DEFERRED_AGENT__'
 
 /** Host policy around commands; continuation retains canonical validation and admission. */
 export interface SessionCommandPolicy {
-  /** Validate and record permission choices without constructing an Agent. */
+  /**
+   * Validate and record permission choices without constructing an Agent.
+   * @param session - Session whose permission preset changes.
+   * @param preset - preset id to validate and record.
+   */
   configurePermission?(session: Session, preset: string): void
-  /** Apply creation defaults; initial selection validates without saving a global default. */
+  /**
+   * Apply creation defaults; initial selection validates without saving a global default.
+   * @param request - requested creation defaults.
+   * @param next - canonical creation continuing the controller's own logic.
+   * @param selectInitialModel - initial selection applied without saving a global default.
+   * @returns the created Session choices.
+   */
   create?(
     request: SessionCreateRequest,
     next: (request: SessionCreateRequest) => Promise<SessionCreateValue>,
     selectInitialModel: (request: SessionSelectModelRequest) => Promise<SessionSelectModelValue>,
   ): Promise<SessionCreateValue>
-  /** The continuation serializes selection with image admission; defaults save unless explicitly disabled. */
+  /**
+   * The continuation serializes selection with image admission; defaults save unless explicitly disabled.
+   * @param request - requested model selection.
+   * @param next - canonical selection continuing the controller's own logic.
+   * @returns the normalized selection.
+   */
   selectModel?(
     request: SessionSelectModelRequest,
     next: (request: SessionSelectModelRequest, persistDefault?: boolean) => Promise<SessionSelectModelValue>,
   ): Promise<SessionSelectModelValue>
-  /** Transform or refuse one prompt; the continuation rechecks cancellation before admission. */
+  /**
+   * Transform or refuse one prompt; the continuation rechecks cancellation before admission.
+   * @param request - submitted prompt.
+   * @param signal - turn cancellation.
+   * @param next - canonical submission continuing the controller's own logic.
+   * @returns the admitted prompt result.
+   */
   prompt?(
     request: SessionPromptRequest,
     signal: AbortSignal,
     next: (request: SessionPromptRequest) => Promise<SessionPromptValue>,
   ): Promise<SessionPromptValue>
-  /** Decorate the catalog without replacing model resolution or validation. */
+  /**
+   * Decorate the catalog without replacing model resolution or validation.
+   * @param catalog - resolved model catalog.
+   * @returns the decorated catalog.
+   */
   modelCatalog?(catalog: ModelCatalog): ModelCatalog | Promise<ModelCatalog>
 }
 
@@ -344,7 +371,12 @@ export class SessionController extends TypertRemoteService {
     return this.agents.resolveAgent(sessionId)
   }
 
-  /** @param sessionId - Session identity. @param signal - read cancellation. @returns a read-only draft or history cut. */
+  /**
+   * Observe a live draft, or read a history cut without activating an Agent.
+   * @param sessionId - Session identity.
+   * @param signal - read cancellation.
+   * @returns a read-only draft or history cut.
+   */
   async observe(sessionId: SessionId, signal?: AbortSignal): Promise<SessionObservation> {
     signal?.throwIfAborted()
     const draft = this.configurations === undefined ? undefined : await this.configurations.observe(sessionId)
@@ -353,7 +385,11 @@ export class SessionController extends TypertRemoteService {
     return await this.ctx.sessionQuery.observeSession(sessionId, options)
   }
 
-  /** @param sessionId - Session identity. @returns saved composer choices and historical metadata, without an Agent. */
+  /**
+   * Read saved composer choices together with the historical header.
+   * @param sessionId - Session identity.
+   * @returns saved composer choices and historical metadata, without an Agent.
+   */
   async configuration(sessionId: SessionId): Promise<SessionConfiguration & { blank: boolean }> {
     using observation = await this.observe(sessionId)
     const saved = await this.configurations?.read(sessionId)
@@ -379,7 +415,11 @@ export class SessionController extends TypertRemoteService {
     return agent === undefined || commands === undefined ? [] : commands.list(agent)
   }
 
-  /** @param request - draft identity and next choices; an executed Session starts a separate draft. @returns its identity. */
+  /**
+   * Save composer choices on a draft, or start a separate draft for an executed Session.
+   * @param request - draft identity and next choices.
+   * @returns the draft identity with the choices it kept.
+   */
   @Remote('configure')
   async configure(request: SessionCreateRequest): Promise<SessionCreateValue> {
     const configurations = this.configurations
@@ -464,7 +504,11 @@ export class SessionController extends TypertRemoteService {
     })
   }
 
-  /** @param request - pending permission preset. @returns after saving choices, without activating an Agent. */
+  /**
+   * Save a pending permission preset without activating an Agent.
+   * @param request - Session identity and pending permission preset.
+   * @returns acceptance after the choices are saved.
+   */
   @Remote('selectPermission')
   async selectPermission(request: { readonly sessionId: SessionId; readonly preset: string }): Promise<{ accepted: true }> {
     const configurations = this.configurations
@@ -745,6 +789,16 @@ export class SessionController extends TypertRemoteService {
   @Remote('cancel')
   cancel(request: SessionCancelRequest): SessionCancelValue {
     return this.commands.cancel(request)
+  }
+
+  /**
+   * Stop one running tool call while its turn continues.
+   * @param request - Session and model tool-call id.
+   * @returns whether the call was still running.
+   */
+  @Remote('interruptToolCall')
+  interruptToolCall(request: SessionInterruptToolCallRequest): SessionInterruptToolCallValue {
+    return this.commands.interruptToolCall(request)
   }
 
   /**

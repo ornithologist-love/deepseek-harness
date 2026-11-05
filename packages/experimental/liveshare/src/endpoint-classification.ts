@@ -105,6 +105,7 @@ export const VIEWER_ENDPOINT_CLASSES = {
   'session/commandCatalog': 'owner-only', // owner lists commands of an executing Session
   'session/configure': 'owner-only', // owner edits a deferred Session draft
   'session/selectPermission': 'owner-only', // owner stages a deferred Session permission preset
+  'session/interruptToolCall': 'owner-only', // owner stops one running tool call
   'session/updateQueue': 'owner-only', // owner edits queued input
   'session/workspacePathApplications': 'owner-only', // owner applies a Workspace path
   'credentials/describe': 'owner-only', // owner credentials; secrets never reach a reader

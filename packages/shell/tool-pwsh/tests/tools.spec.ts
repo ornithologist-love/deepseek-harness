@@ -65,7 +65,7 @@ class FakeBash extends ShellExecutor {
   requests: ShellExecRequest[] = []
   specs: ShellExecSpec[] = []
   startCalls = 0
-  handler: (spec: ShellExecSpec) => ShellRunResult = () => runResult('')
+  handler: (spec: ShellExecSpec) => ShellRunResult | Promise<ShellRunResult> = () => runResult('')
   backgroundHandler: (spec: ShellExecSpec) => ShellProcess = () => fakeProcess('bg-ok\n')
 
   override resolve(request: ShellExecRequest): ShellExecSpec {
@@ -489,14 +489,29 @@ describe('execution through the bash seam', () => {
   it('forwards exec.signal into the resolved request', async () => {
     const { ctx, bash } = await setup()
     const controller = new AbortController()
-    bash.handler = () => runResult('ok\n')
-    await executeToolFixture(ctx, {
+    const running = Promise.withResolvers<ShellRunResult>()
+    let forwarded: AbortSignal | undefined
+    bash.handler = (spec) => {
+      forwarded = spec.signal
+      return running.promise
+    }
+    const pending = executeToolFixture(ctx, {
       signal: controller.signal,
       callId: ToolCallId('call-signal'),
       name: 'pwsh',
       arguments: { command: 'Write-Output ok', description: 'ok' },
     })
-    expect(bash.requests[0]?.signal).toBe(controller.signal)
+    await vi.waitFor(() => { expect(forwarded).toBeDefined() })
+    // The resolved request carries the body signal, which fuses the per-call interrupt.
+    expect(forwarded).toBeInstanceOf(AbortSignal)
+    expect(forwarded).toBe(bash.requests[0]?.signal)
+    expect(forwarded?.aborted).toBe(false)
+
+    controller.abort()
+
+    expect(forwarded?.aborted).toBe(true)
+    running.resolve(runResult('ok\n'))
+    await pending
   })
 
   it('projects the canonical foreground result with stdout, stderr, and exit facts', async () => {

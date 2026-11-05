@@ -418,10 +418,14 @@ describe('ask_user_question tool', () => {
     registerQuestionAnswerer(ctx, {
       async ask(request) {
         seen.push(request)
+        // The registry fuses its per-call interrupt in; the caller's abort reaches the request.
+        controller.abort()
+        abortedInside = request.signal?.aborted ?? false
         return { answers: [{ id: 'continue', selected: ['ok'] }] }
       },
     })
     const controller = new AbortController()
+    let abortedInside = false
 
     await executeToolFixture(ctx, {
       callId: ToolCallId('ask-2'),
@@ -430,7 +434,8 @@ describe('ask_user_question tool', () => {
       signal: controller.signal,
     })
 
-    expect(seen[0]?.signal).toBe(controller.signal)
+    expect(seen).toHaveLength(1)
+    expect(abortedInside).toBe(true)
   })
 
   it('passes optional header and a resumed runtime root through to the user-questions request', async () => {

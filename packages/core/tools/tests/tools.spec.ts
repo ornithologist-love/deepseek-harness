@@ -2984,8 +2984,12 @@ it('settles every unowned call when cancellation precedes the batch', async () =
   const ctx = await setup()
   try {
     let invoked = false
+    // Spelled out rather than spread from echoTool: the compiled definition
+    // types `unbounded` as optional, which exactOptionalPropertyTypes refuses
+    // to widen back to a `true`-only option.
     ctx.tools.register(defineTool({
-      ...echoTool,
+      name: 'echo',
+      description: 'echo arguments back',
       parameters: {},
       output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }] },
       async execute() { invoked = true; return 'unexpected' },

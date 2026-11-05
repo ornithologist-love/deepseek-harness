@@ -7,7 +7,8 @@ import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-user-approval'
 import { assertNever, deepFreeze, snapshotJsonValue, type JsonValue } from '@deepseek-ai/dsh-util-values'
-import { TOOL_ABORTED, TOOL_ABORTED_BEFORE_DISPATCH, ToolNotFoundError, ToolOutputError } from './contracts.ts'
+import { TOOL_ABORTED, TOOL_ABORTED_BEFORE_DISPATCH, TOOL_CANCELLED_BY_USER, TOOL_TIMEOUT, ToolNotFoundError, ToolOutputError } from './contracts.ts'
+import type { ToolCallInterruptReason } from './contracts.ts'
 import { validateJsonSchemaValue } from './json-schema.ts'
 import type { ToolsService } from './index.ts'
 import type { ResolvedToolSet, ToolDefinition, ToolExecutionInput, ToolExecutionMode, ToolExecution, ToolRunContext, ToolExecutionResult, ToolExecutionSuccess, ToolErrorInfo, ToolExecutionToken, PreToolDecision, PostToolDecision } from './contracts.ts'
@@ -46,6 +47,8 @@ interface ToolAskResolution {
 interface ToolCancellationState {
   readonly callerSignal: AbortSignal
   bodyInvoked: boolean
+  /** Registry interrupt signal fused into the body signal while the call dispatches. */
+  interrupt?: AbortSignal
 }
 
 /** One dispatch-scoped fused signal plus listener cleanup after the body settles. */
@@ -260,7 +263,8 @@ export class ToolExecutionPipeline {
     /* v8 ignore next -- only registry-minted executions reach the staged scheduler methods */
     if (state === undefined) throw new Error('tool registry scheduler invariant violated: missing cancellation state')
     const wrapperSignal = exec.signal
-    const fused = fuseToolSignals(state.callerSignal, wrapperSignal)
+    // The registry interrupt is one more cancellation source for the dispatched body.
+    const fused = fuseToolSignals(state.callerSignal, wrapperSignal, ...state.interrupt === undefined ? [] : [state.interrupt])
     const signal = fused.signal
 
     if (isAborted(signal)) {
@@ -293,14 +297,32 @@ export class ToolExecutionPipeline {
    * @returns whether the result still needs post-execute.
    */
   async dispatch(exec: ToolRunContext): Promise<ScheduledToolDispatch> {
+    const state = this.cancellationStates.get(exec)
+    /* v8 ignore next -- only registry-minted executions reach the staged scheduler methods */
+    if (state === undefined) throw new Error('tool registry scheduler invariant violated: missing cancellation state')
+    const startedAt = Date.now()
+    const unbounded = this.resolveExecution(exec.name, exec.agent, exec.parent !== undefined, exec.toolSet)?.unbounded === true
+    using tracked = this.tools.trackCall(exec, unbounded)
+    state.interrupt = tracked.signal
     try {
       const mutableExec = exec as MutableToolRunContext
       const carrier = scopeTarget(this.tools, exec.agent)
-      const result = await this.ctx.waterfall(
-        carrier, 'tools/execute', mutableExec,
-        () => this.dispatchToolBody(mutableExec),
-      )
-      const normalized = this.normalizeDispatchResult(exec, result)
+      // An interrupted body that ignores its signal is abandoned after the
+      // grace period; its late outcome is never committed.
+      const raced = await Promise.race([
+        this.ctx.waterfall(
+          carrier, 'tools/execute', mutableExec,
+          () => this.dispatchToolBody(mutableExec),
+        ),
+        tracked.abandoned,
+      ])
+      const reason = tracked.reason()
+      if (reason !== undefined || raced === undefined) {
+        /* v8 ignore next -- bandoned resolves only after an interrupt reason is set */
+        if (reason === undefined) throw new Error('tool registry invariant violated: abandoned without a reason')
+        return { kind: 'post-result', result: this.markCanonical(exec, toolInterruptedResult(reason, Date.now() - startedAt)) }
+      }
+      const normalized = this.normalizeDispatchResult(exec, raced)
       const deferredContexts = this.deferredContexts.get(exec)
       /* v8 ignore next -- dispatch only receives executions minted by this registry's prepare stage */
       if (deferredContexts === undefined) throw new Error('tool registry scheduler invariant violated: unprepared execution')
@@ -321,6 +343,8 @@ export class ToolExecutionPipeline {
       }
     } catch (error: unknown) {
       return { kind: 'final-result', result: toolErrorResult(error) }
+    } finally {
+      delete state.interrupt
     }
   }
 
@@ -711,33 +735,51 @@ function isAborted(signal: AbortSignal): boolean {
  * Fuse caller and wrapper cancellation without nesting `AbortSignal.any`.
  * Keeping the relay dispatch-scoped also removes listeners when work settles.
  */
-function fuseToolSignals(caller: AbortSignal, wrapper: AbortSignal): FusedToolSignal {
-  if (caller === wrapper) return { signal: caller, dispose() {} }
+function fuseToolSignals(...signals: [AbortSignal, ...AbortSignal[]]): FusedToolSignal {
+  const sources = [...new Set(signals)]
+  if (sources.length === 1) return { signal: signals[0], dispose() {} }
 
   const controller = new AbortController()
   let listening = false
+  const listeners = sources.map(source => [source, (): void => { abortFrom(source) }] as const)
   const dispose = (): void => {
     if (!listening) return
     listening = false
-    caller.removeEventListener('abort', abortFromCaller)
-    wrapper.removeEventListener('abort', abortFromWrapper)
+    for (const [source, listener] of listeners) source.removeEventListener('abort', listener)
   }
   const abortFrom = (source: AbortSignal): void => {
     const reason: unknown = source.reason
     controller.abort(reason)
     dispose()
   }
-  const abortFromCaller = (): void => { abortFrom(caller) }
-  const abortFromWrapper = (): void => { abortFrom(wrapper) }
 
-  if (wrapper.aborted) abortFromWrapper()
-  else if (caller.aborted) abortFromCaller()
+  // When several are already aborted the last one wins (wrapper over caller).
+  const already = sources.findLast(source => source.aborted)
+  if (already !== undefined) abortFrom(already)
   else {
     listening = true
-    caller.addEventListener('abort', abortFromCaller, { once: true })
-    wrapper.addEventListener('abort', abortFromWrapper, { once: true })
+    for (const [source, listener] of listeners) source.addEventListener('abort', listener, { once: true })
   }
   return { signal: controller.signal, dispose }
+}
+
+/**
+ * Model-facing result for an interrupted call. It names the cause and points
+ * the model at running long work in the background instead of retrying it.
+ */
+function toolInterruptedResult(reason: ToolCallInterruptReason, elapsedMs: number): ToolExecutionResult {
+  const seconds = Math.round(elapsedMs / 1000)
+  const [message, code] = reason.kind === 'user'
+    ? [`tool call stopped by the user after ${seconds}s because it was taking too long`, TOOL_CANCELLED_BY_USER]
+    : [`tool call stopped after reaching its ${Math.round(reason.timeoutMs / 1000)}s time limit`, TOOL_TIMEOUT]
+  const advice = 'Changes it already made are kept. Do not rerun it the same way in the foreground: '
+    + 'if the work is expected to take long, run it in the background (for example a shell command with run_in_background) '
+    + 'and check on it later, or narrow its scope.'
+  return {
+    content: [{ type: 'text', text: `Error: ${message}. ${advice}` }],
+    isError: true,
+    error: { message, info: { name: 'ToolInterruptedError', code } },
+  }
 }
 
 /** Canonical result when cancellation supersedes success after body invocation. */

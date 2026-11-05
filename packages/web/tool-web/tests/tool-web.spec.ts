@@ -779,31 +779,33 @@ describe('tool-web execution through the real registry', () => {
     expect('default' in ToolWeb).toBe(false)
   })
 
-  it('executes web_fetch, forwarding the url (no timeout param) and the abort signal to the seam', async () => {
+  it('executes web_fetch, forwarding the url (no timeout param) and the caller abort to the seam', async () => {
     const seen: { request?: { url: string }; signal?: AbortSignal | undefined } = {}
+    const cancellation = new Error('caller stopped the fetch')
+    const started = Promise.withResolvers<undefined>()
     const fetchProvider = {
       id: 'stub-fetch',
       available: () => available,
       fetch: (request: { url: string }, signal?: AbortSignal) => {
         seen.request = request
         seen.signal = signal
-        return Promise.resolve({ url: request.url, statusCode: 200, body: { kind: 'text' as const, content: 'ok' }, truncated: false })
+        started.resolve(undefined)
+        return new Promise<never>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => { reject(cancellation) }, { once: true })
+        })
       },
     }
     const { ctx, agent, fiber } = await mountTools({ webConfig: { fetchProvider: 'stub-fetch' }, fetchProvider })
     const controller = new AbortController()
-    const out = await executeInStep(ctx, agent, { callId: ToolCallId('fetch-1'), name: 'web_fetch', arguments: { url: 'https://a.test' }, signal: controller.signal })
-    expect(out.isError).toBe(false)
-    expect(out.value).toEqual({
-      url: 'https://a.test',
-      statusCode: 200,
-      body: { kind: 'text', content: 'ok' },
-      truncated: false,
-    })
-    // The model schema exposes no timeout: the tool forwards only the url; the
-    // tool-call budget is owned by dsh-tool-call-timeout-policy over exec.signal.
+    const pending = executeInStep(ctx, agent, { callId: ToolCallId('fetch-1'), name: 'web_fetch', arguments: { url: 'https://a.test' }, signal: controller.signal })
+    await started.promise
+    // The registry fuses its per-call interrupt in, so the seam sees a relay that carries the caller's abort.
+    expect(seen.signal?.aborted).toBe(false)
+    controller.abort(cancellation)
+    await pending
     expect(seen.request).toEqual({ url: 'https://a.test' })
-    expect(seen.signal).toBe(controller.signal)
+    expect(seen.signal?.aborted).toBe(true)
+    expect(seen.signal?.reason).toBe(cancellation)
     await fiber.dispose()
   })
 
@@ -828,21 +830,27 @@ describe('tool-web execution through the real registry', () => {
       truncated: false,
     })
     expect(seen.passedSignal).toBe(true)
-    expect(seen.signal).toBe(testToolSignal)
     await fiber.dispose()
   })
 
-  it('executes web_search, forwarding the abort signal to the seam', async () => {
+  it('executes web_search, forwarding the caller abort to the seam', async () => {
     const seen: { signal?: AbortSignal | undefined } = {}
+    const cancellation = new Error('caller stopped the search')
     const provider: WebSearchProvider = {
       id: 'stub-search',
       available: () => available,
-      search: (_request, signal) => { seen.signal = signal; return Promise.resolve({ sources: [], truncated: false }) },
+      search: (_request, signal) => {
+        seen.signal = signal
+        controller.abort(cancellation)
+        return Promise.resolve({ sources: [], truncated: false })
+      },
     }
     const { ctx, agent, fiber } = await mountTools({ webConfig: { searchProvider: 'stub-search' }, search: provider })
     const controller = new AbortController()
     await executeInStep(ctx, agent, { callId: ToolCallId('search-1'), name: 'web_search', arguments: { queries: ['q'] }, signal: controller.signal })
-    expect(seen.signal).toBe(controller.signal)
+    // The registry fuses its per-call interrupt in, so the seam sees a relay that carries the caller's abort.
+    expect(seen.signal?.aborted).toBe(true)
+    expect(seen.signal?.reason).toBe(cancellation)
     await fiber.dispose()
   })
 

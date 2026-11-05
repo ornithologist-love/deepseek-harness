@@ -6,7 +6,7 @@ import type {
   ImageAttachmentLimits, ImageAttachmentRef, ImageMediaType,
 } from '@deepseek-ai/dsh-attachment'
 import type { Branded } from '@deepseek-ai/dsh-brand'
-import type { LlmAttemptId, MessageId } from '@deepseek-ai/dsh-llm/brand'
+import type { LlmAttemptId, MessageId, ToolCallId } from '@deepseek-ai/dsh-llm/brand'
 import type { LlmModelBadge, TextBlock } from '@deepseek-ai/dsh-llm'
 import type { SessionId, SessionSeqCursor } from '@deepseek-ai/dsh-session/types'
 import type { SessionProjectionMap, SessionProjectionSummaryExcluded, SessionProjectionSummaryValues } from '@deepseek-ai/dsh-session-projection/types'
@@ -377,6 +377,17 @@ export interface SessionCancelRequest {
 /** Receipt after cancellation is admitted to the live Agent. */
 export interface SessionCancelValue {
   readonly accepted: true
+}
+
+/** Request to stop one running tool call while its turn continues. */
+export interface SessionInterruptToolCallRequest {
+  readonly sessionId: SessionId
+  readonly callId: ToolCallId
+}
+
+/** Whether the call was still running when the interrupt arrived. */
+export interface SessionInterruptToolCallValue {
+  readonly accepted: boolean
 }
 
 /** Request to open one path prepared by a Session-aware caller on the Host desktop. */

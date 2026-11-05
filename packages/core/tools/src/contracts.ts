@@ -65,8 +65,17 @@ export interface ToolDefinition extends ToolSchema {
    * is NEVER sent to the model — `schemas()` whitelists only name/description/
    * parameters. Declaring it asserts this tool forwards `exec.signal` to a
    * cooperative implementation that can reach quiescence when the signal aborts.
+   * The registry's own per-call budget (`maxCallMs`) applies independently and
+   * settles the call even when the body does not cooperate.
    */
   timeoutMs?: number
+  /**
+   * Exempt this tool from the registry-wide per-call budget (`maxCallMs`).
+   * Declare it only for a tool whose normal call waits on a person, a child
+   * Agent, or a background job for an open-ended time. A user can still
+   * interrupt the call.
+   */
+  unbounded?: boolean
   /**
    * Pure synchronous classifier for overlap with sibling tool calls. Only
    * `true` opts in; omission, exceptions, non-`true` returns, and invalid
@@ -265,6 +274,27 @@ export const TOOL_ABORTED = 'ABORTED'
 
 /** Canonical error code for cancellation before a tool body was invoked. */
 export const TOOL_ABORTED_BEFORE_DISPATCH = 'ABORTED_BEFORE_DISPATCH'
+
+/** Error code for a call the registry settled because it reached its time budget. */
+export const TOOL_TIMEOUT = 'TOOL_TIMEOUT'
+
+/** Error code for a call the registry settled because the user interrupted it. */
+export const TOOL_CANCELLED_BY_USER = 'TOOL_CANCELLED_BY_USER'
+
+/** Why the registry stops one running call; the first requested reason wins. */
+export type ToolCallInterruptReason =
+  | { readonly kind: 'user' }
+  | { readonly kind: 'timeout'; readonly timeoutMs: number }
+
+/** Abort reason carried by a body signal stopped through `ToolsService.interrupt`. */
+export class ToolInterruptedError extends Error {
+  override readonly name = 'ToolInterruptedError'
+
+  /** @param reason - why the call was interrupted. */
+  constructor(readonly reason: ToolCallInterruptReason) {
+    super(reason.kind === 'user' ? 'tool call interrupted by the user' : `tool call timed out after ${reason.timeoutMs}ms`)
+  }
+}
 
 /** Structured error metadata for a failed tool call (alongside the model-facing text). */
 export interface ToolErrorInfo {

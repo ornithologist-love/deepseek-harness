@@ -7,11 +7,12 @@ import { ToolExecutorUnavailableError } from './executor.ts'
 import type { ToolExecutor, ToolBatchInput, ToolBatchResult } from './executor.ts'
 import './events.ts'
 import type { ToolSchema } from '@deepseek-ai/dsh-llm'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { projectToolSchema } from './schema.ts'
 import { assertSupportedJsonSchema } from './json-schema.ts'
-import { RUN_CODE_NAME, ToolActivationError } from './contracts.ts'
+import { RUN_CODE_NAME, ToolActivationError, ToolInterruptedError } from './contracts.ts'
 import type {
-  ToolDefinition, ToolRestriction, ToolExecution, ToolGuard,
+  ToolCallInterruptReason, ToolDefinition, ToolRestriction, ToolExecution, ToolGuard,
   ResolvedToolSet, ToolActivationContext, ToolRegistrationOptions,
 } from './contracts.ts'
 
@@ -90,26 +91,70 @@ interface Registration {
   executor: ToolExecutor | undefined
 }
 
+/** One dispatched call that `interrupt` can stop. */
+interface RunningToolCall {
+  readonly exec: Pick<ToolExecution, 'token' | 'callId' | 'agent'>
+  /** Aborts the body's signal; fused into the dispatched execution. */
+  readonly interrupt: AbortController
+  /** First interrupt request; set once. */
+  reason?: ToolCallInterruptReason
+  /** Releases the dispatch from waiting on the body after the grace period. */
+  readonly abandon: () => void
+}
+
+
+/** Running-call handle returned to a scheduler by `ToolsService.trackCall`. */
+export interface TrackedToolCall extends Disposable {
+  /** Signal that aborts when the call is interrupted; fused into the body signal. */
+  readonly signal: AbortSignal
+  /** Settles once an interrupted call's grace period ends. */
+  readonly abandoned: Promise<undefined>
+  /** Why the call was interrupted, when it was. */
+  reason(): ToolCallInterruptReason | undefined
+}
+
 class GuardLayer {
   readonly guards = new AnonymousEntries<ToolGuard>()
   isEmpty(): boolean { return this.guards.isEmpty() }
 }
 
+/** Registry-wide config: per-call budgeting for the tools it dispatches. */
+export interface ToolsConfig {
+  /** Removed. Mount a native or PTC tool executor instead. */
+  mode?: never
+  /** Moved to the PTC tool executor configuration. */
+  maxParallelSubCalls?: never
+  /** Per-call time budget for tools that do not declare `unbounded`; 0 disables it. */
+  maxCallMs?: number
+  /** How long an interrupted call may take to observe its aborted signal before the registry settles it. */
+  interruptGraceMs?: number
+}
+
 /** Concrete tool registry and scoped executor dispatcher. */
 export class ToolsService extends Service {
   static inject = ['systemPrompt']
-  static Config = z.object({
+  static Config: z<ToolsConfig> = z.object({
     mode: z.never().description('Removed. Mount a native or PTC tool executor instead.'),
     maxParallelSubCalls: z.never().description('Moved to the PTC tool executor configuration.'),
+    maxCallMs: z.natural().default(0).description('Per-call time budget in milliseconds for tools that do not declare unbounded; 0 disables it. On expiry the call settles with TOOL_TIMEOUT.'),
+    interruptGraceMs: z.natural().default(1000).description('How long an interrupted call may take to observe its aborted signal before the registry settles it without the body.'),
   })
 
   private readonly layers = new ScopedLayers(scope => new ToolLayer(scope), () => { this.ctx.emit('tools/change') })
   private readonly scoped = new WeakMap<ScopeKey, Registration>()
   private root: Registration | undefined
   private readonly guards = new ScopedLayers(() => new GuardLayer(), () => {})
+  /** Calls between dispatch start and settlement, for {@link interrupt}. */
+  private readonly running = new Set<RunningToolCall>()
+  /** Per-call budget for tools that do not declare `unbounded`; 0 disables it. */
+  private readonly maxCallMs: number
+  /** Grace period before an interrupted body is abandoned. */
+  private readonly interruptGraceMs: number
 
-  constructor(ctx: Context) {
+  constructor(ctx: Context, config: ToolsConfig = {}) {
     super(ctx, 'tools')
+    this.maxCallMs = config.maxCallMs ?? 0
+    this.interruptGraceMs = config.interruptGraceMs ?? 1000
     ctx.systemPrompt.tools(({ scope, toolSet }) => {
       const executor = this.selectExecutor(scope)
       const description = executor.describe(this.definitions(scope, toolSet))
@@ -383,6 +428,66 @@ export class ToolsService extends Service {
    */
   guard(guard: ToolGuard): () => void {
     return this.guards.effect(this.ctx, layer => layer.guards.append(guard), { label: 'tools.guard()' })
+  }
+
+  /**
+   * Register one dispatched call so `interrupt` can stop it, and arm the
+   * registry-wide budget unless the tool declares `unbounded`. Dispose the
+   * handle when the dispatch settles.
+   * @param exec - the dispatched execution.
+   * @param unbounded - whether the tool is exempt from `maxCallMs`.
+   * @returns the running-call handle.
+   */
+  trackCall(exec: Pick<ToolExecution, 'token' | 'callId' | 'agent'>, unbounded: boolean): TrackedToolCall {
+    let abandon!: () => void
+    const abandoned = new Promise<undefined>((resolve) => { abandon = () => { resolve(undefined) } })
+    const call: RunningToolCall = { exec, interrupt: new AbortController(), abandon }
+    this.running.add(call)
+    const budget = unbounded ? 0 : this.maxCallMs
+    const timer = budget > 0 ? setTimeout(() => { this.stop(call, { kind: 'timeout', timeoutMs: budget }) }, budget) : undefined
+    return {
+      signal: call.interrupt.signal,
+      abandoned,
+      reason: () => call.reason,
+      [Symbol.dispose]: () => {
+        clearTimeout(timer)
+        this.running.delete(call)
+      },
+    }
+  }
+
+  /**
+   * Stop one running call: abort its body signal, then let its scheduler settle
+   * it with `TOOL_TIMEOUT` or `TOOL_CANCELLED_BY_USER` once the body returns or
+   * `interruptGraceMs` elapses. Sibling calls continue. Work the body already
+   * did is not rolled back.
+   * @param exec - the execution to stop, as seen by a `tools/execute` wrapper.
+   * @param reason - why the call stops; later requests keep the first reason.
+   * @returns whether the call was still running.
+   */
+  interrupt(exec: Pick<ToolExecution, 'token'>, reason: ToolCallInterruptReason): boolean {
+    const call = [...this.running].find(candidate => candidate.exec.token === exec.token)
+    return call !== undefined && this.stop(call, reason)
+  }
+
+  /**
+   * {@link interrupt} a running call by the model tool-call id an Agent issued.
+   * @param agent - the Agent whose call to stop.
+   * @param callId - model tool-call id.
+   * @param reason - why the call stops.
+   * @returns whether a matching call was still running.
+   */
+  interruptCall(agent: Agent, callId: ToolExecution['callId'], reason: ToolCallInterruptReason): boolean {
+    const call = [...this.running].find(candidate => candidate.exec.agent === agent && candidate.exec.callId === callId)
+    return call !== undefined && this.stop(call, reason)
+  }
+
+  private stop(call: RunningToolCall, reason: ToolCallInterruptReason): boolean {
+    if (call.reason !== undefined) return true
+    call.reason = reason
+    setTimeout(call.abandon, this.interruptGraceMs)
+    call.interrupt.abort(new ToolInterruptedError(reason))
+    return true
   }
 
   /**

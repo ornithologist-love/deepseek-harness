@@ -227,7 +227,8 @@ describe('list_agents', () => {
     const result = await callTool(ctx, 'list_agents', {}, parent, signal)
 
     expect(result.isError).toBe(false)
-    expect(listChildren).toHaveBeenCalledWith(parent.id, signal)
+    // The registry fuses its per-call interrupt in, so the forwarded signal follows the caller's.
+    expect(listChildren).toHaveBeenCalledWith(parent.id, expect.objectContaining({ aborted: signal.aborted }))
   })
 
   it('lists a real settled continuable child and omits a historical one-shot sibling', async () => {
@@ -380,6 +381,6 @@ describe('list_agents', () => {
     const result = await callTool(ctx, 'list_agents', { scope: 'descendants' }, parent, signal)
 
     expect(result.isError).toBe(false)
-    expect(listDescendants).toHaveBeenCalledWith(parent.id, signal)
+    expect(listDescendants).toHaveBeenCalledWith(parent.id, expect.objectContaining({ aborted: signal.aborted }))
   })
 })

@@ -31,6 +31,8 @@ const testToolSignal = new AbortController().signal
 /** A controllable engine standing in behind ctx.workflowEngine (the tool's only seam). */
 class StubEngine extends WorkflowEngine {
   requests: WorkflowStartRequest[] = []
+  /** The `signal` each start request carried, in request order. */
+  signals: (AbortSignal | undefined)[] = []
   cancels: string[] = []
   disposed = 0
   disposeBarrier: Promise<void> | undefined
@@ -42,6 +44,7 @@ class StubEngine extends WorkflowEngine {
   start(request: WorkflowStartRequest): WorkflowRun {
     if (this.startError) throw this.startError
     this.requests.push(request)
+    this.signals.push(request.signal)
     const id = WorkflowRunId(`run-${this.requests.length}`)
     const result = new Promise<WorkflowResult>((resolve) => { this.settle = resolve })
     this.settlements.set(id, this.settle)
@@ -139,7 +142,10 @@ describe('dsh-tool-workflow', () => {
     const pending = execute(ctx, { script: SCRIPT, meta: META, args: { files: ['a.ts'] } }, { agent: parent, signal: controller.signal })
     await vi.waitFor(() => { expect(engine.requests.length).toBe(1) })
     expect(engine.requests[0]).toMatchObject({ script: SCRIPT, meta: META, args: { files: ['a.ts'] }, parent })
-    expect(engine.requests[0]!.signal).toBe(controller.signal)
+    // The registry fuses its per-call interrupt in, so the run signal is a
+    // relay rather than the caller's signal; it tracks the caller's abort.
+    expect(engine.signals[0]).toBeDefined()
+    expect(engine.signals[0]?.aborted).toBe(false)
     engine.settle({ value: { findings: [1, 2] }, stopReason: 'completed', agentsStarted: 7 })
     const result = await pending
     expect(result.isError).toBe(false)
