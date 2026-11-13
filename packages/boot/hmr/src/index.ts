@@ -409,6 +409,8 @@ class Hmr extends Service {
         })])
         if (inputs === lastInputs) return
         const { warnings, pending, restartReason } = await this.reconcileProfile()
+        // A profile may install a package after boot; watch its resolved directory without following dependency links.
+        this.watcher?.add([...mappedDirectories(this.ownerContext.get('pluginPackages')?.resolution)])
         if (restartReason !== undefined) this.ctx.logger.warn('restart required: %s', restartReason)
         if (pending.length > 0) this.ctx.logger.warn('changed modules keep running their previous code until a restart: %o', pending)
         lastInputs = inputs
@@ -431,7 +433,7 @@ class Hmr extends Service {
       this.ctx.logger.info('watching %o in %s', root, this.baseDir)
     }
 
-    const match = picomatch(ignored)
+    const match = picomatch(ignored, { dot: true })
     const watchBaseDir = realpathSync(this.baseDir)
 
     // Collect externals before opening the watcher so every post-ready change
@@ -445,7 +447,9 @@ class Hmr extends Service {
     this.watcher = watch(root, {
       ...this.config,
       cwd: watchBaseDir,
-      ignored: path => match(relative(watchBaseDir, path)),
+      // Glob stars do not consume `..`, even with dot enabled; external roots also need their absolute spelling.
+      ignored: path => match(relative(watchBaseDir, path).split(sep).join('/'))
+        || match(resolve(watchBaseDir, path).split(sep).join('/')),
       ignoreInitial: true,
     })
 
