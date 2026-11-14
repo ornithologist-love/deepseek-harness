@@ -5206,6 +5206,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
     parameters: [{ name: 'request', description: 'immutable routing metadata from the exact prepared call.' }, { name: 'headers', description: 'fresh profile headers, shared only within this dispatch.' }, { name: 'next', description: 'continue header preparation through the remaining listeners.' }],
   },
   {
+    name: 'llm-pi-ai/request-route',
+    mode: 'waterfall',
+    signature: '\'llm-pi-ai/request-route\'(request: PiAiRequestHeaderContext, route: PiAiRequestRoute | undefined, next: () => PiAiRequestRoute | undefined): PiAiRequestRoute | undefined',
+    summary: 'Select a transport for one inference call before resolving profile credentials.',
+    description: 'Select a transport for one inference call before resolving profile credentials. Undefined preserves the prepared profile. An override replaces its endpoint, credential and headers together, without changing the profile or model identity.',
+    parameters: [{ name: 'request', description: 'immutable routing metadata from the prepared call.' }, { name: 'route', description: 'optional transport selected by the preceding listener.' }, { name: 'next', description: 'continue route selection through the remaining listeners.' }],
+  },
+  {
     name: 'llm/adapters-updated',
     mode: 'emit',
     signature: '\'llm/adapters-updated\'(): void',
@@ -7572,6 +7580,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'PiAiRequestHeaderContext',
     declaration: 'export interface PiAiRequestHeaderContext extends Readonly<Pick<GenerateOptions<string>, \'provider\' | \'model\' | \'sessionId\' | \'purpose\'>> {\n    readonly baseURL: string;\n}',
+  },
+  {
+    name: 'PiAiRequestRoute',
+    declaration: 'export interface PiAiRequestRoute {\n    readonly baseURL: string;\n    readonly apiKey: string;\n    readonly headers?: Readonly<Record<string, string>>;\n}',
   },
   {
     name: 'PlatformSession',

@@ -145,6 +145,12 @@ The adapter is built on immutable snapshots and per-operation resolution. Each o
 Initial prompt text and active tools use pi-ai's `Context.systemPrompt` and `Context.tools`; later system and tool updates remain in `Context.messages`. pi-ai normalizes these fields and applies the selected protocol's serialization rules.
 
 <a id="request-headers"></a>
+### Per-call request routes
+
+The synchronous `llm-pi-ai/request-route` waterfall selects an optional transport for one inference call before profile credentials are resolved. Its immutable `PiAiRequestHeaderContext` describes the prepared model. Returning `undefined` keeps that profile; returning a `PiAiRequestRoute` replaces the endpoint, API key and headers together for this call only. The override never reads the profile's credential or copies its headers, changes the model identity, or changes the saved profile. Overlapping local and delegated calls therefore remain independent. Direct `PiAiAdapter` consumers can supply `resolveRequestRoute`.
+
+Route overrides must use an HTTP(S) endpoint without embedded credentials or fragments and supply a nonempty API key and valid headers. Invalid overrides fail with `REQUEST_ROUTE` before dispatch. The request-header waterfall runs afterward with the selected endpoint and fresh route headers; model discovery does not use this routing seam.
+
 ### Request headers
 
 Plugins can contribute model-hidden transport metadata through the synchronous `llm-pi-ai/request-headers` waterfall. Each inference call supplies immutable routing metadata (`PiAiRequestHeaderContext`) and a fresh `Headers` copy of its profile headers; when configured names differ only in capitalization, the last entry wins. The endpoint belongs to the prepared model, so concurrent calls and configuration changes cannot exchange header state. Listeners edit that copy, call `next()`, and release their references on return; `ctx.on()` removes their registration when the owning plugin unloads. Harness attribution is applied after all contributors, and pi-ai receives a detached header record.

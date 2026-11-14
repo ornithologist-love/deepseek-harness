@@ -73,11 +73,11 @@ import { discoverModels } from './discovery.ts'
 import type { StoredModelDiscoveryProfile } from './discovery.ts'
 import { registerPiAiFlows } from './login.ts'
 import { providerDefaultsOf } from './provider-data.ts'
-import type { PiAiRequestHeaderContext } from './types.ts'
+import type { PiAiRequestHeaderContext, PiAiRequestRoute } from './types.ts'
 
 export { PiAiAdapter } from './adapter.ts'
 export type { PiAiAdapterOptions } from './adapter.ts'
-export type { PiAiRequestHeaderContext } from './types.ts'
+export type { PiAiRequestHeaderContext, PiAiRequestRoute } from './types.ts'
 export { Config } from './config.ts'
 export type {
   Options,
@@ -98,6 +98,18 @@ export const inject = ['llm']
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
+    /**
+     * Select a transport for one inference call before resolving profile credentials.
+     * Undefined preserves the prepared profile. An override replaces its endpoint,
+     * credential and headers together, without changing the profile or model identity.
+     * @mode waterfall
+     * @param request - immutable routing metadata from the prepared call.
+     * @param route - optional transport selected by the preceding listener.
+     * @param next - continue route selection through the remaining listeners.
+     * @returns a complete request-owned transport, or undefined to use the profile.
+     */
+    'llm-pi-ai/request-route'(request: PiAiRequestHeaderContext, route: PiAiRequestRoute | undefined,
+      next: () => PiAiRequestRoute | undefined): PiAiRequestRoute | undefined
     /**
      * Prepare headers for one pi-ai inference call, excluding model discovery.
      * Listeners run synchronously and must call next(); they may edit only the
@@ -239,6 +251,7 @@ export function apply(ctx: Context, config: Config): void {
     profiles,
     resolveApiKey,
     auth,
+    resolveRequestRoute: request => ctx.waterfall('llm-pi-ai/request-route', request, undefined, () => undefined),
     prepareHeaders: (request, headers) => ctx.waterfall('llm-pi-ai/request-headers', request, headers, () => headers),
     resolveAttachments: () => ctx.get('attachments'),
     resolveImageAccess: (attachments, ref) => resolveImageAttachmentAccess(

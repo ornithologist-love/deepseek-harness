@@ -868,7 +868,7 @@ interface LlmCallConfigAdapterDefaults {
 
 ## Pi-ai 请求头
 
-`PiAiRequestHeaderContext` 包含已准备调用的 provider、model、解析后的模型 `baseURL`，以及可选 Session id 和辅助用途。它不可变且不含消息或认证字段，与本次请求独有的 `Headers` 一起传入同步的 `llm-pi-ai/request-headers` waterfall。[适配器的请求头文档](../../packages/llm/llm-pi-ai/README.zh.md#request-headers)定义贡献的所有权、应用标识的优先级与失败行为。此扩展点仅适用于 pi-ai 推理请求。
+`PiAiRequestHeaderContext` 包含已准备调用的 provider、model、解析后的模型 `baseURL`，以及可选 Session id 和辅助用途。它不可变且不含消息或认证字段。同步的 `llm-pi-ai/request-route` waterfall 可在解析 profile 凭据之前返回完整的 `PiAiRequestRoute`（端点、API key 和请求头）；返回 undefined 则保留 profile。覆盖只属于本次调用，不修改配置。随后 `llm-pi-ai/request-headers` waterfall 接收选定的端点与本次请求独有的请求头。[适配器文档](../../packages/llm/llm-pi-ai/README.zh.md#per-call-request-routes)定义传输所有权、应用标识的优先级与失败行为。这些扩展点覆盖 pi-ai 推理及辅助调用，不包括模型发现。
 
 ## 服务与提供方约定
 
@@ -1284,6 +1284,28 @@ Prepare headers for one pi-ai inference call, excluding model discovery. Listene
  * @returns headers passed to pi-ai after Harness attribution is applied.
  */
 'llm-pi-ai/request-headers'(request: PiAiRequestHeaderContext, headers: Headers, next: () => Headers): Headers
+```
+
+Source: [`packages/llm/llm-pi-ai/src/index.ts`](../../packages/llm/llm-pi-ai/src/index.ts)
+
+<a id="llm-pi-airequest-route--waterfall"></a>
+
+#### `llm-pi-ai/request-route` — waterfall
+
+Select a transport for one inference call before resolving profile credentials. Undefined preserves the prepared profile. An override replaces its endpoint, credential and headers together, without changing the profile or model identity.
+
+```ts cordis-catalog
+/**
+ * Select a transport for one inference call before resolving profile credentials.
+ * Undefined preserves the prepared profile. An override replaces its endpoint,
+ * credential and headers together, without changing the profile or model identity.
+ * @mode waterfall
+ * @param request - immutable routing metadata from the prepared call.
+ * @param route - optional transport selected by the preceding listener.
+ * @param next - continue route selection through the remaining listeners.
+ * @returns a complete request-owned transport, or undefined to use the profile.
+ */
+'llm-pi-ai/request-route'(request: PiAiRequestHeaderContext, route: PiAiRequestRoute | undefined, next: () => PiAiRequestRoute | undefined): PiAiRequestRoute | undefined
 ```
 
 Source: [`packages/llm/llm-pi-ai/src/index.ts`](../../packages/llm/llm-pi-ai/src/index.ts)

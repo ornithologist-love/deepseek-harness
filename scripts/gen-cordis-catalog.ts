@@ -437,6 +437,7 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   DeepSeekLlmApiExtensionRequest: 'llm-streaming.md',
   LlmCallConfig: 'llm-streaming.md',
   PiAiRequestHeaderContext: 'llm-streaming.md',
+  PiAiRequestRoute: 'llm-streaming.md',
   ConfigureCall: 'llm-streaming.md',
   LlmModelContext: 'llm-streaming.md',
   LlmModelReasoningInfo: 'llm-streaming.md',
