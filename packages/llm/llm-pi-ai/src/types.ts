@@ -8,3 +8,10 @@ export interface PiAiRequestHeaderContext extends Readonly<Pick<GenerateOptions<
   /** Resolved endpoint of the model selected for this call. */
   readonly baseURL: string
 }
+
+/** A complete transport override owned by one inference call. */
+export interface PiAiRequestRoute {
+  readonly baseURL: string
+  readonly apiKey: string
+  readonly headers?: Readonly<Record<string, string>>
+}

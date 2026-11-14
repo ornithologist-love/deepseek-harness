@@ -47,6 +47,9 @@
 /deepseek-ai-dsh-llm-pi-ai/understand-the-implementation/design-philosophy:
   en: db1ac8ccca2d858b
   zh: 1d7cd4153aad22b0
+/deepseek-ai-dsh-llm-pi-ai/understand-the-implementation/per-call-request-routes:
+  en: 08075bcf90f3ffa5
+  zh: f8aa9630d809ded4
 /deepseek-ai-dsh-llm-pi-ai/understand-the-implementation/request-headers:
   en: 615ca9834bf6544f
   zh: 2d70b548f99000d1

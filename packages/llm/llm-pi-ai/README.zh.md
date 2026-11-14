@@ -145,6 +145,12 @@ Config 更新严格验证发生变化的 provider。初始加载将已存储的�
 初始提示词文本和可用工具分别使用 pi-ai 的 `Context.systemPrompt` 与 `Context.tools`；后续系统消息和工具更新保留在 `Context.messages` 中。pi-ai 负责规范化这些字段，并应用所选协议的序列化规则。
 
 <a id="request-headers"></a>
+### Per-call request routes
+
+同步的 `llm-pi-ai/request-route` waterfall 在解析 profile 凭据之前，为一次推理选择可选的传输配置。不可变的 `PiAiRequestHeaderContext` 描述已准备的模型。返回 `undefined` 保留 profile；返回 `PiAiRequestRoute` 则只为本次调用一起替换端点、API key 和请求头。覆盖既不读取 profile 的凭据，也不复制其请求头，不改变模型身份或已保存的 profile，因此并发的本地与委托调用互不影响。直接使用 `PiAiAdapter` 时可提供 `resolveRequestRoute`。
+
+覆盖必须使用不含嵌入凭据或片段的 HTTP(S) 端点，并提供非空 API key 与有效请求头。无效覆盖在发送前以 `REQUEST_ROUTE` 失败。之后的请求头 waterfall 接收选定的端点与本次请求的新请求头；模型发现不使用此路由扩展点。
+
 ### 请求头
 
 插件可通过同步的 `llm-pi-ai/request-headers` waterfall 贡献模型不可见的传输元数据。每次推理调用提供不可变的路由元数据（`PiAiRequestHeaderContext`）和从 profile 标头复制出的独立 `Headers`；配置名称仅大小写不同时，以最后一个条目为准。端点来自已准备的模型，因此并发调用与配置变更不会交换请求头状态。监听器修改该副本、调用 `next()`，并在返回时释放对它的引用；所属插件卸载时，`ctx.on()` 会移除注册。Harness 的应用标识在所有贡献器之后写入，pi-ai 接收独立的标头记录。

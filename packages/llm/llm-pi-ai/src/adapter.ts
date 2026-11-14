@@ -64,7 +64,7 @@ import { conversationUpdates, createModels, getSupportedThinkingLevels } from '.
 import { toStreamChunks } from './stream.ts'
 import { bindThinkingToPrefix } from './prefix-binding.ts'
 import type { PrefixDigests } from './prefix-binding.ts'
-import type { PiAiRequestHeaderContext } from './types.ts'
+import type { PiAiRequestHeaderContext, PiAiRequestRoute } from './types.ts'
 
 /**
  * Initially active declaration added to an Anthropic request whose projected
@@ -107,6 +107,8 @@ export interface PiAiAdapterOptions {
    * every request no matter how often the human signed in.
    */
   auth: PiAiAuthInjection
+  /** Override one call's endpoint and authentication before profile credential lookup. */
+  resolveRequestRoute?: (request: PiAiRequestHeaderContext) => PiAiRequestRoute | undefined
   /**
    * Synchronously prepare this call's headers before SDK dispatch. The input
    * contains a fresh copy of profile headers; attribution is enforced afterward.
@@ -417,7 +419,30 @@ export class PiAiAdapter extends LlmAdapter {
     // mid-request builds a separate snapshot, so this request finishes under
     // the one it started with and the next call picks up the new one.
     const profile = this.profileOf(snapshot, options.provider)
-    const model = this.modelOf(snapshot, options.provider, options.model)
+    const preparedModel = this.modelOf(snapshot, options.provider, options.model)
+    const selectedRoute = this.config.resolveRequestRoute?.(Object.freeze({
+      provider: options.provider, model: options.model, baseURL: preparedModel.baseUrl,
+      ...options.sessionId === undefined ? {} : { sessionId: options.sessionId },
+      ...options.purpose === undefined ? {} : { purpose: options.purpose },
+    }))
+    let route: PiAiRequestRoute | undefined
+    if (selectedRoute !== undefined) {
+      try {
+        const endpoint = new URL(selectedRoute.baseURL)
+        if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password
+          || endpoint.hash || typeof selectedRoute.apiKey !== 'string' || selectedRoute.apiKey.trim().length === 0
+          || /[\r\n\0]/.test(selectedRoute.apiKey))
+          throw new TypeError('Invalid route')
+        route = { baseURL: endpoint.href, apiKey: selectedRoute.apiKey,
+          headers: Object.fromEntries(new Headers(selectedRoute.headers).entries()) }
+      } catch {
+        throw LlmError.fromFailure({
+          message: 'pi-ai request route must supply an HTTP endpoint, credential and valid headers',
+          code: 'REQUEST_ROUTE',
+        })
+      }
+    }
+    const model = route === undefined ? preparedModel : { ...preparedModel, baseUrl: route.baseURL }
     const updates = conversationUpdates(model)
     // pi-ai collapses Anthropic tool updates without an initially active declaration.
     const tools = options.tools ?? []
@@ -432,7 +457,7 @@ export class PiAiAdapter extends LlmAdapter {
       model,
       options.reasoningEffort ?? profile.reasoning,
     )
-    const apiKey = await this.config.resolveApiKey(options.provider, profile)
+    const apiKey = route === undefined ? await this.config.resolveApiKey(options.provider, profile) : route.apiKey
 
     const consumer = new AbortController()
     const upstream = options.signal === undefined
@@ -478,7 +503,7 @@ export class PiAiAdapter extends LlmAdapter {
         ...options.maxTokens === undefined ? {} : { maxTokens: options.maxTokens },
         ...options.sessionId === undefined ? {} : { sessionId: String(options.sessionId) },
         signal: watchdog.signal,
-        headers: requestHeaders(profile.headers, options, model.baseUrl, this.config.prepareHeaders),
+        headers: requestHeaders(route === undefined ? profile.headers : route.headers, options, model.baseUrl, this.config.prepareHeaders),
       })
       const iterator = toStreamChunks(events, model.contextWindow, options.signal, model.id, digest)[Symbol.asyncIterator]()
       let exhausted = false

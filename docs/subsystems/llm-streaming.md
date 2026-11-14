@@ -864,7 +864,7 @@ The [wire reference](../deepseek-llm-api-wire-extensions.md) defines the exact r
 
 ## Pi-ai request headers
 
-`PiAiRequestHeaderContext` contains the prepared call's provider, model, resolved model `baseURL`, and optional Session id and auxiliary purpose. It is immutable, contains no messages or authentication fields, and accompanies a request-owned `Headers` object in the synchronous `llm-pi-ai/request-headers` waterfall. The [adapter's request-header documentation](../../packages/llm/llm-pi-ai/README.md#request-headers) defines contribution ownership, attribution precedence, and failure behavior. This extension point is specific to pi-ai inference requests.
+`PiAiRequestHeaderContext` contains the prepared call's provider, model, resolved model `baseURL`, and optional Session id and auxiliary purpose. It is immutable and contains no messages or authentication fields. The synchronous `llm-pi-ai/request-route` waterfall may return a complete `PiAiRequestRoute` (endpoint, API key and headers) before profile credential resolution; undefined keeps the profile. This override belongs to one call and does not mutate configuration. The `llm-pi-ai/request-headers` waterfall then receives the selected endpoint and request-owned headers. The [adapter documentation](../../packages/llm/llm-pi-ai/README.md#per-call-request-routes) defines transport ownership, attribution precedence, and failure behavior. These extension points cover pi-ai inference, including auxiliary calls, and exclude model discovery.
 
 ## Service and provider contracts
 
@@ -1280,6 +1280,28 @@ Prepare headers for one pi-ai inference call, excluding model discovery. Listene
  * @returns headers passed to pi-ai after Harness attribution is applied.
  */
 'llm-pi-ai/request-headers'(request: PiAiRequestHeaderContext, headers: Headers, next: () => Headers): Headers
+```
+
+Source: [`packages/llm/llm-pi-ai/src/index.ts`](../../packages/llm/llm-pi-ai/src/index.ts)
+
+<a id="llm-pi-airequest-route--waterfall"></a>
+
+#### `llm-pi-ai/request-route` — waterfall
+
+Select a transport for one inference call before resolving profile credentials. Undefined preserves the prepared profile. An override replaces its endpoint, credential and headers together, without changing the profile or model identity.
+
+```ts cordis-catalog
+/**
+ * Select a transport for one inference call before resolving profile credentials.
+ * Undefined preserves the prepared profile. An override replaces its endpoint,
+ * credential and headers together, without changing the profile or model identity.
+ * @mode waterfall
+ * @param request - immutable routing metadata from the prepared call.
+ * @param route - optional transport selected by the preceding listener.
+ * @param next - continue route selection through the remaining listeners.
+ * @returns a complete request-owned transport, or undefined to use the profile.
+ */
+'llm-pi-ai/request-route'(request: PiAiRequestHeaderContext, route: PiAiRequestRoute | undefined, next: () => PiAiRequestRoute | undefined): PiAiRequestRoute | undefined
 ```
 
 Source: [`packages/llm/llm-pi-ai/src/index.ts`](../../packages/llm/llm-pi-ai/src/index.ts)
