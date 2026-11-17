@@ -7,6 +7,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { McpResourceProvider } from '@deepseek-ai/dsh-mcp-resources'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import { publicToolName } from './tools.ts'
 
 /** Connection-owned values used by the resource and prompt consumers. */
 export interface ServerContext {
@@ -34,7 +35,15 @@ export function registerServerContext(ctx: Context, server: string, connection: 
       name: `mcp:${server}`,
       order: inner.systemPrompt.getSectionOrder('MCP_SERVERS'),
       interpolate: false,
-      text: () => connection.instructions(),
+      text: ({ scope, toolSet }) => {
+        const prefix = publicToolName(server, '')
+        const belongs = (tool: { name: string }): boolean => tool.name.startsWith(prefix)
+        // Deferred tools contribute instructions only when this step admits
+        // them. Resource-only servers retain their independent instructions.
+        if (toolSet && inner.tools.definitions(scope).some(belongs)
+          && !inner.tools.definitions(scope, toolSet).some(belongs)) return ''
+        return connection.instructions()
+      },
     })
   })
 }

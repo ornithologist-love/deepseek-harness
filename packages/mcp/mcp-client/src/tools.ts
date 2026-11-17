@@ -19,10 +19,21 @@ import type { Context } from '@deepseek-ai/cordis'
 import { isImageAdmissionError } from '@deepseek-ai/dsh-attachment'
 import type { AttachmentStore, ImageAttachmentRef, ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { ToolDefinition, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import type { ToolDefinition, ToolExecution, ToolExecutionResult, ToolRegistrationOptions } from '@deepseek-ai/dsh-tools'
 import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { JsonSchemaNode } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * Supply native step-time activation conditions for MCP tools.
+     * @mode waterfall
+     */
+    'mcp/tool-registration'(server: string, tool: ToolDefinition,
+      next: () => ToolRegistrationOptions | Promise<ToolRegistrationOptions>): Promise<ToolRegistrationOptions>
+  }
+}
 
 /** Resolved options relevant to tool bridging. */
 export interface ToolBridgeOptions {
@@ -148,7 +159,8 @@ export async function syncTools(
   const disposers: ToolDisposers = new Map()
   try {
     for (const [publicName, definition] of definitions) {
-      disposers.set(publicName, ctx.tools.register(definition))
+      const registration = await ctx.waterfall('mcp/tool-registration', opts.serverName, definition, () => ({}))
+      disposers.set(publicName, ctx.tools.register(definition, registration))
     }
   } catch (error) {
     // A conflict on an `mcp__<serverName>__`-qualified name means a foreign

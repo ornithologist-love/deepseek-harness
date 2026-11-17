@@ -70,6 +70,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 After startup, the server's tools appear as `mcp__<serverName>__<tool>` — try a prompt that uses one. If the initial connection fails, the harness still starts but no tools from that server appear, and an error is logged. Setting `failOnStartupError: true` rejects plugin activation; [app-boot's startup policy](../../boot/app-boot/README.md) still permits an optional MCP entry to fail without aborting the harness.
 
+Embedders may supply native `ToolRegistrationOptions` through the `mcp/tool-registration` waterfall to activate tools conditionally per step. Tool discovery and execution remain owned by the bridge and registry; server instructions are omitted from steps that admit none of the server's registered tools.
+
 ### Tool naming and coexistence
 
 The model sees each tool under a stable server-qualified name: `mcp__<serverName>__<rawName>`, for example `mcp__github__create_issue` — the same naming shape Claude Code and Codex use. Names stay stable while the server keeps the same tool name, so session history and permission rules survive restarts and reloads. Two servers can both offer a tool named `search` and coexist as `mcp__github__search` and `mcp__web__search`.
