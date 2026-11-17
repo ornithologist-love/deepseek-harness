@@ -15,7 +15,7 @@
  * @module
  */
 
-import { Client, type Transport } from '@modelcontextprotocol/client'
+import { Client, SdkHttpError, type Transport } from '@modelcontextprotocol/client'
 import type { Context } from '@deepseek-ai/cordis'
 import { assertNever, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ServerContext } from './server-context.ts'
@@ -272,6 +272,7 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     const closed: PromiseWithResolvers<void> = Promise.withResolvers()
     let attemptSettled = false
     let closeObserved = false
+    let sessionRecoveryStarted = false
     let transport: Transport | undefined
     const hasClosed = (): boolean => closeObserved
     client = generation
@@ -282,6 +283,18 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
       // A failed connect owns its close barrier in the catch path below. An
       // established generation can transition down directly from this signal.
       if (attemptSettled) generationDown(generation)
+    }
+    generation.onerror = (error) => {
+      // An HTTP 404 for an established session requires a new initialize,
+      // not another request with the expired session ID. Ordinary request
+      // failures (including authentication and tool errors) stay local.
+      if (!attemptSettled || !isCurrent(generation) || sessionRecoveryStarted
+        || config.transport !== 'streamable-http' || !transport?.sessionId
+        || !(error instanceof SdkHttpError) || error.data?.status !== 404) return
+      sessionRecoveryStarted = true
+      ctx.logger.warn(`${label}: HTTP session expired; closing the old connection to reconnect`)
+      // Do not replay in-flight tool calls: only the connection is recovered.
+      void closeGeneration().then((quiesced) => { settleFailedGeneration(generation, quiesced) })
     }
     /** Unattached probes close through their transport; attached clients must also report transport closure. */
     async function closeGeneration(): Promise<boolean> {
