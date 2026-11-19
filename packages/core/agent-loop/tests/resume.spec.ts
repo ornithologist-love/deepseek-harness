@@ -511,28 +511,30 @@ describe('the session-persistence Agent Note: AgentLoop factory create/resume', 
     await ctx.fiber.dispose()
   })
 
-  it('resume appends interrupted-turn closers durably through the handle', async () => {
+  it('resume restores an interrupted claim before closing its turn durably', async () => {
     // Lifecycle 1: store an interrupted log — an open turn with no turn/end.
     const sessionId = SessionId('interrupted-resume')
     const { ctx: ctx1, root } = await persistentHarness(new MockAdapter([]))
+    const pending = createUserMessage({ content: [{ type: 'text', text: 'claimed before crash' }], source: { kind: 'user' } })
     await seedStoredSession(ctx1, sessionId, [
-      { type: 'turn/start', seq: SessionSeq(0), time: 1, data: { turn: 1 } },
+      { type: 'agent/inbox/spliced', seq: SessionSeq(0), time: 1, data: { target: 'next-step', start: 0, inserted: [pending] } },
+      { type: 'turn/start', seq: SessionSeq(1), time: 2, data: { turn: 1 } },
+      { type: 'agent/inbox/spliced', seq: SessionSeq(2), time: 3, data: { target: 'next-step', start: 0, removedCount: 1, inserted: [] } },
     ])
     // A read returns the PHYSICAL validated log: no synthetic closers.
     const raw = await readStoredEvents(ctx1, sessionId)
-    expect(raw.map(event => event.type)).toEqual(['turn/start'])
+    expect(raw.map(event => event.type)).toEqual(['agent/inbox/spliced', 'turn/start', 'agent/inbox/spliced'])
     await ctx1.fiber.dispose()
 
     // Lifecycle 2: resume repairs the tail and stores the repair durably.
     const ctx2 = await mountPersistentHarness(root, new MockAdapter([]))
     const handle = await ctx2.agents.resume({ resumeSessionId: sessionId })
-    expect(handle.agent.session.snapshotEvents().map(event => event.type))
-      .toEqual(['turn/start', 'turn/end', 'session/end-seed'])
     await handle.dispose()
 
     const stored = await readStoredEvents(ctx2, sessionId)
-    expect(stored.map(event => event.type)).toEqual(['turn/start', 'turn/end', 'session/end-seed'])
-    expect(stored[1]).toMatchObject({ data: { reason: { kind: 'interrupted' } } })
+    expect(stored.slice(0, raw.length)).toEqual(raw)
+    expect(stored[3]).toMatchObject({ type: 'agent/inbox/spliced', data: { target: 'next-step', start: 0, inserted: [pending] } })
+    expect(stored[4]).toMatchObject({ type: 'turn/end', data: { reason: { kind: 'interrupted' } } })
     await ctx2.fiber.dispose()
   })
 
@@ -1120,7 +1122,7 @@ describe('the session-persistence Agent Note: AgentLoop factory create/resume', 
     // Lifecycle 1: run one full turn, persisting it.
     const adapter1 = new MockAdapter([textResponse('first answer')])
     const { ctx: ctx1, root } = await persistentHarness(adapter1)
-    const h1 = await ctx1.agents.create({ sessionId: SessionId('sess-resume'), meta: { cwd: '/w' } })
+    const h1 = await ctx1.agents.create({ sessionId: SessionId('sess-resume'), meta: { cwd: '/w' }, agentOptions: { provider: 'mock', model: 'mock' } })
     const a1 = h1.agent
     a1.followup(createUserMessage({ content: [{ type: 'text', text: 'first question' }], source: { kind: 'user' } }))
     await waitForIdle(ctx1, a1)

@@ -30,7 +30,7 @@ import {
 import { assertNever, deepFreeze } from '@deepseek-ai/dsh-util-values'
 import type { Scope } from '@deepseek-ai/dsh-scope'
 import { createScope } from '@deepseek-ai/dsh-scope'
-import type { EpochHeader, RequestContext, Session, SessionId, SessionSeq, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
+import type { EpochHeader, RequestContext, Session, SessionId, SessionLogOffset, SessionSeq, TurnEndReason, UserMessage } from '@deepseek-ai/dsh-session'
 import { canonicalHeader, headerEquals, ToolCallRecovery } from '@deepseek-ai/dsh-session'
 import { renderContextSections, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
@@ -61,6 +61,7 @@ type Phase =
   | { kind: 'running'; abort: AbortController; turn: number; step: number; wakeRequested: boolean }
 
 type StepEndReason = Extract<TurnEndReason, { kind: 'completed' | 'max-tokens' }>
+type InboxBatch = Partial<Record<InboxTarget, readonly UserMessage[]>>
 
 type PreparedStep =
   | { kind: 'reject' }
@@ -114,6 +115,7 @@ export class ReactLoopAgent implements Agent {
   readonly inbox: ReactLoopInbox
   private phase: Phase
   private activityDone: Promise<void> = Promise.resolve()
+  private claimedInput: InboxBatch = {}
 
   /** The agent-scoped registration boundary; the lifecycle owner unwinds it after the driver exits. */
   readonly scope: Scope
@@ -173,7 +175,12 @@ export class ReactLoopAgent implements Agent {
     // Captured before the insertion so a reentrant cancel from a splice observer cannot reclassify it.
     const wakingAfterAbort = wakeup && this.phase.kind !== 'idle' && this.phase.abort.signal.aborted
     const resolvedTarget = wakingAfterAbort ? 'next-turn' : target
-    this.inbox.splice(resolvedTarget, Infinity, 0, [message])
+    const matchesId = (candidate: UserMessage) => candidate.id === message.id
+    if (this.claimedInput['next-turn']?.some(matchesId) || this.claimedInput['next-step']?.some(matchesId)) return
+    if (!this.inbox.nextTurn.some(matchesId) && !this.inbox.nextStep.some(matchesId)) {
+      if (this.session.snapshotEvents().some(event => event.type === 'user/message' && matchesId(event.data))) return
+      this.inbox.append(resolvedTarget, message)
+    }
     if (wakeup) this.wakeDriver(wakingAfterAbort)
   }
 
@@ -286,11 +293,10 @@ export class ReactLoopAgent implements Agent {
     }
   }
 
-  private async preStep(target: InboxTarget, position: { turn: number; step: number }): Promise<PreparedStep> {
+  private async preStep(position: { turn: number; step: number }): Promise<PreparedStep> {
     /* v8 ignore next -- private callers establish the running phase before proposing a step */
     if (this.phase.kind !== 'running') throw new Error(`agent "${this.id}": pre-step outside running phase`)
     const signal = this.phase.abort.signal
-    const claimed = this.inbox.claim(target, position.turn)
     const selection = this.model.current()
     if (selection === undefined) {
       throw new Error(`agent "${this.id}" has no provider/model: set AgentOptions.provider and AgentOptions.model or record a model selection`)
@@ -299,6 +305,11 @@ export class ReactLoopAgent implements Agent {
     try {
       const assembly = await this.loopCtx.systemPrompt.assemble({ ...assembleContextFor(this, signal), modelSelection: selection, toolSet })
       signal.throwIfAborted()
+      this.claimedInput['next-step'] = this.inbox.nextStep
+      const claimed = [
+        ...this.inbox.claim('next-step', this.claimedInput['next-step'].length, position.turn),
+        ...this.claimedInput['next-turn'] ?? [],
+      ]
       const decision = await this.dispatch.waterfall(
         'agent/pre-step', { messages: claimed, ...position, signal, modelSelection: selection },
         (): Promise<PreStepDecision> => {
@@ -329,6 +340,19 @@ export class ReactLoopAgent implements Agent {
     return !headerEquals(baseline, canonicalHeader({ ...baseline, tools: [...tools] }))
   }
 
+  /** Put input back after preparation fails, leaving already committed messages in history. */
+  private restoreBatch(from: SessionLogOffset): void {
+    const events = this.session.snapshotEvents(from)
+    if (events.some(event => event.type === 'assistant/message' || event.type === 'assistant/attempt')) return
+    const admitted = new Set(events.flatMap(event =>
+      event.type === 'user/message' ? [event.data.id] : []))
+    for (const target of ['next-turn', 'next-step'] as const) {
+      const messages = this.claimedInput[target] ?? []
+      this.inbox.restore(target, messages.filter(message =>
+        !admitted.has(message.id) && (target === 'next-step' || message.source.kind === 'user')))
+    }
+  }
+
   /** Open one turn before claiming its first proposed step. */
   private async turn(): Promise<boolean> {
     if (this.phase.kind !== 'running') {
@@ -345,12 +369,15 @@ export class ReactLoopAgent implements Agent {
     }
     phase.turn = turn
     let turnEnds: TurnEndReason | null = null
-    let target: InboxTarget = 'next-turn'
+    const nextTurn = this.inbox.nextTurnBatch
+    this.claimedInput = { 'next-turn': nextTurn }
+    let batchStart = this.session.seq
     try {
+      this.inbox.claim('next-turn', nextTurn.length, turn)
       while (true) {
         signal.throwIfAborted()
         const step = phase.step + 1
-        const decision = await this.preStep(target, { turn, step })
+        const decision = await this.preStep({ turn, step })
         if (decision.kind === 'reject') {
           turnEnds = { kind: 'blocked' }
           return false
@@ -397,13 +424,14 @@ export class ReactLoopAgent implements Agent {
           // Admission closes once the step's tool batch settles or no step opens.
           decision.toolSet.dispose()
         }
+        this.claimedInput = {}
+        batchStart = this.session.seq
         signal.throwIfAborted()
         if (turnEnds && this.inbox.nextStep.length === 0) {
           await this.dispatch.serial('agent/turn-stopping', { turn, signal })
           signal.throwIfAborted()
         }
         if (turnEnds && this.inbox.nextStep.length === 0) break
-        target = 'next-step'
       }
     } catch (error: unknown) {
       // A cause is present exactly while the signal is aborted.
@@ -411,6 +439,11 @@ export class ReactLoopAgent implements Agent {
       if (cause !== undefined) {
         turnEnds = { kind: 'aborted', reason: cause }
         throw error
+      }
+      try {
+        this.restoreBatch(batchStart)
+      } catch (restoreError: unknown) {
+        error = new AggregateError([error, restoreError], 'Step failed and its queued input could not be restored', { cause: error })
       }
       // Every failure is structured: an `LlmError` keeps its facts, a tool
       // activation failure keeps its code, and anything else flattens to
@@ -423,6 +456,7 @@ export class ReactLoopAgent implements Agent {
       }
       this.throwError(error)
     } finally {
+      this.claimedInput = {}
       try {
         // oxlint-disable-next-line typescript/no-non-null-assertion -- every exit assigns a turn ending
         this.session.append('turn/end', { turn, reason: turnEnds! })
