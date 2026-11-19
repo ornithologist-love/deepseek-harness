@@ -6,7 +6,7 @@
 
 import type { MessageId } from '@deepseek-ai/dsh-llm'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
-import type { Session, SessionEventMap, UserMessage } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionEventMap, UserMessage } from '@deepseek-ai/dsh-session'
 import type {
   AgentEventDispatch,
   Inbox as InboxContract,
@@ -64,6 +64,63 @@ export const inboxProjectionDefinition = {
 } satisfies ProjectionDefinition<'inbox', InboxState>
 
 /**
+ * Recover claimed messages left outside the request history of an interrupted turn.
+ * @param events - persisted session history ending inside the interrupted turn.
+ * @returns inbox splices restoring unadmitted messages in their original queue order.
+ */
+export function interruptedInboxRestorations(
+  events: readonly SessionEvent[],
+): SessionEventMap['agent/inbox/spliced'][] {
+  let pending = inboxProjectionDefinition.init()
+  const claimed = {
+    'next-turn': new Map<MessageId, UserMessage>(),
+    'next-step': new Map<MessageId, UserMessage>(),
+  }
+  let inTurn = false
+  for (const event of events) {
+    switch (event.type) {
+      case 'turn/start':
+      case 'turn/end':
+        inTurn = event.type === 'turn/start'
+        claimed['next-turn'].clear()
+        claimed['next-step'].clear()
+        break
+      case 'assistant/message':
+      case 'assistant/attempt':
+        // A model attempt settles the proposal, including inputs filtered by middleware.
+        claimed['next-turn'].clear()
+        claimed['next-step'].clear()
+        break
+      case 'agent/inbox/spliced': {
+        const { target, start, removedCount = 0, inserted, outcome } = event.data
+        if (inTurn && outcome === undefined) {
+          for (const message of pending[target].slice(start, start + removedCount)) {
+            if (target === 'next-turn' && message.source.kind !== 'user') continue
+            claimed[target].set(message.id, message)
+          }
+        }
+        for (const { id } of inserted) {
+          claimed['next-turn'].delete(id)
+          claimed['next-step'].delete(id)
+        }
+        pending = inboxProjectionDefinition.apply(pending, event)
+        break
+      }
+      case 'user/message':
+        claimed['next-turn'].delete(event.data.id)
+        claimed['next-step'].delete(event.data.id)
+        break
+      default:
+        break
+    }
+  }
+  return (['next-turn', 'next-step'] as const).flatMap((target) => {
+    const inserted = [...claimed[target].values()]
+    return inserted.length === 0 ? [] : [{ target, start: 0, inserted }]
+  })
+}
+
+/**
  * Driver-owned durable Inbox implementation used by ReactLoopAgent and focused
  * provider tests.
  * @param readState - reader for the live Inbox projection state.
@@ -77,7 +134,7 @@ export class ReactLoopInbox implements InboxContract {
     private readonly dispatch: AgentEventDispatch,
   ) {}
 
-  /** Prompts awaiting individual turns. */
+  /** Prompts awaiting the next turn. */
   get nextTurn(): readonly UserMessage[] {
     return this.readState()['next-turn']
   }
@@ -85,6 +142,14 @@ export class ReactLoopInbox implements InboxContract {
   /** Input awaiting the next step boundary. */
   get nextStep(): readonly UserMessage[] {
     return this.readState()['next-step']
+  }
+
+  /** Consecutive user follow-ups share a turn. Agent-authored turns keep their own admission. */
+  get nextTurnBatch(): readonly UserMessage[] {
+    const pending = this.nextTurn
+    if (pending[0]?.source.kind !== 'user') return pending.slice(0, 1)
+    const end = pending.findIndex(message => message.source.kind !== 'user')
+    return end === -1 ? pending : pending.slice(0, end)
   }
 
   /** Whether either pending-message list contains work. */
@@ -100,16 +165,26 @@ export class ReactLoopInbox implements InboxContract {
   }
 
   /**
-   * Remove and return the complete batch proposed for one step.
-   * @param target - whether this boundary also consumes one queued turn.
+   * Remove and return the pending batch for one inbox target.
+   * @param target - pending list that is claimed.
+   * @param count - size of the batch at the start of the claim.
    * @param turn - turn that will own the claimed batch.
-   * @returns next-step input followed by the queued turn, when requested.
+   * @returns the claimed messages in queue order.
    */
-  claim(target: InboxTarget, turn: number): UserMessage[] {
-    const claimed = this.mutate('next-step', 0, this.nextStep.length, [], false)
-    if (target === 'next-turn') claimed.push(...this.mutate('next-turn', 0, 1, [], false))
+  claim(target: InboxTarget, count: number, turn: number): UserMessage[] {
+    const claimed = this.mutate(target, 0, count, [], false)
     for (const message of claimed) this.dispatch.emit('agent/inbox/claimed', { message, turn })
     return claimed
+  }
+
+  /**
+   * Restore a failed batch ahead of input received after its claim.
+   * @param target - original destination of the batch.
+   * @param messages - messages that have not entered the model history.
+   */
+  restore(target: InboxTarget, messages: readonly UserMessage[]): void {
+    const missing = messages.filter(message => this.locate(message.id) === undefined)
+    this.splice(target, 0, 0, missing)
   }
 
   /**

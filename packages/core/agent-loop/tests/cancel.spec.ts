@@ -215,7 +215,7 @@ describe('Agent.cancel()', () => {
     send(agent, 'wake it')
     await idle
     expect(userTexts(agent)).toEqual(['active', 'preserved', 'wake it'])
-    expect(adapter.requests).toHaveLength(3)
+    expect(adapter.requests).toHaveLength(2)
   })
 
   it('cancel({ keepInbox: true }) latches a waking send landing in the abort-to-idle window', async () => {

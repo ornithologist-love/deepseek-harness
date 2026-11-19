@@ -85,6 +85,8 @@ function latestCompletedPrefixBoundary(events: readonly SessionEvent[]): Session
 
 /** Implements Session business commands delegated by the Session Controller Remote service. */
 export class SessionCommandController {
+  private readonly promptAdmissions = new WeakMap<Agent, Map<SessionRequestId, Promise<SessionPromptValue>>>()
+
   /**
    * @param ctx - Host context carrying Agent, model, attachment, title, and Workspace services.
    * @param agents - sole owner of create, resume, and Agent composition.
@@ -308,7 +310,23 @@ export class SessionCommandController {
    */
   async prompt(request: SessionPromptRequest, source: MessageSource): Promise<SessionPromptValue> {
     const agent = await this.resolveAgent(request.sessionId)
+    const admissions = this.promptAdmissions.get(agent) ?? new Map<SessionRequestId, Promise<SessionPromptValue>>()
+    const pending = admissions.get(request.requestId)
+    if (pending !== undefined) return pending
     if (hasPromptRequest(agent, request.requestId)) return { accepted: true }
+
+    const admission = this.admitPrompt(agent, request, source)
+    admissions.set(request.requestId, admission)
+    this.promptAdmissions.set(agent, admissions)
+    try {
+      return await admission
+    } finally {
+      admissions.delete(request.requestId)
+    }
+  }
+
+  /** Prepare attachments and deliver the first attempt at this prompt identity. */
+  private async admitPrompt(agent: Agent, request: SessionPromptRequest, source: MessageSource): Promise<SessionPromptValue> {
     const admission = resolvePromptFileReceipts(
       request.content,
       receiptId => this.ctx.fileUploads.resolve(agent, receiptId),
@@ -563,10 +581,10 @@ function hasPromptRequest(agent: Agent, requestId: SessionRequestId): boolean {
     return source.kind === 'user' && 'rpcId' in source && source.rpcId === requestId
   }
   if (agent.inbox.nextTurn.some(matches) || agent.inbox.nextStep.some(matches)) return true
+  // The insertion establishes acceptance even if the occurrence was later removed.
   // oxlint-disable-next-line typescript/no-deprecated -- Existing Session history read; migration deferred.
   return agent.session.snapshotEvents().some((event) => {
-    if (event.type !== 'user/message') return false
-    const source = event.data.source
-    return source.kind === 'user' && 'rpcId' in source && source.rpcId === requestId
+    if (event.type === 'user/message') return matches(event.data)
+    return event.type === 'agent/inbox/spliced' && event.data.inserted.some(matches)
   })
 }

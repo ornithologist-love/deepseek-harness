@@ -638,6 +638,27 @@ describe('Session file uploads', () => {
     expect(followup).not.toHaveBeenCalled()
   })
 
+  it('admits one occurrence for concurrent and subsequent retries of a queued prompt', async () => {
+    const { controller, agent, followup, saveImages } = await uploadHarness()
+    saveImages.mockResolvedValue([STAGED_IMAGE])
+    followup.mockImplementation((message: UserMessage) => {
+      agent.session.append('agent/inbox/spliced', {
+        target: 'next-turn', start: 0, inserted: [message],
+      })
+    })
+    const request = promptRequest([{ type: 'image', mediaType: 'image/png', data: 'AAAA' }])
+    const send = () => controller.prompt(request, USER_SOURCE)
+
+    await expect(Promise.all([send(), send()])).resolves.toEqual([{ accepted: true }, { accepted: true }])
+    expect(saveImages).toHaveBeenCalledOnce()
+
+    agent.session.append('agent/inbox/spliced', {
+      target: 'next-turn', start: 0, removedCount: 1, inserted: [], outcome: 'canceled',
+    })
+    await expect(send()).resolves.toEqual({ accepted: true })
+    expect(followup).toHaveBeenCalledOnce()
+  })
+
   it('rejects when the Agent disappears during prompt admission', async () => {
     const { controller, saveImages, disposeAgent } = await uploadHarness()
     const admitted = Promise.withResolvers<readonly ImageAttachmentRef[]>()

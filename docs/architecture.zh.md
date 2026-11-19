@@ -86,8 +86,9 @@ AgentLoop 初始化 Agent，失败则回滚，并在启动已排队工作前等�
 
 ```text
 turn/start
-  claim next-step input plus one queued message
+  claim consecutive queued user follow-ups or one agent-authored turn
   snapshot Session model selection; assemble prompt sections + step-admitted tool schemas
+  claim the queued next-step batch
   -> agent/pre-step; project runtime context at fallback
                                      reject | enter(messages, startsRequestSeries?)
      reject, or a first enter rewritten empty -> close the turn with no step
@@ -102,7 +103,7 @@ turn/start
        assistant/message | assistant/attempt -> agent/assistant-stream end
      tool/call* -> tools/pre-execute -> tools/execute -> tools/post-execute -> tool/result*
      step/end
-     tools owe another request, or next-step input arrived -> claim -> next step
+     tools owe another request, or next-step input arrived -> prepare next step
   -> agent/turn-stopping
 turn/end
 ```

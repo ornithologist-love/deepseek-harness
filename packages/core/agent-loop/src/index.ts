@@ -25,15 +25,15 @@ import type {
 } from '@deepseek-ai/dsh-agent'
 import { modelSelectionProjectionDefinition } from '@deepseek-ai/dsh-agent'
 import { errorChain, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
-import { interruptedTurnClosers, SessionLogOffset, SessionPreparation } from '@deepseek-ai/dsh-session'
-import type { Session, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
+import { interruptedTurnClosers, SessionLogOffset, SessionPreparation, SessionSeq } from '@deepseek-ai/dsh-session'
+import type { Session, SessionEvent, SessionHeader, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection'
 import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
 import type { SessionHandle, SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
 import { ReactLoopAgent } from './agent.ts'
-import { inboxProjectionDefinition } from './inbox.ts'
+import { inboxProjectionDefinition, interruptedInboxRestorations } from './inbox.ts'
 import { DEFAULT_MAX_PARALLEL_TOOL_CALLS } from './constants.ts'
 import type {} from './runtime-context.ts'
 
@@ -793,21 +793,33 @@ export class AgentLoop extends Service implements AgentFactory {
             (abandoned) => { void abandoned.close() },
           )
           // Semantic crash repair is the agent layer's job: persistence hands
-          // back the physically valid log; an interrupted final turn receives
-          // synthetic closers (missing tool errors, step/end, turn/end) that
-          // are appended through the same handle as an ordinary batch.
+          // back the physically valid log. Restore unadmitted claims before
+          // closing the interrupted turn through the same persistence handle.
           const coldRead = await handle.read(0, undefined, { signal: fused })
           fused.throwIfAborted()
           const persisted = coldRead.events
           const closers = interruptedTurnClosers(persisted)
-          if (closers.length > 0) await handle.append(closers)
+          let recovered = closers
+          const last = persisted.at(-1)
+          if (last !== undefined && closers.length > 0) {
+            const restorations = interruptedInboxRestorations(persisted).map((data, index): SessionEvent<'agent/inbox/spliced'> => ({
+              type: 'agent/inbox/spliced',
+              seq: SessionSeq(last.seq + index + 1),
+              time: last.time,
+              data,
+            }))
+            if (restorations.length > 0) {
+              recovered = [...restorations, ...interruptedTurnClosers([...persisted, ...restorations])]
+            }
+            await handle.append(recovered)
+          }
           preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, {
-            seed: [...persisted, ...closers],
+            seed: [...persisted, ...recovered],
             meta: structuredClone(handle.header),
             inheritedEventCount: handle.inheritedEventCount,
             eventState: coldRead.eventState,
           }))
-          stored = { handle, storedCount: persisted.length + closers.length }
+          stored = { handle, storedCount: persisted.length + recovered.length }
           await this.appendUnstoredSuffix(stored, preparation.session)
         } finally {
           await unfollowOwner()

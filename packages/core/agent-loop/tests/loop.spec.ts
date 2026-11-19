@@ -1043,8 +1043,8 @@ describe('agent loop', () => {
     expect(flat).toContain('change of plans')
   })
 
-  it('starts idle steering synchronously and enters later steering at the next step', async () => {
-    const adapter = new MockAdapter([textResponse('first'), textResponse('second')])
+  it('starts idle steering synchronously and includes adjacent steering in the same request', async () => {
+    const adapter = new MockAdapter([textResponse('first')])
     const ctx = await harness(adapter)
     const agent = await ctx.agentLoop.create(SessionId('a1'), { provider: 'mock', model: 'mock' })
 
@@ -1062,10 +1062,9 @@ describe('agent loop', () => {
       [{ type: 'text', text: 'first idle steer' }],
       [{ type: 'text', text: 'second idle steer' }],
     ])
-    expect(adapter.requests).toHaveLength(2)
+    expect(adapter.requests).toHaveLength(1)
     expect(JSON.stringify(adapter.requests[0]?.messages)).toContain('first idle steer')
-    expect(JSON.stringify(adapter.requests[0]?.messages)).not.toContain('second idle steer')
-    expect(JSON.stringify(adapter.requests[1]?.messages)).toContain('second idle steer')
+    expect(JSON.stringify(adapter.requests[0]?.messages)).toContain('second idle steer')
   })
 
   it('stops after a throwing pre-step listener and retains later steering until a wakeup', async () => {
@@ -1791,6 +1790,60 @@ describe('agent loop', () => {
       { kind: 'user' },
       { kind: 'test' },
     ])
+  })
+
+  it('batches follow-ups at the next turn and includes steering received during assembly', async () => {
+    const adapter = new MockAdapter([textResponse('first'), textResponse('second')])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('batches'), { provider: 'mock', model: 'mock' })
+    const assembling = Promise.withResolvers<undefined>()
+    const release = Promise.withResolvers<undefined>()
+    const assemble = ctx.systemPrompt.assemble.bind(ctx.systemPrompt)
+    vi.spyOn(ctx.systemPrompt, 'assemble').mockImplementationOnce(async (...args) => {
+      assembling.resolve(undefined)
+      await release.promise
+      return assemble(...args)
+    })
+
+    send(agent, 'first')
+    await assembling.promise
+    send(agent, 'second')
+    send(agent, 'third')
+    for (const text of ['steer one', 'steer two']) {
+      agent.steer(createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } }))
+    }
+    release.resolve(undefined)
+    await agent.whenIdle()
+
+    const userCounts = adapter.requests.map(request => request.messages.filter(message => message.role === 'user').length)
+    expect(userCounts).toEqual([3, 5])
+    expect(userTexts(agent)).toEqual(['steer one', 'steer two', 'first', 'second', 'third'])
+    expect(agent.session.snapshotEvents().filter(event => event.type === 'turn/start')).toHaveLength(2)
+  })
+
+  it('restores unadmitted messages to their original queues after request preparation fails', async () => {
+    const adapter = new MockAdapter([textResponse('recovered')])
+    const ctx = await harness(adapter)
+    const agent = await ctx.agentLoop.create(SessionId('failed-batch'), { provider: 'mock', model: 'mock' })
+    const followup = createUserMessage({ content: [{ type: 'text', text: 'follow-up' }], source: { kind: 'user' } })
+    const stop = ctx.on('agent/request', () => {
+      agent.followup(followup)
+      throw new Error('mock preparation failure')
+    })
+    const steering = createUserMessage({ content: [{ type: 'text', text: 'steer' }], source: { kind: 'user' } })
+    agent.inbox.append('next-step', steering)
+    agent.followup(followup)
+    await agent.whenIdle()
+
+    expect(agent.inbox.nextTurn).toEqual([followup])
+    expect(agent.inbox.nextStep).toEqual([steering])
+    expect(userTexts(agent)).toEqual([])
+
+    stop()
+    send(agent, 'wake')
+    await agent.whenIdle()
+    expect(adapter.requests).toHaveLength(1)
+    expect(userTexts(agent)).toEqual(['steer', 'follow-up', 'wake'])
   })
 
   it('keeps a session-listener send after dequeue in the following turn', async () => {
