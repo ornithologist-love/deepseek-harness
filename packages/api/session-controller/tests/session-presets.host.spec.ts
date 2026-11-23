@@ -53,7 +53,12 @@ interface HarnessOptions {
   /** Requested presets whose resolution waits for the paired promise. */
   readonly resolving?: ReadonlyMap<string, Promise<void>>
   /** Workspace placement served to `workspaceId` requests. */
-  readonly workspace?: { readonly members: readonly SessionId[]; readonly archived: readonly SessionId[] }
+  readonly workspace?: {
+    readonly members: readonly SessionId[]
+    readonly archived: readonly SessionId[]
+    /** Member directories, primary first; defaults to the Workspace path. */
+    readonly directories?: (cwd: string) => readonly string[]
+  }
 }
 
 const WORKSPACE = 'workspace-1' as WorkspaceId
@@ -115,10 +120,12 @@ async function harness(options: HarnessOptions = {}) {
     },
   }) as never)
   const { members, archived } = options.workspace ?? { members: [], archived: [] }
+  const directories = options.workspace?.directories?.(cwd) ?? [cwd]
   const workspace = { id: WORKSPACE, path: cwd, sessionIds: members, attachSession: () => Promise.resolve() }
   ctx.provide('workspaceRegistry', {
     get: (id: WorkspaceId) => id === WORKSPACE ? workspace : undefined,
     list: () => [workspace],
+    directoriesOf: (id: WorkspaceId) => id === WORKSPACE ? directories : [],
     archivedSessionIds: archived,
   } as never)
 
@@ -659,6 +666,17 @@ describe('session.create Workspace placement', () => {
     const reused = await remote.create({ sessionId: draft, workspaceId: WORKSPACE })
 
     expect(reused).toMatchObject({ ok: true, value: { sessionId: 'member-draft' } })
+  })
+
+  it('starts a new Session in the primary member directory of a multi-folder Workspace', async () => {
+    const primary = realpathSync(mkdtempSync(join(tmpdir(), 'dsh-session-preset-primary-')))
+    tempDirs.push(primary)
+    const { remote, ctx } = await harness({ presets: ['standard'], workspace: { members: [], archived: [], directories: cwd => [primary, cwd] } })
+
+    const created = await remote.create({ workspaceId: WORKSPACE })
+
+    if (!created.ok) throw new Error(`create failed: ${created.error.message}`)
+    expect(ctx.sessions.get(created.value.sessionId)?.header.cwd).toBe(primary)
   })
 
   it.each([

@@ -97,6 +97,7 @@ describe('Session creation failures', () => {
     failed.provide('workspaceRegistry', {
       get: () => workspace,
       list: () => [workspace],
+      directoriesOf: () => [workspace.path],
     } as never)
     const failedController = new SessionCommandController(
       failed,

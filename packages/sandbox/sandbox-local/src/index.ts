@@ -34,7 +34,7 @@ import {
 } from '@deepseek-ai/node-addon-system/landlock-run'
 import { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { SandboxPreparationError, SandboxProvider, SandboxUnavailableError, canonicalPath } from '@deepseek-ai/dsh-sandbox'
+import { SandboxPreparationError, SandboxProvider, SandboxUnavailableError, canonicalPath, workspaceWritableRoots } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, ConfinedSandboxMode, RunnerFailureRule, SandboxEnforcement, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { AclWriteGrant, isTempRootInsideWorkspace, registerAclDiagnosisSkill, tempWriteSid, workspaceWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
@@ -157,7 +157,7 @@ export interface SandboxInternals {
 }
 
 /** The chain's verdict: which runner confines, and how completely it enforces. */
-type SelectedRunner = { runner: 'bwrap' | 'landlock' | 'seatbelt' | 'windows-acl'; enforcement: SandboxEnforcement }
+type SelectedRunner = { runner: 'bwrap' | 'landlock' | 'seatbelt' | 'windows-mxc' | 'windows-acl'; enforcement: SandboxEnforcement }
 
 /** One live session/workspace pair's private temp directory and capability. */
 interface AclTempCapability {
@@ -178,10 +178,8 @@ interface AclTempCapability {
 const PLATFORM_CHAINS: Record<string, readonly SelectedRunner['runner'][]> = {
   linux: ['bwrap', 'landlock'],
   darwin: ['seatbelt'],
-  // The Windows restricted-token runner (@deepseek-ai/dsh-sandbox-windows-acl):
-  // a sole candidate, selected without a probe — its execution-time refusal
-  // fails closed through its stderr signature (windows-acl-run:) and exit 127.
-  win32: ['windows-acl'],
+  // Native Windows MXC/PSEC runner; refuses to fall back to the legacy ACL runner.
+  win32: ['windows-mxc'],
 }
 
 /**
@@ -197,6 +195,7 @@ const STATIC_ENFORCEMENT: Record<SelectedRunner['runner'], SandboxEnforcement> =
   bwrap: 'full',
   landlock: 'full',
   seatbelt: 'full',
+  'windows-mxc': 'partial',
   // Everyone stays in both restricting lists for process initialization, but
   // the Low label denies the write authority it used to confer. NTFS hard
   // links still alias a granted workspace file to a path outside it, reads
@@ -229,6 +228,7 @@ const DENIAL_SIGNATURES = {
   // pwsh/.NET: "Access to the path '...' is denied."; cmd: "Access is denied.";
   // Node EACCES: "permission denied"; EPERM: "operation not permitted".
   'windows-acl': ['access is denied', 'access to the path', 'permission denied', 'operation not permitted'],
+  'windows-mxc': ['access is denied', 'access to the path', 'permission denied', 'operation not permitted'],
   runnerCommand: ['read-only file system', 'permission denied'],
 } as const satisfies Record<SelectedRunner['runner'] | 'runnerCommand', readonly string[]>
 
@@ -257,6 +257,7 @@ const RUNNER_FAILURE_RULES = {
   }],
   seatbelt: [{ fatalSignatures: ['sandbox-exec: '] }],
   'windows-acl': [{ allowedExitCodes: [WINDOWS_ACL_RUNNER_FAILURE_EXIT], fatalSignatures: ['windows-acl-run: '] }],
+  'windows-mxc': [{ allowedExitCodes: [WINDOWS_ACL_RUNNER_FAILURE_EXIT], fatalSignatures: ['windows-mxc-run: '] }],
 } as const satisfies Record<SelectedRunner['runner'], readonly RunnerFailureRule[]>
 
 /**
@@ -367,6 +368,14 @@ export class LocalSandboxProvider extends SandboxProvider {
       case 'bwrap': return ['bwrap', ...bwrapProfileArgs(policy)]
       case 'landlock': return [this.landlockLauncher(), ...landlockProfileArgs(policy)]
       case 'seatbelt': return [this.seatbeltExec(), ...seatbeltProfileArgs(policy)]
+      case 'windows-mxc': return [
+        ...this.windowsAclRunnerInvocation(), '--mxc',
+        JSON.stringify({
+          mode: policy.mode,
+          roots: policy.mode === 'workspace-write' ? workspaceWritableRoots(policy) : [policy.workspaceRoot],
+          host: { systemDrive: process.env['SystemDrive'], localAppData: process.env['LOCALAPPDATA'] },
+        }),
+      ]
       case 'windows-acl': return this.windowsAclRunnerArgv(policy)
       default: return assertNever(runner)
     }
@@ -583,6 +592,14 @@ export class LocalSandboxProvider extends SandboxProvider {
       case 'seatbelt': {
         const probe = this.internals.probeSeatbelt ?? (exec => defaultProbeSeatbelt(exec, this.probeTimeoutMs))
         return probe(this.seatbeltExec()) ? 'full' : 'unusable'
+      }
+      case 'windows-mxc': {
+        const [program, ...args] = this.windowsAclRunnerInvocation()
+        if (program === undefined) return 'unusable'
+        const result = spawnSync(program, [...args, '--mxc', '--probe'], {
+          timeout: this.probeTimeoutMs, stdio: 'ignore',
+        })
+        return result.status === 0 ? 'partial' : 'unusable'
       }
       case 'windows-acl': {
         const probe = this.internals.probeWindowsAcl
