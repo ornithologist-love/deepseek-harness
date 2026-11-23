@@ -3,7 +3,7 @@ import type { Dict } from '@deepseek-ai/cosmokit'
 import { ModuleLoader, type ModuleJob, type ResolveResult } from '@deepseek-ai/cordis-plugin-loader'
 import type { Include } from '@deepseek-ai/cordis-plugin-include'
 import { FSWatcher, watch, type ChokidarOptions } from 'chokidar'
-import { relative, resolve } from 'node:path'
+import { relative, resolve, sep } from 'node:path'
 import { realpath } from 'node:fs/promises'
 import { handleError } from './error.ts'
 import type {} from '@deepseek-ai/cordis-plugin-timer'
@@ -104,7 +104,7 @@ class Hmr extends Service {
       this.ctx.logger.info('watching %o in %s', root, this.baseDir)
     }
 
-    const match = picomatch(ignored)
+    const match = picomatch(ignored, { dot: true })
     const watchBaseDir = await realpath(this.baseDir)
 
     // Collect externals before opening the watcher so every post-ready change
@@ -120,7 +120,9 @@ class Hmr extends Service {
     this.watcher = watch(root, {
       ...this.config,
       cwd: watchBaseDir,
-      ignored: path => match(relative(watchBaseDir, path)),
+      // Glob stars do not consume `..`, even with dot enabled; external roots also need their absolute spelling.
+      ignored: path => match(relative(watchBaseDir, path).split(sep).join('/'))
+        || match(resolve(watchBaseDir, path).split(sep).join('/')),
       ignoreInitial: true,
     })
 

@@ -62,6 +62,10 @@ export interface HmrConfig extends ChokidarOptions {
   debounce: number
   /** Glob patterns excluded from module watching. */
   ignored: string[]
+  /** Follow installed-package dependencies when replacing watched plugin modules. */
+  includeNodeModules?: boolean
+  /** Subscribe to filesystem changes; disable for explicit profile reconciliation only. */
+  watch?: boolean
 }
 
 /**
@@ -222,6 +226,8 @@ class Hmr extends Service {
       'data',
     ]),
     debounce: z.natural().role('ms').default(100),
+    includeNodeModules: z.boolean().default(false),
+    watch: z.boolean().default(true),
   })
 
   /** Absolute base directory used to resolve module watch roots. */
@@ -352,6 +358,12 @@ class Hmr extends Service {
     return this.esmJob(pathToFileURL(canonicalPath(resolve(entry))).href)
   }
 
+  /** Profile packages and an explicitly configured application code root. */
+  private profileRoots(dir: string): string[] {
+    return [...new Set([...profileRoots(dir), ...(this.config.base
+      ? realSpellings(this.baseDir).map(root => root + sep) : [])])]
+  }
+
   async* [Service.init](): AsyncGenerator<() => Promise<void>, void, unknown> {
     const mainJob = this.mainJob()
     let host: Promise<Set<string>> | undefined
@@ -373,7 +385,7 @@ class Hmr extends Service {
       const unsubscribe = ready.onReady(() => {
         // Plugins started with the application are recorded; modules loaded later are compared by modification time.
         try {
-          this.files.observe(this.profileModules(profileRoots(profile.dir)))
+          this.files.observe(this.profileModules(this.profileRoots(profile.dir)))
         } catch (error) {
           // Without a first record, modules are compared by modification time against this HMR instance’s creation time.
           this.ctx.logger.warn(error)
@@ -397,15 +409,21 @@ class Hmr extends Service {
         })])
         if (inputs === lastInputs) return
         const { warnings, pending, restartReason } = await this.reconcileProfile()
+        // A profile may install a package after boot; watch its resolved directory without following dependency links.
+        this.watcher?.add([...mappedDirectories(this.ownerContext.get('pluginPackages')?.resolution)])
         if (restartReason !== undefined) this.ctx.logger.warn('restart required: %s', restartReason)
         if (pending.length > 0) this.ctx.logger.warn('changed modules keep running their previous code until a restart: %o', pending)
         lastInputs = inputs
         lastBundles = bundles
         for (const diagnostic of warnings) this.ctx.logger.warn(diagnostic)
       }
-      for (const filename of patchFiles) await this.watchConfig(filename, () => refresh(false))
-      await this.watchConfig(manifestPath, () => refresh(true))
+      if (this.config.watch !== false) {
+        for (const filename of patchFiles) await this.watchConfig(filename, () => refresh(false))
+        await this.watchConfig(manifestPath, () => refresh(true))
+      }
     }
+
+    if (this.config.watch === false) return
 
     const { loader } = this.ctx
     const { root, ignored } = this.config
@@ -415,13 +433,13 @@ class Hmr extends Service {
       this.ctx.logger.info('watching %o in %s', root, this.baseDir)
     }
 
-    const match = picomatch(ignored)
+    const match = picomatch(ignored, { dot: true })
     const watchBaseDir = realpathSync(this.baseDir)
 
     // Collect externals before opening the watcher so every post-ready change
     // is observed by listeners that already have their classification state.
     if (mainJob) {
-      this.externals = await loadDependencies(mainJob)
+      this.externals = await loadDependencies(mainJob, new Set(), this.config.includeNodeModules)
     } else {
       this.externals = new Set()
     }
@@ -429,7 +447,9 @@ class Hmr extends Service {
     this.watcher = watch(root, {
       ...this.config,
       cwd: watchBaseDir,
-      ignored: path => match(relative(watchBaseDir, path)),
+      // Glob stars do not consume `..`, even with dot enabled; external roots also need their absolute spelling.
+      ignored: path => match(relative(watchBaseDir, path).split(sep).join('/'))
+        || match(resolve(watchBaseDir, path).split(sep).join('/')),
       ignoreInitial: true,
     })
 
@@ -531,7 +551,7 @@ class Hmr extends Service {
     this.accepted = new Set(this.stashed)
     this.declined = new Set(this.externals)
 
-    const isExcluded = (url: string) => url.startsWith('node:') || url.includes('/node_modules/')
+    const isExcluded = (url: string) => url.startsWith('node:') || (!this.config.includeNodeModules && url.includes('/node_modules/'))
 
     await Promise.all([...this.stashed].map(async (url) => {
       const children = await this.getLinked(url)
@@ -618,7 +638,7 @@ class Hmr extends Service {
     // Check each pending plugin's dependency tree for accepted files
     for (const [job, plugin] of pending) {
       this.declined.delete(job.url)
-      const dependencies = [...await loadDependencies(job, this.declined)]
+      const dependencies = [...await loadDependencies(job, this.declined, this.config.includeNodeModules)]
       this.declined.add(job.url)
 
       if (dependencies.length === 0) {
@@ -943,7 +963,7 @@ class Hmr extends Service {
       comparedAt = this.files.now()
       // A failed comparison keeps every record, so the next recomposition compares the same modules again.
       comparison = await this.contained('comparing loaded modules with disk', () => {
-        const roots = profileRoots(profile.dir)
+        const roots = this.profileRoots(profile.dir)
         return Promise.resolve({ roots, ...this.files.compare(this.profileModules(roots)) })
       }, undefined)
       // Changed modules stay stale until replaced, including when the generation cannot be applied.
