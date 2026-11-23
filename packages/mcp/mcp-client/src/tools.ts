@@ -19,11 +19,22 @@ import type { Context } from '@deepseek-ai/cordis'
 import { isImageAdmissionError } from '@deepseek-ai/dsh-attachment'
 import type { AttachmentStore, ImageAttachmentRef, ImageMediaType, SaveImageAttachment } from '@deepseek-ai/dsh-attachment'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import type { ToolDefinition, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
+import type { ToolDefinition, ToolExecution, ToolExecutionResult, ToolRegistrationOptions } from '@deepseek-ai/dsh-tools'
 import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { JsonSchemaNode } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { describeError, McpLocalError } from './diagnostic.ts'
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * Supply native step-time activation conditions for MCP tools.
+     * @mode waterfall
+     */
+    'mcp/tool-registration'(server: string, tool: ToolDefinition,
+      next: () => ToolRegistrationOptions | Promise<ToolRegistrationOptions>): Promise<ToolRegistrationOptions>
+  }
+}
 
 /** Resolved options relevant to tool bridging. */
 export interface ToolBridgeOptions {
@@ -71,8 +82,9 @@ const IMAGE_MEDIA_TYPES: readonly ImageMediaType[] = [
   'image/gif',
 ]
 
-/** Canonical RFC 4648 base64, excluding whitespace and URL-safe aliases. */
-const CANONICAL_BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
+/** Character admission only; the Buffer round-trip below validates lengths and pad bits.
+ * A flat expression avoids V8's recursive regexp stack limit on large images. */
+const CANONICAL_BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
 
 /**
  * Derive the model-facing public name for one MCP tool.
@@ -174,7 +186,8 @@ export async function syncTools(
   const disposers: ToolDisposers = new Map()
   try {
     for (const [publicName, definition] of definitions) {
-      disposers.set(publicName, ctx.tools.register(definition))
+      const registration = await ctx.waterfall('mcp/tool-registration', opts.serverName, definition, () => ({}))
+      disposers.set(publicName, ctx.tools.register(definition, registration))
     }
   } catch (error) {
     // A conflict on an `mcp__<serverName>__`-qualified name means a foreign

@@ -15,7 +15,7 @@
  * @module
  */
 
-import { Client } from '@modelcontextprotocol/client'
+import { Client, SdkHttpError } from '@modelcontextprotocol/client'
 import type { Context } from '@deepseek-ai/cordis'
 import { assertNever, deepEqualJson, type JsonValue } from '@deepseek-ai/dsh-util-values'
 import type { ServerContext } from './server-context.ts'
@@ -289,8 +289,21 @@ export function startConnection(ctx: Context, config: Config, policy: ResolvedRe
     current = record
     status.opened()
     status.update({ state: 'connecting', attempt: failedAttempts })
+    let sessionRecoveryStarted = false
     client.onclose = () => {
       if (record.connectedAt !== undefined) lost(record, 'connection closed')
+    }
+    client.onerror = (error) => {
+      // An HTTP 404 for an established session requires a new initialize,
+      // not another request with the expired session ID. Ordinary request
+      // failures (including authentication and tool errors) stay local.
+      if (record.connectedAt === undefined || !isCurrent(record) || sessionRecoveryStarted
+        || config.transport !== 'streamable-http' || !client.transport?.sessionId
+        || !(error instanceof SdkHttpError) || error.data?.status !== 404) return
+      sessionRecoveryStarted = true
+      ctx.logger.warn(`${label}: HTTP session expired; closing the old connection to reconnect`)
+      // Do not replay in-flight tool calls: only the connection is recovered.
+      lost(record, 'HTTP session expired')
     }
     async function refreshTools(): Promise<void> {
       if (!isCurrent(record)) return
