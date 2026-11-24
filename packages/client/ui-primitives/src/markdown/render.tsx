@@ -196,14 +196,6 @@ export interface MarkdownPathImages {
    * appends a per-mount `load` query parameter to `api/file` route results.
    */
   resolve(value: string): string | undefined
-  /**
-   * Render a settled standalone image after native URL validation.
-   * @param destination - Original authored image destination.
-   * @param alt - Authored description.
-   * @param fallback - Native image and preview, retained when no product renderer applies.
-   * @returns Replacement presentation or the unchanged native fallback.
-   */
-  render?: ((destination: string, alt: string, fallback: ReactNode) => ReactNode) | undefined
 }
 
 /**
@@ -707,10 +699,7 @@ function MarkdownImage({ destination, alt, pathImages, streaming, inLink }: {
   const resolved = file === undefined ? undefined : fileImages?.resolve(file.path)
   const src = resolved === undefined ? imageSource(destination, pathImages, load) : freshImageUrl(resolved, load)
   if (src === undefined) return <span className={css.imageAlt}>{alt}</span>
-  const fallback = <LoadedMarkdownImage key={src} src={src} alt={alt} destination={destination} preview={inLink ? undefined : fileImages} />
-  return !streaming && !inLink && pathImages?.render !== undefined
-    ? pathImages.render(destination, alt, fallback)
-    : fallback
+  return <LoadedMarkdownImage key={src} src={src} alt={alt} destination={destination} preview={inLink ? undefined : fileImages} />
 }
 
 function LoadedMarkdownImage({ src, alt, destination, preview }: {

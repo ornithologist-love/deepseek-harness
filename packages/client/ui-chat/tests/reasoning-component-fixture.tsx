@@ -21,9 +21,7 @@ function content(input: ReasoningContentInput) {
 }
 
 /** Render the production child component without emulating a registry or its dispatch. */
-export const renderReasoningSlot: AssistantMarkdownProps['renderSlot'] = (key: string, input: object, options) => {
-  // A Markdown image replacement is absent here, so its native presentation stays.
-  if (key === 'conversation.chat.markdown.image') return options?.fallback ?? null
+export const renderReasoningSlot: AssistantMarkdownProps['renderSlot'] = (key: string, input: object) => {
   if (key !== 'conversation.chat.reasoning.body') throw new Error(`Unexpected reasoning Slot: ${key}`)
   return createElement(DefaultReasoningBody, {
     ...input, renderFactorySlot: renderReasoningFactory,
